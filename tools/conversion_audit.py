@@ -33,6 +33,7 @@ COVERAGE_ALIASES = {
     "burner": {"BurnerFlow"},
     "charging": {"BatteryPowerHistory", "BatteryPowerStep"},
     "comp_stage": {"CompressorStageFlow"},
+    "convert_spec_units": {"SpecPowerUnitConversion"},
     "cp_air": {"AirIntegratedHeat", "AirSpecificHeat"},
     "cp_jeta": {"JetAIntegratedHeat"},
     "cv_air": {"AirSpecificHeatVolume"},
