@@ -88,6 +88,52 @@ class FeasibleStep(om.ExplicitComponent):
         ]
 
 
+class GaussianEliminationPivot(om.ExplicitComponent):
+    """Perform one FAST Gaussian-elimination pivot for a fixed pivot entry.
+
+    Inputs:
+        matrix: Tableau or linear-system matrix before elimination.
+
+    Outputs:
+        eliminated_matrix: Matrix after normalizing the pivot row and
+            eliminating the pivot column from every other row.
+
+    Assumptions:
+        Pivot row and column are one-based options matching FAST-Python's
+        ``gauss_elim`` arguments. The pivot entry is assumed nonzero and fixed
+        away from branch/singularity changes.
+    """
+
+    def initialize(self):
+        self.options.declare("num_rows", default=2)
+        self.options.declare("num_cols", default=2)
+        self.options.declare("pivot_row", default=1)
+        self.options.declare("pivot_col", default=1)
+
+    def setup(self):
+        shape = (self.options["num_rows"], self.options["num_cols"])
+        self.add_input("matrix", val=np.eye(*shape))
+        self.add_output("eliminated_matrix", val=np.eye(*shape))
+        self.declare_partials(of="eliminated_matrix", wrt="matrix")
+
+    def compute(self, inputs, outputs):
+        outputs["eliminated_matrix"] = gaussian_elimination_pivot_values(
+            inputs["matrix"],
+            self.options["pivot_row"],
+            self.options["pivot_col"],
+        )["eliminated_matrix"]
+
+    def compute_partials(self, inputs, partials):
+        values = gaussian_elimination_pivot_values(
+            inputs["matrix"],
+            self.options["pivot_row"],
+            self.options["pivot_col"],
+        )
+        partials["eliminated_matrix", "matrix"] = values[
+            "deliminated_matrix_dmatrix"
+        ]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -536,6 +582,65 @@ def feasible_step_values(slack, slack_direction, num_constraints):
         "feasible_step": step,
         "dfeasible_step_dslack": dslack,
         "dfeasible_step_dslack_direction": ddirection,
+    }
+
+
+def gaussian_elimination_pivot_values(matrix, pivot_row, pivot_col):
+    """Return one Gaussian-elimination pivot result and dense Jacobian."""
+
+    matrix = np.asarray(matrix, dtype=float)
+    row = int(pivot_row) - 1
+    col = int(pivot_col) - 1
+    num_rows, num_cols = matrix.shape
+    pivot = matrix[row, col]
+    result = np.array(matrix, dtype=float, copy=True)
+    result[row, :] = matrix[row, :] / pivot
+
+    for irow in range(num_rows):
+        if irow == row:
+            continue
+
+        result[irow, :] = matrix[irow, :] - matrix[irow, col] * result[row, :]
+
+    jacobian = np.zeros((matrix.size, matrix.size))
+
+    for output_row in range(num_rows):
+        for output_col in range(num_cols):
+            output_index = output_row * num_cols + output_col
+
+            for input_row in range(num_rows):
+                for input_col in range(num_cols):
+                    input_index = input_row * num_cols + input_col
+                    derivative = 0.0
+
+                    if output_row == row:
+                        if input_row == row and input_col == output_col:
+                            derivative += 1.0 / pivot
+
+                        if input_row == row and input_col == col:
+                            derivative -= matrix[row, output_col] / pivot ** 2
+                    else:
+                        if input_row == output_row and input_col == output_col:
+                            derivative += 1.0
+
+                        if input_row == output_row and input_col == col:
+                            derivative -= matrix[row, output_col] / pivot
+
+                        if input_row == row and input_col == output_col:
+                            derivative -= matrix[output_row, col] / pivot
+
+                        if input_row == row and input_col == col:
+                            derivative += (
+                                matrix[output_row, col]
+                                * matrix[row, output_col]
+                                / pivot ** 2
+                            )
+
+                    jacobian[output_index, input_index] = derivative
+
+    return {
+        "eliminated_matrix": result,
+        "deliminated_matrix_dmatrix": jacobian,
     }
 
 

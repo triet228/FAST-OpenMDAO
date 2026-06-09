@@ -15,6 +15,7 @@ from fast_openmdao import (
     DesignSplitBounds,
     ElectricMotorPowerAvailable,
     FeasibleStep,
+    GaussianEliminationPivot,
     MeritFunction,
     OperationalObjective,
     OperationalSplitConstraints,
@@ -26,6 +27,7 @@ from fast_python.optimization import (
     con_size_opt,
     electric_motor_power_available,
     feas_step,
+    gauss_elim,
     merit_function,
     operational_objective_value,
     operational_split_constraint_blocks,
@@ -120,6 +122,32 @@ def test_feasible_step_matches_fast_python():
     assert np.isclose(
         problem.get_val("feasible_step")[0],
         feas_step(slack.size, slack, slack_direction),
+    )
+
+
+def test_gaussian_elimination_pivot_matches_fast_python():
+    """Check one FAST Gaussian-elimination pivot against FAST-Python."""
+
+    matrix = np.asarray(
+        [
+            [2.0, -1.0, 0.5],
+            [4.0, 3.0, -2.0],
+            [1.5, 2.0, 5.0],
+        ]
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "pivot",
+        GaussianEliminationPivot(num_rows=3, num_cols=3, pivot_row=2, pivot_col=1),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("matrix", matrix)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("eliminated_matrix"),
+        gauss_elim(matrix, 2, 1),
     )
 
 
@@ -369,6 +397,19 @@ def test_optimization_helpers_declare_analytic_partials():
             {
                 "slack": np.asarray([0.5, 0.8, 0.3]),
                 "slack_direction": np.asarray([-1.0, -3.0, 0.4]),
+            },
+        ),
+        (
+            "pivot",
+            GaussianEliminationPivot(num_rows=3, num_cols=3, pivot_row=2, pivot_col=1),
+            {
+                "matrix": np.asarray(
+                    [
+                        [2.0, -1.0, 0.5],
+                        [4.0, 3.0, -2.0],
+                        [1.5, 2.0, 5.0],
+                    ]
+                ),
             },
         ),
         (
