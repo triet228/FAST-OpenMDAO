@@ -13,6 +13,7 @@ from fast_openmdao import (
     CruiseDynamicPressure,
     FAR25EngineGradient,
     JetApproachConstraint,
+    JetCruiseConstraint,
     JetLandingFieldLengthConstraint,
     JetTakeoffFieldLengthConstraint,
     OEIMultiplier,
@@ -22,6 +23,8 @@ from fast_python.constraint import (
     cruise_dynamic_pressure,
     far25_engine_gradient,
     jet_app,
+    jet_crs,
+    jet_div,
     jet_lfl,
     jet_tofl,
     oei_multiplier,
@@ -194,6 +197,57 @@ def test_jet_field_residual_components_match_fast_python():
     )
 
 
+def test_jet_cruise_residual_components_match_fast_python():
+    """Check JetCrs and JetDiv component parity."""
+
+    aircraft = make_full_constraint_aircraft()
+    cases = [
+        (
+            "cruise",
+            JetCruiseConstraint(
+                aircraft_class="Turbofan",
+                req_type=1,
+                cd0=0.02,
+                aspect_ratio=9.0,
+                oswald=0.8,
+                altitude=10000.0,
+                mach=0.78,
+                lapse_exp=0.6,
+                devries_exp=0.1,
+            ),
+            jet_crs,
+        ),
+        (
+            "diversion",
+            JetCruiseConstraint(
+                aircraft_class="Turbofan",
+                req_type=1,
+                cd0=0.02,
+                aspect_ratio=9.0,
+                oswald=0.8,
+                altitude=8000.0,
+                mach=0.65,
+                lapse_exp=0.6,
+                devries_exp=0.2,
+            ),
+            jet_div,
+        ),
+    ]
+
+    for name, component, fast_function in cases:
+        problem = om.Problem()
+        problem.model.add_subsystem(name, component, promotes=["*"])
+        problem.setup()
+        problem.set_val("wing_loading", 400.0, units="kg/m**2")
+        problem.set_val("thrust_loading", 0.3)
+        problem.run_model()
+
+        assert np.isclose(
+            problem.get_val("cruise_residual")[0],
+            fast_function(400.0, 0.3, aircraft),
+        )
+
+
 def test_constraint_primitives_declare_analytic_partials():
     """Check constraint primitive derivatives against finite difference."""
 
@@ -230,6 +284,21 @@ def test_constraint_primitives_declare_analytic_partials():
                 landing_field_length=1500.0,
                 obstacle_length=15.0,
                 wland_mtow=0.85,
+            ),
+            {"wing_loading": 400.0, "thrust_loading": 0.3},
+        ),
+        (
+            "cruise_residual",
+            JetCruiseConstraint(
+                aircraft_class="Turbofan",
+                req_type=1,
+                cd0=0.02,
+                aspect_ratio=9.0,
+                oswald=0.8,
+                altitude=10000.0,
+                mach=0.78,
+                lapse_exp=0.6,
+                devries_exp=0.1,
             ),
             {"wing_loading": 400.0, "thrust_loading": 0.3},
         ),
@@ -312,6 +381,29 @@ def test_constraint_residual_optimizations_match_fast_python_zero_points():
     landing_problem.run_driver()
     landing_root = landing_problem.get_val("wing_loading", units="kg/m**2")[0]
     assert abs(jet_lfl(landing_root, 0.3, aircraft)) < 1.0e-7
+
+    cruise_problem = make_zero_residual_problem(
+        JetCruiseConstraint(
+            aircraft_class="Turbofan",
+            req_type=1,
+            cd0=0.02,
+            aspect_ratio=9.0,
+            oswald=0.8,
+            altitude=10000.0,
+            mach=0.78,
+            lapse_exp=0.6,
+            devries_exp=0.1,
+        ),
+        "cruise_residual",
+        design_var="thrust_loading",
+        initial=0.3,
+        lower=0.01,
+        upper=1.0,
+    )
+    cruise_problem.set_val("wing_loading", 400.0, units="kg/m**2")
+    cruise_problem.run_driver()
+    cruise_root = cruise_problem.get_val("thrust_loading")[0]
+    assert abs(jet_crs(400.0, cruise_root, aircraft)) < 1.0e-7
 
 
 def make_zero_residual_problem(component, residual_name, design_var, initial, lower, upper):

@@ -124,6 +124,63 @@ class JetLandingFieldLengthConstraint(om.ExplicitComponent):
         partials["landing_field_length_residual", "thrust_loading"] = 0.0
 
 
+class JetCruiseConstraint(om.ExplicitComponent):
+    """Compute FAST cruise or diversion performance constraint residual."""
+
+    def initialize(self):
+        self.options.declare("aircraft_class", default="Turbofan")
+        self.options.declare("req_type", default=1)
+        self.options.declare("cd0", default=0.02)
+        self.options.declare("aspect_ratio", default=9.0)
+        self.options.declare("oswald", default=0.8)
+        self.options.declare("altitude", default=10000.0)
+        self.options.declare("mach", default=0.78)
+        self.options.declare("lapse_exp", default=0.6)
+        self.options.declare("devries_exp", default=0.1)
+
+    def setup(self):
+        self.add_input("wing_loading", val=400.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_output("cruise_residual", val=0.0)
+        self.declare_partials(of="cruise_residual", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["cruise_residual"] = jet_cruise_residual(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            self.options["cd0"],
+            self.options["aspect_ratio"],
+            self.options["oswald"],
+            self.options["altitude"],
+            self.options["mach"],
+            self.options["lapse_exp"],
+            self.options["devries_exp"],
+        )
+
+    def compute_partials(self, inputs, partials):
+        derivatives = jet_cruise_derivatives(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            self.options["cd0"],
+            self.options["aspect_ratio"],
+            self.options["oswald"],
+            self.options["altitude"],
+            self.options["mach"],
+            self.options["lapse_exp"],
+            self.options["devries_exp"],
+        )
+        partials["cruise_residual", "wing_loading"] = derivatives[
+            "dresidual_dwing_loading"
+        ]
+        partials["cruise_residual", "thrust_loading"] = derivatives[
+            "dresidual_dthrust_loading"
+        ]
+
+
 class PsLossSigmoid(om.ExplicitComponent):
     """Evaluate FAST PsLoss sigmoid climb-gradient helper."""
 
@@ -372,6 +429,126 @@ def jet_landing_field_length_residual(
     vstall = vapp / 1.3 * convert_velocity(1.0, "kts", "ft/s")
     required = 0.5 * 0.002377 * vstall ** 2 * cl_landing / wland_mtow
     return converted_wing_loading - required
+
+
+def jet_cruise_residual(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    req_type,
+    cd0,
+    aspect_ratio,
+    oswald,
+    altitude,
+    mach,
+    lapse_exp,
+    devries_exp,
+):
+    """Return FAST JetCrs/JetDiv residual for one scalar design point."""
+
+    q, rho_ratio, velocity = cruise_dynamic_pressure_base(altitude, mach)
+    converted_wing_loading = wing_loading * KG_M2_TO_LBM_FT2
+    base = cruise_drag_residual_base(converted_wing_loading, q, cd0, aspect_ratio, oswald)
+
+    if aircraft_class.lower() in ("turboprop", "piston"):
+        velocity_mps = convert_velocity(velocity, "ft/s", "m/s")
+        effective_thrust_loading = 1.0 / (velocity_mps * thrust_loading)
+        return base - effective_thrust_loading
+
+    if req_type in (0, 1):
+        return base / rho_ratio ** lapse_exp - thrust_loading
+
+    if req_type == 2:
+        return base / rho_ratio ** devries_exp - thrust_loading
+
+    raise ValueError("Jet cruise constraints require ReqType 0, 1, or 2.")
+
+
+def jet_cruise_derivatives(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    req_type,
+    cd0,
+    aspect_ratio,
+    oswald,
+    altitude,
+    mach,
+    lapse_exp,
+    devries_exp,
+):
+    """Return scalar FAST JetCrs/JetDiv derivatives."""
+
+    q, rho_ratio, velocity = cruise_dynamic_pressure_base(altitude, mach)
+    converted_wing_loading = wing_loading * KG_M2_TO_LBM_FT2
+    dbase_dwing_loading = (
+        cruise_drag_residual_base_derivative(
+            converted_wing_loading,
+            q,
+            cd0,
+            aspect_ratio,
+            oswald,
+        )
+        * KG_M2_TO_LBM_FT2
+    )
+
+    if aircraft_class.lower() in ("turboprop", "piston"):
+        velocity_mps = convert_velocity(velocity, "ft/s", "m/s")
+        return {
+            "dresidual_dwing_loading": dbase_dwing_loading,
+            "dresidual_dthrust_loading": 1.0 / (
+                velocity_mps * thrust_loading ** 2
+            ),
+        }
+
+    if req_type in (0, 1):
+        scale = rho_ratio ** lapse_exp
+    elif req_type == 2:
+        scale = rho_ratio ** devries_exp
+    else:
+        raise ValueError("Jet cruise constraints require ReqType 0, 1, or 2.")
+
+    return {
+        "dresidual_dwing_loading": dbase_dwing_loading / scale,
+        "dresidual_dthrust_loading": -1.0,
+    }
+
+
+def cruise_dynamic_pressure_base(altitude, mach):
+    """Return q, density ratio, and velocity for cruise residual equations."""
+
+    values = cruise_dynamic_pressure_values(altitude, mach)
+    return (
+        values["dynamic_pressure"],
+        values["density_ratio"],
+        values["velocity"],
+    )
+
+
+def cruise_drag_residual_base(wing_loading, dynamic_pressure, cd0, aspect_ratio, oswald):
+    """Return shared cruise drag residual before lapse/thrust terms."""
+
+    induced_factor = math.pi * aspect_ratio * oswald
+    return (
+        dynamic_pressure * cd0 / wing_loading
+        + wing_loading / (dynamic_pressure * induced_factor)
+    )
+
+
+def cruise_drag_residual_base_derivative(
+    wing_loading,
+    dynamic_pressure,
+    cd0,
+    aspect_ratio,
+    oswald,
+):
+    """Return derivative of shared cruise drag residual with wing loading."""
+
+    induced_factor = math.pi * aspect_ratio * oswald
+    return (
+        -dynamic_pressure * cd0 / wing_loading ** 2
+        + 1.0 / (dynamic_pressure * induced_factor)
+    )
 
 
 def cruise_dynamic_pressure_values(altitude, mach):
