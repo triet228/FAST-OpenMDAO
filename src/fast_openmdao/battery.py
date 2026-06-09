@@ -104,6 +104,63 @@ class BatteryCurrent(om.ExplicitComponent):
         ]
 
 
+class BatteryChargeOCV(om.ExplicitComponent):
+    """Estimate the ground-charge open-circuit voltage for one cell."""
+
+    def initialize(self):
+        self.options.declare("analysis_type", default=0)
+        self.options.declare("degradation", default=0)
+
+    def setup(self):
+        self.add_input("soc_begin", val=80.0)
+        self.add_input("parallel_cells", val=10.0)
+        self.add_input("series_cells", val=100.0)
+        self.add_input("max_cell_voltage", val=4.2)
+        self.add_input("internal_resistance", val=0.01)
+        self.add_input("exponential_voltage", val=0.1)
+        self.add_input("exponential_capacity", val=1.0)
+        self.add_input("cap_cell", val=2.4)
+        self.add_input("state_of_health", val=100.0)
+        self.add_output("open_circuit_voltage", val=4.0, units="V")
+        self.declare_partials(of="open_circuit_voltage", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = battery_charge_ocv_values(
+            inputs["soc_begin"][0],
+            inputs["parallel_cells"][0],
+            inputs["series_cells"][0],
+            inputs["max_cell_voltage"][0],
+            inputs["internal_resistance"][0],
+            inputs["exponential_voltage"][0],
+            inputs["exponential_capacity"][0],
+            inputs["cap_cell"][0],
+            inputs["state_of_health"][0],
+            self.options["analysis_type"],
+            self.options["degradation"],
+        )
+        outputs["open_circuit_voltage"] = values["open_circuit_voltage"]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_charge_ocv_values(
+            inputs["soc_begin"][0],
+            inputs["parallel_cells"][0],
+            inputs["series_cells"][0],
+            inputs["max_cell_voltage"][0],
+            inputs["internal_resistance"][0],
+            inputs["exponential_voltage"][0],
+            inputs["exponential_capacity"][0],
+            inputs["cap_cell"][0],
+            inputs["state_of_health"][0],
+            self.options["analysis_type"],
+            self.options["degradation"],
+        )
+
+        for variable in battery_charge_ocv_input_names():
+            partials["open_circuit_voltage", variable] = values[
+                "dopen_circuit_voltage_d%s" % variable
+            ]
+
+
 class BatteryWeightFromEnergy(om.ExplicitComponent):
     """Size battery-source weight from final mission energy use."""
 
@@ -487,12 +544,74 @@ def battery_current_derivatives(
     }
 
 
+def battery_charge_ocv_values(
+    soc_begin,
+    parallel_cells,
+    series_cells,
+    max_cell_voltage,
+    internal_resistance,
+    exponential_voltage,
+    exponential_capacity,
+    cap_cell,
+    state_of_health,
+    analysis_type=0,
+    degradation=0,
+):
+    """Return FAST ground-charge cell OCV estimate and analytical derivatives."""
+
+    values = battery_power_step_values(
+        0.0,
+        1.0,
+        soc_begin,
+        parallel_cells,
+        series_cells,
+        max_cell_voltage,
+        internal_resistance,
+        exponential_voltage,
+        exponential_capacity,
+        cap_cell,
+        state_of_health,
+        False,
+        analysis_type,
+        degradation,
+    )
+    voltage = values["voltage"]
+    ocv = voltage / series_cells
+    result = {"open_circuit_voltage": ocv}
+
+    for variable in battery_charge_ocv_input_names():
+        derivative = values["dvoltage_d%s" % variable] / series_cells
+
+        if variable == "series_cells":
+            derivative -= voltage / series_cells ** 2
+
+        result["dopen_circuit_voltage_d%s" % variable] = derivative
+
+    return result
+
+
 def battery_power_step_input_names():
     """Return scalar input names for BatteryPowerStep derivatives."""
 
     return (
         "requested_power",
         "time",
+        "soc_begin",
+        "parallel_cells",
+        "series_cells",
+        "max_cell_voltage",
+        "internal_resistance",
+        "exponential_voltage",
+        "exponential_capacity",
+        "cap_cell",
+        "state_of_health",
+    )
+
+
+def battery_charge_ocv_input_names():
+    """Return scalar input names for BatteryChargeOCV derivatives."""
+
+    return (
         "soc_begin",
         "parallel_cells",
         "series_cells",

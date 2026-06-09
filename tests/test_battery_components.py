@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     AvailableCellCapacity,
+    BatteryChargeOCV,
     BatteryCyclingAging,
     BatteryCurrent,
     DetailedBatterySizing,
@@ -23,6 +24,7 @@ from fast_python.battery import (
     charging,
     cycling_aging_parameters,
     discharging,
+    estimate_charge_ocv,
     resize_battery,
     solve_battery_current,
 )
@@ -68,6 +70,28 @@ def test_battery_current_matches_fast_python_real_roots():
             problem.get_val("cell_current", units="A")[0],
             solve_battery_current(0.01, 4.0, requested_power, is_discharge),
         )
+
+
+def test_battery_charge_ocv_matches_fast_python_estimator():
+    """Check ground-charge OCV estimator parity with FAST-Python."""
+
+    values = charge_ocv_values()
+    problem = om.Problem()
+    problem.model.add_subsystem("ocv", BatteryChargeOCV(), promotes=["*"])
+    problem.setup()
+
+    for variable, value in values.items():
+        problem.set_val(variable, value)
+
+    problem.run_model()
+    expected = estimate_charge_ocv(
+        make_power_step_aircraft(),
+        values["soc_begin"],
+        values["parallel_cells"],
+        values["series_cells"],
+    )
+
+    assert np.isclose(problem.get_val("open_circuit_voltage", units="V")[0], expected)
 
 
 def test_battery_weight_from_energy_matches_fast_python_resize_battery():
@@ -274,6 +298,11 @@ def test_battery_primitives_declare_analytic_partials():
                 "cold_voltage": 4.0,
                 "requested_cell_power": -5.0,
             },
+        ),
+        (
+            "charge_ocv",
+            BatteryChargeOCV(),
+            charge_ocv_values(),
         ),
         (
             "detailed_sizing",
@@ -521,6 +550,18 @@ def power_step_values(requested_power):
         "cap_cell": 2.4,
         "state_of_health": 100.0,
     }
+
+
+def charge_ocv_values():
+    """Return OpenMDAO inputs for FAST ground-charge OCV estimation."""
+
+    values = power_step_values(0.0)
+    del values["requested_power"]
+    del values["time"]
+    values["soc_begin"] = 82.0
+    values["parallel_cells"] = 12.0
+    values["series_cells"] = 96.0
+    return values
 
 
 def power_history_values(requested_power):

@@ -71,9 +71,10 @@ derivative-native FAST equation components:
 - Generic and named FAR 25 climb residual components with analytical partial
   derivatives.
 - Battery scalar primitives for effective cell capacity, selected current root,
-  empirical cycling-aging SOH, detailed parallel-cell resizing, one-step and
-  fixed-history equivalent-circuit power dynamics, and simple energy-based
-  battery source weight with analytical partial derivatives.
+  ground-charge OCV estimation, empirical cycling-aging SOH, detailed
+  parallel-cell resizing, one-step and fixed-history equivalent-circuit power
+  dynamics, and simple energy-based battery source weight with analytical
+  partial derivatives.
 - Analysis source-weight vectorization plus analysis and OEW summation helpers
   for scalar/vector weight values with analytical partial derivatives.
 - Optimization helper primitives for available electric motor power and
@@ -106,9 +107,9 @@ The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
 - Analysis: `ConvergenceError`, `SourceWeightVector`, `WeightSum`
-- Battery: `AvailableCellCapacity`, `BatteryCyclingAging`, `BatteryCurrent`,
-  `DetailedBatterySizing`, `BatteryPowerHistory`, `BatteryPowerStep`,
-  `BatteryWeightFromEnergy`
+- Battery: `AvailableCellCapacity`, `BatteryChargeOCV`, `BatteryCyclingAging`,
+  `BatteryCurrent`, `DetailedBatterySizing`, `BatteryPowerHistory`,
+  `BatteryPowerStep`, `BatteryWeightFromEnergy`
 - Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
   `FAR25EngineGradient`, `JetAEOClimbConstraint`, `JetApproachConstraint`,
   `JetCeilingConstraint`, `JetCruiseConstraint`, `JetFAR25NamedClimbConstraint`,
