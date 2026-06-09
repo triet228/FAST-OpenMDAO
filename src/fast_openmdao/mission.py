@@ -1927,6 +1927,369 @@ class CruiseSegmentKinematicsPower(om.ExplicitComponent):
                 ]
 
 
+class PrescribedRateSegmentKinematicsPower(om.ExplicitComponent):
+    """Compute FAST prescribed-rate climb/descent kinematics and power.
+
+    Inputs:
+        initial_distance: Segment starting distance in m.
+        initial_time: Segment starting time in s.
+        altitude: Segment altitude control-point history in m.
+        true_airspeed: Segment TAS control-point history in m/s.
+        mass: Segment mass control-point history in kg.
+        available_power: Total available propulsive power in W.
+        rate_of_climb: Prescribed vertical-rate history in m/s.
+        lift_drag: Segment lift-to-drag ratio.
+
+    Outputs:
+        Smooth branch distance, time, time_step, acceleration,
+        flight_path_angle, drag_power, required_power, specific_excess_power,
+        potential_energy, and kinetic_energy histories.
+
+    Assumptions:
+        This matches the FAST prescribed-rate branch before propulsion-history
+        mutation and before acceleration limiting. When ``idle_floor`` is
+        enabled, negative required power is clipped to FAST's descent idle
+        bookkeeping value and that clipped branch has zero local derivatives.
+    """
+
+    def initialize(self):
+        self.options.declare("npoint", default=3)
+        self.options.declare("gravity", default=9.81)
+        self.options.declare("idle_floor", default=False)
+        self.options.declare("idle_power", default=0.0001)
+
+    def setup(self):
+        npoint = self.options["npoint"]
+        nstep = npoint - 1
+        self.add_input("initial_distance", val=0.0, units="m")
+        self.add_input("initial_time", val=0.0, units="s")
+        self.add_input("altitude", val=np.zeros(npoint), units="m")
+        self.add_input("true_airspeed", val=np.ones(npoint), units="m/s")
+        self.add_input("mass", val=np.ones(npoint), units="kg")
+        self.add_input("available_power", val=np.zeros(npoint), units="W")
+        self.add_input("rate_of_climb", val=np.zeros(npoint), units="m/s")
+        self.add_input("lift_drag", val=10.0)
+        self.add_output("distance", val=np.zeros(npoint), units="m")
+        self.add_output("time", val=np.zeros(npoint), units="s")
+        self.add_output("time_step", val=np.ones(nstep), units="s")
+        self.add_output("acceleration", val=np.zeros(npoint), units="m/s**2")
+        self.add_output("flight_path_angle", val=np.zeros(npoint))
+        self.add_output("drag_power", val=np.zeros(npoint), units="W")
+        self.add_output("required_power", val=np.zeros(npoint), units="W")
+        self.add_output("specific_excess_power", val=np.zeros(npoint), units="m/s")
+        self.add_output("potential_energy", val=np.zeros(npoint), units="J")
+        self.add_output("kinetic_energy", val=np.zeros(npoint), units="J")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = prescribed_rate_segment_kinematics_power_values(
+            self.options["npoint"],
+            self.options["gravity"],
+            self.options["idle_floor"],
+            self.options["idle_power"],
+            prescribed_rate_segment_kinematics_power_inputs(inputs),
+        )
+
+        for output_name in prescribed_rate_segment_kinematics_power_output_names():
+            outputs[output_name] = values[output_name]
+
+    def compute_partials(self, inputs, partials):
+        values = prescribed_rate_segment_kinematics_power_values(
+            self.options["npoint"],
+            self.options["gravity"],
+            self.options["idle_floor"],
+            self.options["idle_power"],
+            prescribed_rate_segment_kinematics_power_inputs(inputs),
+        )
+
+        for output_name in prescribed_rate_segment_kinematics_power_output_names():
+            for input_name in prescribed_rate_segment_kinematics_power_input_names():
+                partials[output_name, input_name] = values[
+                    "d%s_d%s" % (output_name, input_name)
+                ]
+
+
+def prescribed_rate_segment_kinematics_power_input_names():
+    """Return prescribed-rate segment kernel input names."""
+
+    return (
+        "initial_distance",
+        "initial_time",
+        "altitude",
+        "true_airspeed",
+        "mass",
+        "available_power",
+        "rate_of_climb",
+        "lift_drag",
+    )
+
+
+def prescribed_rate_segment_kinematics_power_output_names():
+    """Return prescribed-rate segment kernel output names."""
+
+    return (
+        "distance",
+        "time",
+        "time_step",
+        "acceleration",
+        "flight_path_angle",
+        "drag_power",
+        "required_power",
+        "specific_excess_power",
+        "potential_energy",
+        "kinetic_energy",
+    )
+
+
+def prescribed_rate_segment_kinematics_power_inputs(inputs):
+    """Return numeric inputs for the prescribed-rate segment kernel."""
+
+    return {
+        "initial_distance": inputs["initial_distance"][0],
+        "initial_time": inputs["initial_time"][0],
+        "altitude": np.asarray(inputs["altitude"], dtype=float).reshape(-1),
+        "true_airspeed": np.asarray(inputs["true_airspeed"], dtype=float).reshape(-1),
+        "mass": np.asarray(inputs["mass"], dtype=float).reshape(-1),
+        "available_power": np.asarray(inputs["available_power"], dtype=float).reshape(-1),
+        "rate_of_climb": np.asarray(inputs["rate_of_climb"], dtype=float).reshape(-1),
+        "lift_drag": inputs["lift_drag"][0],
+    }
+
+
+def prescribed_rate_segment_kinematics_power_values(
+    npoint,
+    gravity,
+    idle_floor,
+    idle_power,
+    data,
+):
+    """Return prescribed-rate segment outputs and dense derivatives."""
+
+    values = prescribed_rate_segment_kinematics_power_seed_values(
+        npoint,
+        gravity,
+        idle_floor,
+        idle_power,
+        data,
+        zero_prescribed_rate_segment_kinematics_power_seeds(npoint),
+    )
+    input_sizes = prescribed_rate_segment_kinematics_power_input_sizes(npoint)
+    output_sizes = prescribed_rate_segment_kinematics_power_output_sizes(npoint)
+
+    for output_name in prescribed_rate_segment_kinematics_power_output_names():
+        for input_name in prescribed_rate_segment_kinematics_power_input_names():
+            values["d%s_d%s" % (output_name, input_name)] = np.zeros(
+                (output_sizes[output_name], input_sizes[input_name])
+            )
+
+    for input_name in prescribed_rate_segment_kinematics_power_input_names():
+        for column in range(input_sizes[input_name]):
+            seeds = zero_prescribed_rate_segment_kinematics_power_seeds(npoint)
+            seeds[input_name].reshape(-1)[column] = 1.0
+            derivative_values = prescribed_rate_segment_kinematics_power_seed_values(
+                npoint,
+                gravity,
+                idle_floor,
+                idle_power,
+                data,
+                seeds,
+            )
+
+            for output_name in prescribed_rate_segment_kinematics_power_output_names():
+                values["d%s_d%s" % (output_name, input_name)][:, column] = (
+                    derivative_values["d%s" % output_name].reshape(-1)
+                )
+
+    return values
+
+
+def prescribed_rate_segment_kinematics_power_input_sizes(npoint):
+    """Return input sizes for prescribed-rate dense derivative blocks."""
+
+    return {
+        "initial_distance": 1,
+        "initial_time": 1,
+        "altitude": npoint,
+        "true_airspeed": npoint,
+        "mass": npoint,
+        "available_power": npoint,
+        "rate_of_climb": npoint,
+        "lift_drag": 1,
+    }
+
+
+def prescribed_rate_segment_kinematics_power_output_sizes(npoint):
+    """Return output sizes for prescribed-rate dense derivative blocks."""
+
+    nstep = npoint - 1
+    return {
+        "distance": npoint,
+        "time": npoint,
+        "time_step": nstep,
+        "acceleration": npoint,
+        "flight_path_angle": npoint,
+        "drag_power": npoint,
+        "required_power": npoint,
+        "specific_excess_power": npoint,
+        "potential_energy": npoint,
+        "kinetic_energy": npoint,
+    }
+
+
+def zero_prescribed_rate_segment_kinematics_power_seeds(npoint):
+    """Return zero derivative seeds for the prescribed-rate segment kernel."""
+
+    return {
+        "initial_distance": np.zeros(1),
+        "initial_time": np.zeros(1),
+        "altitude": np.zeros(npoint),
+        "true_airspeed": np.zeros(npoint),
+        "mass": np.zeros(npoint),
+        "available_power": np.zeros(npoint),
+        "rate_of_climb": np.zeros(npoint),
+        "lift_drag": np.zeros(1),
+    }
+
+
+def prescribed_rate_segment_kinematics_power_seed_values(
+    npoint,
+    gravity,
+    idle_floor,
+    idle_power,
+    data,
+    seeds,
+):
+    """Return prescribed-rate outputs and one seeded derivative direction."""
+
+    altitude = data["altitude"]
+    true_airspeed = data["true_airspeed"]
+    mass = data["mass"]
+    available_power = data["available_power"]
+    rate_of_climb = data["rate_of_climb"]
+    lift_drag = data["lift_drag"]
+    initial_distance = data["initial_distance"]
+    initial_time = data["initial_time"]
+    daltitude = seeds["altitude"]
+    dtrue_airspeed = seeds["true_airspeed"]
+    dmass = seeds["mass"]
+    davailable_power = seeds["available_power"]
+    drate_of_climb = seeds["rate_of_climb"]
+    dlift_drag = seeds["lift_drag"][0]
+    dinitial_distance = seeds["initial_distance"][0]
+    dinitial_time = seeds["initial_time"][0]
+    altitude_step = np.diff(altitude)
+    daltitude_step = np.diff(daltitude)
+    time_step = altitude_step / rate_of_climb[:-1]
+    dtime_step = (
+        daltitude_step * rate_of_climb[:-1]
+        - altitude_step * drate_of_climb[:-1]
+    ) / rate_of_climb[:-1] ** 2
+    time = np.zeros(npoint)
+    dtime = np.zeros(npoint)
+    time[0] = initial_time
+    dtime[0] = dinitial_time
+    time[1:] = initial_time + np.cumsum(time_step)
+    dtime[1:] = dinitial_time + np.cumsum(dtime_step)
+    speed_step = np.diff(true_airspeed)
+    dspeed_step = np.diff(dtrue_airspeed)
+    acceleration = np.zeros(npoint)
+    dacceleration = np.zeros(npoint)
+    acceleration[:-1] = speed_step / time_step
+    dacceleration[:-1] = (
+        dspeed_step * time_step
+        - speed_step * dtime_step
+    ) / time_step ** 2
+    climb_ratio = rate_of_climb / true_airspeed
+    dclimb_ratio = (
+        drate_of_climb * true_airspeed
+        - rate_of_climb * dtrue_airspeed
+    ) / true_airspeed ** 2
+    flight_path_angle = np.degrees(np.arcsin(climb_ratio))
+    dflight_path_angle = (
+        180.0
+        / np.pi
+        * dclimb_ratio
+        / np.sqrt(1.0 - climb_ratio ** 2)
+    )
+    cosine_fpa = np.sqrt(1.0 - climb_ratio ** 2)
+    dcosine_fpa = -climb_ratio * dclimb_ratio / cosine_fpa
+    ground_speed = true_airspeed * cosine_fpa
+    dground_speed = dtrue_airspeed * cosine_fpa + true_airspeed * dcosine_fpa
+    distance = np.zeros(npoint)
+    ddistance = np.zeros(npoint)
+    distance[0] = initial_distance
+    ddistance[0] = dinitial_distance
+    distance_step = ground_speed[:-1] * time_step
+    ddistance_step = dground_speed[:-1] * time_step + ground_speed[:-1] * dtime_step
+    distance[1:] = initial_distance + np.cumsum(distance_step)
+    ddistance[1:] = dinitial_distance + np.cumsum(ddistance_step)
+    drag_power = mass * gravity * cosine_fpa * true_airspeed / lift_drag
+    ddrag_power = gravity * (
+        (
+            dmass * cosine_fpa * true_airspeed
+            + mass * dcosine_fpa * true_airspeed
+            + mass * cosine_fpa * dtrue_airspeed
+        )
+        / lift_drag
+        - mass * cosine_fpa * true_airspeed * dlift_drag / lift_drag ** 2
+    )
+    required_power = (
+        mass * gravity * rate_of_climb
+        + mass * true_airspeed * acceleration
+        + drag_power
+    )
+    drequired_power = (
+        gravity * (dmass * rate_of_climb + mass * drate_of_climb)
+        + dmass * true_airspeed * acceleration
+        + mass * dtrue_airspeed * acceleration
+        + mass * true_airspeed * dacceleration
+        + ddrag_power
+    )
+
+    if idle_floor:
+        clipped = required_power < idle_power
+        required_power[clipped] = idle_power
+        drequired_power[clipped] = 0.0
+
+    specific_excess_power = (
+        available_power - drag_power
+    ) / (mass * gravity)
+    dspecific_excess_power = (
+        (davailable_power - ddrag_power) * mass * gravity
+        - (available_power - drag_power) * dmass * gravity
+    ) / (mass * gravity) ** 2
+    potential_energy = mass * gravity * altitude
+    dpotential_energy = gravity * (dmass * altitude + mass * daltitude)
+    kinetic_energy = 0.5 * mass * true_airspeed ** 2
+    dkinetic_energy = (
+        0.5 * dmass * true_airspeed ** 2
+        + mass * true_airspeed * dtrue_airspeed
+    )
+
+    return {
+        "distance": distance,
+        "time": time,
+        "time_step": time_step,
+        "acceleration": acceleration,
+        "flight_path_angle": flight_path_angle,
+        "drag_power": drag_power,
+        "required_power": required_power,
+        "specific_excess_power": specific_excess_power,
+        "potential_energy": potential_energy,
+        "kinetic_energy": kinetic_energy,
+        "ddistance": ddistance,
+        "dtime": dtime,
+        "dtime_step": dtime_step,
+        "dacceleration": dacceleration,
+        "dflight_path_angle": dflight_path_angle,
+        "ddrag_power": ddrag_power,
+        "drequired_power": drequired_power,
+        "dspecific_excess_power": dspecific_excess_power,
+        "dpotential_energy": dpotential_energy,
+        "dkinetic_energy": dkinetic_energy,
+    }
+
+
 def breguet_efficiency_input_names():
     """Return CruiseBRE efficiency input names."""
 

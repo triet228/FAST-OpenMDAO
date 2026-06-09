@@ -20,6 +20,7 @@ from fast_openmdao import (
     CruiseTimeTargetDistance,
     FlightConditions,
     InitialEnergyRemaining,
+    PrescribedRateSegmentKinematicsPower,
 )
 from fast_python.data_struct import init_mission_history
 from fast_python.mission import (
@@ -31,7 +32,9 @@ from fast_python.mission import (
     cruise_breguet_propulsive_efficiency,
     cruise_breguet_source_energy,
     cruise_time_target_to_distance,
+    eval_climb,
     eval_cruise,
+    eval_descent,
     initial_energy_remaining,
 )
 
@@ -456,6 +459,103 @@ def test_cruise_segment_kinematics_power_declares_analytic_partials():
         )
 
 
+def test_prescribed_rate_segment_kinematics_power_matches_fast_python():
+    """Check prescribed-rate EvalClimb and EvalDescent kernel parity."""
+
+    cases = (
+        (
+            "climb",
+            make_prescribed_climb_aircraft(),
+            eval_climb,
+            False,
+            [0.0, 500.0, 1000.0],
+            [10.0, 10.0, 0.0],
+            [1000000.0, 1000000.0, 1000000.0],
+        ),
+        (
+            "descent",
+            make_prescribed_descent_aircraft(),
+            eval_descent,
+            True,
+            [1000.0, 500.0, 0.0],
+            [-10.0, -10.0, 0.0],
+            [1000000.0, 1000000.0, 1000000.0],
+        ),
+    )
+
+    for name, aircraft, evaluator, idle_floor, altitude, rate, available_power in cases:
+        result = evaluator(init_mission_history(aircraft))
+        history = result["Mission"]["History"]["SI"]
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            name,
+            PrescribedRateSegmentKinematicsPower(npoint=3, idle_floor=idle_floor),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("initial_distance", 0.0, units="m")
+        problem.set_val("initial_time", 0.0, units="s")
+        problem.set_val("altitude", altitude, units="m")
+        problem.set_val("true_airspeed", [100.0, 100.0, 100.0], units="m/s")
+        problem.set_val("mass", [1000.0, 1000.0, 1000.0], units="kg")
+        problem.set_val("available_power", available_power, units="W")
+        problem.set_val("rate_of_climb", rate, units="m/s")
+        problem.set_val("lift_drag", 10.0)
+        problem.run_model()
+
+        assert np.allclose(problem.get_val("distance", units="m"), history["Performance"]["Dist"])
+        assert np.allclose(problem.get_val("time", units="s"), history["Performance"]["Time"])
+        assert np.allclose(problem.get_val("acceleration", units="m/s**2"), history["Performance"]["Acc"])
+        assert np.allclose(problem.get_val("flight_path_angle"), history["Performance"]["FPA"])
+        assert np.allclose(problem.get_val("required_power", units="W"), history["Power"]["Req"])
+        assert np.allclose(problem.get_val("specific_excess_power", units="m/s"), history["Performance"]["Ps"])
+        assert np.allclose(problem.get_val("potential_energy", units="J"), history["Energy"]["PE"])
+        assert np.allclose(problem.get_val("kinetic_energy", units="J"), history["Energy"]["KE"])
+        assert np.allclose(problem.get_val("time_step", units="s"), [50.0, 50.0])
+        assert np.allclose(problem.get_val("drag_power", units="W"), expected_drag_power(rate))
+
+
+def test_prescribed_rate_segment_kinematics_power_declares_analytic_partials():
+    """Check prescribed-rate segment derivatives against finite difference."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "segment",
+        PrescribedRateSegmentKinematicsPower(npoint=4, idle_floor=False),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("initial_distance", 10.0, units="m")
+    problem.set_val("initial_time", 20.0, units="s")
+    problem.set_val("altitude", [100.0, 160.0, 230.0, 310.0], units="m")
+    problem.set_val("true_airspeed", [90.0, 94.0, 98.0, 103.0], units="m/s")
+    problem.set_val("mass", [1000.0, 990.0, 980.0, 970.0], units="kg")
+    problem.set_val(
+        "available_power",
+        [220000.0, 222000.0, 224000.0, 226000.0],
+        units="W",
+    )
+    problem.set_val("rate_of_climb", [8.0, 9.0, 10.0, 0.0], units="m/s")
+    problem.set_val("lift_drag", 12.0)
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-5,
+    )
+
+    for key, partial_data in partials["segment"].items():
+        absolute_error = partial_data["abs error"].forward
+        relative_error = partial_data["rel error"].forward
+        assert absolute_error < 1.0e-4 or relative_error < 1.0e-5, (
+            key,
+            absolute_error,
+            relative_error,
+        )
+
+
 def test_cruise_breguet_detailed_battery_matches_fast_python():
     """Check detailed CruiseBRE battery discharge parity."""
 
@@ -854,6 +954,82 @@ def make_smooth_cruise_aircraft():
             },
         },
     }
+
+
+def make_prescribed_climb_aircraft():
+    """Return a minimal all-electric aircraft for prescribed EvalClimb parity."""
+
+    aircraft = make_smooth_cruise_aircraft()
+    aircraft["Specs"]["Aero"] = {
+        "L_D": {
+            "Clb": 10,
+        },
+    }
+    aircraft["Specs"]["Power"]["LamDwn"] = {
+        "Clb": 0,
+    }
+    aircraft["Specs"]["Power"]["LamUps"] = {
+        "Clb": 0,
+    }
+    aircraft["Specs"]["Propulsion"]["SLSPower"] = [1000000]
+    aircraft["Specs"]["Weight"]["Batt"] = 20000
+    aircraft["Mission"]["Profile"] = {
+        "SegsID": 1,
+        "MissID": 1,
+        "SegPts": [3],
+        "SegBeg": [1],
+        "SegEnd": [3],
+        "AltBeg": [0],
+        "AltEnd": [1000],
+        "VelBeg": [100],
+        "VelEnd": [100],
+        "TypeBeg": ["TAS"],
+        "TypeEnd": ["TAS"],
+        "ClbRate": [10],
+    }
+    return aircraft
+
+
+def make_prescribed_descent_aircraft():
+    """Return a minimal all-electric aircraft for prescribed EvalDescent parity."""
+
+    aircraft = make_smooth_cruise_aircraft()
+    aircraft["Specs"]["Aero"] = {
+        "L_D": {
+            "Des": 10,
+        },
+    }
+    aircraft["Specs"]["Power"]["LamDwn"] = {
+        "Des": 0,
+    }
+    aircraft["Specs"]["Power"]["LamUps"] = {
+        "Des": 0,
+    }
+    aircraft["Specs"]["Propulsion"]["SLSPower"] = [1000000]
+    aircraft["Specs"]["Weight"]["Batt"] = 20000
+    aircraft["Mission"]["Profile"] = {
+        "SegsID": 1,
+        "MissID": 1,
+        "SegPts": [3],
+        "SegBeg": [1],
+        "SegEnd": [3],
+        "AltBeg": [1000],
+        "AltEnd": [0],
+        "VelBeg": [100],
+        "VelEnd": [100],
+        "TypeBeg": ["TAS"],
+        "TypeEnd": ["TAS"],
+        "ClbRate": [-10],
+    }
+    return aircraft
+
+
+def expected_drag_power(rate_of_climb):
+    """Return prescribed segment drag power for the fixed parity fixtures."""
+
+    rate_of_climb = np.asarray(rate_of_climb, dtype=float)
+    flight_path_angle = np.degrees(np.arcsin(rate_of_climb / 100.0))
+    return 1000.0 * 9.81 * np.cos(np.radians(flight_path_angle)) * 100.0 / 10.0
 
 
 def fast_python_breguet_power_history(architecture, values):

@@ -69,6 +69,7 @@ from fast_openmdao.mission import (
     CruiseTimeTargetDistance,
     FlightConditions,
     InitialEnergyRemaining,
+    PrescribedRateSegmentKinematicsPower,
 )
 from fast_openmdao.oew import NumericSum, TurbofanAirframeWeight, TurbopropAirframeWeight
 from fast_openmdao.optimization import (
@@ -173,6 +174,7 @@ __all__ = [
     "PerfectExpansionNozzleFlow",
     "ParallelHybridArchitecture",
     "PartialTurboelectricArchitecture",
+    "PrescribedRateSegmentKinematicsPower",
     "OperationalObjective",
     "OperationalSplitConstraints",
     "PowerManagementObjective",
