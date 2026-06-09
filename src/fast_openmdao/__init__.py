@@ -59,6 +59,7 @@ from fast_openmdao.projection import (
 from fast_openmdao.regression import SquaredExponentialKernel
 from fast_openmdao.propulsion import (
     EngineLapse,
+    EngineThrustRequirement,
     PowerFlow,
     PowerSupplementCheck,
     SafeComponentWeight,
@@ -87,6 +88,7 @@ __all__ = [
     "ElectricMotorSpecificPowerProjection",
     "ElectricMotorPowerAvailable",
     "EngineLapse",
+    "EngineThrustRequirement",
     "FAR25EngineGradient",
     "FAR25ClimbConstraint",
     "FastPythonComponent",

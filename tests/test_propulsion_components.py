@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     EngineLapse,
+    EngineThrustRequirement,
     PowerFlow,
     PowerSupplementCheck,
     SafeComponentWeight,
@@ -19,6 +20,7 @@ from fast_openmdao import (
 )
 from fast_python.propulsion import (
     engine_lapse,
+    engine_thrust_requirement,
     get_thrust_sink_efficiency,
     power_flow,
     power_supplement_check,
@@ -164,6 +166,43 @@ def test_power_flow_matches_fast_python_upstream_and_downstream():
         assert np.allclose(problem.get_val("propagated_power", units="W"), expected)
 
 
+def test_engine_thrust_requirement_matches_fast_python():
+    """Check connected thrust sink selector parity with FAST-Python."""
+
+    architecture, transmitter_type, thrust_output = make_engine_thrust_case()
+    num_sources = 1
+    component = 1
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "thrust",
+        EngineThrustRequirement(
+            architecture=architecture,
+            transmitter_type=transmitter_type,
+            num_sources=num_sources,
+            component=component,
+            num_points=thrust_output.shape[0],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("thrust_output", thrust_output, units="N")
+    problem.run_model()
+
+    expected = [
+        engine_thrust_requirement(
+            architecture,
+            transmitter_type,
+            num_sources,
+            thrust_output,
+            component,
+            point,
+        )
+        for point in range(thrust_output.shape[0])
+    ]
+
+    assert np.allclose(problem.get_val("required_thrust", units="N"), expected)
+
+
 def test_propulsion_primitives_declare_analytic_partials():
     """Check propulsion primitive derivatives against finite difference."""
 
@@ -171,7 +210,19 @@ def test_propulsion_primitives_declare_analytic_partials():
         make_power_supplement_case()
     )
     flow_up, flow_down = make_power_flow_cases()
+    thrust_architecture, thrust_type, thrust_output = make_engine_thrust_case()
     cases = [
+        (
+            "thrust",
+            EngineThrustRequirement(
+                architecture=thrust_architecture,
+                transmitter_type=thrust_type,
+                num_sources=1,
+                component=1,
+                num_points=thrust_output.shape[0],
+            ),
+            {"thrust_output": thrust_output},
+        ),
         (
             "flow_up",
             PowerFlow(
@@ -361,3 +412,24 @@ def make_power_flow_cases():
             downstream_efficiency,
         ),
     ]
+
+
+def make_engine_thrust_case():
+    """Return a fixed architecture with one engine-to-sink thrust path."""
+
+    architecture = np.asarray(
+        [
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0, 0.0],
+        ]
+    )
+    transmitter_type = np.asarray([1.0, 2.0, 2.0])
+    thrust_output = np.asarray(
+        [
+            [0.0, 100.0, 200.0, 0.0],
+            [0.0, 110.0, 210.0, 0.0],
+        ]
+    )
+    return architecture, transmitter_type, thrust_output

@@ -303,6 +303,67 @@ class PowerFlow(om.ExplicitComponent):
         ]
 
 
+class EngineThrustRequirement(om.ExplicitComponent):
+    """Select thrust handled by the sink connected to a fixed engine component.
+
+    Inputs:
+        thrust_output: Component thrust output matrix in N.
+
+    Outputs:
+        required_thrust: Thrust assigned to the engine component in N.
+
+    Assumptions:
+        Architecture, transmitter types, source count, and component index are
+        fixed at setup. Missing or nonfinite connected sink thrust maps to zero,
+        matching FAST sizing bookkeeping.
+    """
+
+    def initialize(self):
+        self.options.declare("architecture")
+        self.options.declare("transmitter_type")
+        self.options.declare("num_sources")
+        self.options.declare("component")
+        self.options.declare("num_points", default=1)
+
+    def setup(self):
+        architecture = np.asarray(self.options["architecture"], dtype=float)
+        num_points = self.options["num_points"]
+        num_components = architecture.shape[1]
+
+        self.add_input(
+            "thrust_output",
+            val=np.zeros((num_points, num_components)),
+            units="N",
+        )
+        self.add_output(
+            "required_thrust",
+            val=np.zeros(num_points),
+            units="N",
+        )
+        self.declare_partials(of="required_thrust", wrt="thrust_output")
+
+    def compute(self, inputs, outputs):
+        outputs["required_thrust"] = engine_thrust_requirement_values(
+            self.options["architecture"],
+            self.options["transmitter_type"],
+            self.options["num_sources"],
+            inputs["thrust_output"],
+            self.options["component"],
+        )["required_thrust"]
+
+    def compute_partials(self, inputs, partials):
+        values = engine_thrust_requirement_values(
+            self.options["architecture"],
+            self.options["transmitter_type"],
+            self.options["num_sources"],
+            inputs["thrust_output"],
+            self.options["component"],
+        )
+        partials["required_thrust", "thrust_output"] = values[
+            "drequired_dthrust_output"
+        ]
+
+
 def engine_lapse_value(sea_level_static, aircraft_class, density):
     """Return scalar FAST engine-lapse value."""
 
@@ -432,6 +493,57 @@ def power_flow_values(power, architecture, split, efficiency, direction, toleran
         "dpropagated_dinitial_power": dpower,
         "dpropagated_dsplit": dsplit,
         "dpropagated_defficiency": defficiency,
+    }
+
+
+def engine_thrust_requirement_values(
+    architecture,
+    transmitter_type,
+    num_sources,
+    thrust_output,
+    component,
+):
+    """Return FAST engine thrust requirement vector and analytical partials."""
+
+    architecture = np.asarray(architecture, dtype=float)
+    transmitter_type = np.asarray(transmitter_type).reshape(-1)
+    thrust_output = np.asarray(thrust_output, dtype=float)
+    num_points, num_components = thrust_output.shape
+    required = np.zeros(num_points)
+    derivatives = np.zeros((num_points, thrust_output.size))
+    thrust_components = np.where(transmitter_type == 2)[0] + num_sources
+
+    if len(thrust_components) == 0:
+        return {
+            "required_thrust": required,
+            "drequired_dthrust_output": derivatives,
+        }
+
+    connected = thrust_components[
+        architecture[component, thrust_components] > 0
+    ]
+
+    if len(connected) == 0:
+        return {
+            "required_thrust": required,
+            "drequired_dthrust_output": derivatives,
+        }
+
+    thrust_component = connected[0]
+
+    for point in range(num_points):
+        thrust = thrust_output[point, thrust_component]
+
+        if np.isfinite(thrust):
+            required[point] = thrust
+            derivatives[
+                point,
+                point * num_components + thrust_component,
+            ] = 1.0
+
+    return {
+        "required_thrust": required,
+        "drequired_dthrust_output": derivatives,
     }
 
 
