@@ -8,6 +8,7 @@ from fast_openmdao.battery import (
     AvailableCellCapacity,
     BatteryCyclingAging,
     BatteryCurrent,
+    BatteryPowerHistory,
     BatteryPowerStep,
     BatteryWeightFromEnergy,
 )
@@ -109,6 +110,7 @@ __all__ = [
     "BatterySpecificEnergyProjection",
     "AvailableCellCapacity",
     "BatteryCurrent",
+    "BatteryPowerHistory",
     "BatteryPowerStep",
     "BatteryWeightFromEnergy",
     "BurnerFlow",

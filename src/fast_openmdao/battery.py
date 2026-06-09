@@ -281,6 +281,87 @@ class BatteryPowerStep(om.ExplicitComponent):
                 ]
 
 
+class BatteryPowerHistory(om.ExplicitComponent):
+    """Run FAST battery equivalent-circuit dynamics over a fixed interval history."""
+
+    def initialize(self):
+        self.options.declare("num_steps", default=1)
+        self.options.declare("is_discharge", default=True)
+        self.options.declare("drop_initial_soc", default=False)
+        self.options.declare("analysis_type", default=0)
+        self.options.declare("degradation", default=0)
+
+    def setup(self):
+        num_steps = self.options["num_steps"]
+        soc_size = num_steps if self.options["drop_initial_soc"] else num_steps + 1
+
+        self.add_input("requested_power", val=np.ones(num_steps), units="W")
+        self.add_input("time", val=np.ones(num_steps), units="s")
+        self.add_input("soc_begin", val=100.0)
+        self.add_input("parallel_cells", val=10.0)
+        self.add_input("series_cells", val=100.0)
+        self.add_input("max_cell_voltage", val=4.2)
+        self.add_input("internal_resistance", val=0.01)
+        self.add_input("exponential_voltage", val=0.1)
+        self.add_input("exponential_capacity", val=1.0)
+        self.add_input("cap_cell", val=2.4)
+        self.add_input("state_of_health", val=100.0)
+        self.add_output("voltage", val=np.zeros(num_steps), units="V")
+        self.add_output("current", val=np.zeros(num_steps), units="A")
+        self.add_output("output_power", val=np.zeros(num_steps), units="W")
+        self.add_output("capacity", val=np.zeros(num_steps))
+        self.add_output("soc", val=np.zeros(soc_size))
+        self.add_output("c_rate", val=np.zeros(num_steps))
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = battery_power_history_values(
+            inputs["requested_power"],
+            inputs["time"],
+            inputs["soc_begin"][0],
+            inputs["parallel_cells"][0],
+            inputs["series_cells"][0],
+            inputs["max_cell_voltage"][0],
+            inputs["internal_resistance"][0],
+            inputs["exponential_voltage"][0],
+            inputs["exponential_capacity"][0],
+            inputs["cap_cell"][0],
+            inputs["state_of_health"][0],
+            self.options["is_discharge"],
+            self.options["drop_initial_soc"],
+            self.options["analysis_type"],
+            self.options["degradation"],
+        )
+
+        for output in battery_power_history_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_power_history_values(
+            inputs["requested_power"],
+            inputs["time"],
+            inputs["soc_begin"][0],
+            inputs["parallel_cells"][0],
+            inputs["series_cells"][0],
+            inputs["max_cell_voltage"][0],
+            inputs["internal_resistance"][0],
+            inputs["exponential_voltage"][0],
+            inputs["exponential_capacity"][0],
+            inputs["cap_cell"][0],
+            inputs["state_of_health"][0],
+            self.options["is_discharge"],
+            self.options["drop_initial_soc"],
+            self.options["analysis_type"],
+            self.options["degradation"],
+        )
+
+        for output in battery_power_history_output_names():
+            for variable in battery_power_history_input_names():
+                partials[output, variable] = values[
+                    "d%s_d%s" % (output, variable)
+                ]
+
+
 def available_cell_capacity_value(cap_cell, state_of_health, analysis_type, degradation):
     """Return FAST effective cell capacity scalar value."""
 
@@ -392,6 +473,37 @@ def battery_power_step_output_names():
     )
 
 
+def battery_power_history_input_names():
+    """Return input names for BatteryPowerHistory derivatives."""
+
+    return (
+        "requested_power",
+        "time",
+        "soc_begin",
+        "parallel_cells",
+        "series_cells",
+        "max_cell_voltage",
+        "internal_resistance",
+        "exponential_voltage",
+        "exponential_capacity",
+        "cap_cell",
+        "state_of_health",
+    )
+
+
+def battery_power_history_output_names():
+    """Return output names for BatteryPowerHistory."""
+
+    return (
+        "voltage",
+        "current",
+        "output_power",
+        "capacity",
+        "soc",
+        "c_rate",
+    )
+
+
 def battery_cycling_aging_values(
     chemistry,
     depth_of_discharge,
@@ -485,6 +597,170 @@ def battery_cycling_aging_values(
         values["dfull_equivalent_cycles_d%s" % variable] = dfec[variable]
 
     return values
+
+
+def battery_power_history_values(
+    requested_power,
+    time,
+    soc_begin,
+    parallel_cells,
+    series_cells,
+    max_cell_voltage,
+    internal_resistance,
+    exponential_voltage,
+    exponential_capacity,
+    cap_cell,
+    state_of_health,
+    is_discharge,
+    drop_initial_soc,
+    analysis_type,
+    degradation,
+):
+    """Return FAST battery dynamics history and dense analytical derivatives."""
+
+    requested_power = np.asarray(requested_power, dtype=float).reshape(-1)
+    time = np.asarray(time, dtype=float).reshape(-1)
+    num_steps = len(requested_power)
+
+    if len(time) != num_steps:
+        raise ValueError("BatteryPowerHistory requires matching power and time sizes.")
+
+    scalar_inputs = battery_power_history_input_names()[2:]
+    vector_inputs = battery_power_history_input_names()[:2]
+    voltage = np.zeros(num_steps)
+    current = np.zeros(num_steps)
+    output_power = np.zeros(num_steps)
+    capacity = np.zeros(num_steps)
+    c_rate = np.zeros(num_steps)
+    soc_full = np.zeros(num_steps + 1)
+    soc_full[0] = soc_begin
+    derivatives = {}
+
+    for output in ("voltage", "current", "output_power", "capacity", "c_rate"):
+        derivatives[output] = {
+            "requested_power": np.zeros((num_steps, num_steps)),
+            "time": np.zeros((num_steps, num_steps)),
+        }
+
+        for variable in scalar_inputs:
+            derivatives[output][variable] = np.zeros((num_steps, 1))
+
+    dsoc_current = {
+        "requested_power": np.zeros(num_steps),
+        "time": np.zeros(num_steps),
+    }
+
+    for variable in scalar_inputs:
+        dsoc_current[variable] = np.asarray([1.0 if variable == "soc_begin" else 0.0])
+
+    soc_derivatives = {
+        "requested_power": np.zeros((num_steps + 1, num_steps)),
+        "time": np.zeros((num_steps + 1, num_steps)),
+    }
+    soc_derivatives["soc_begin"] = np.zeros((num_steps + 1, 1))
+    soc_derivatives["soc_begin"][0, 0] = 1.0
+
+    for variable in scalar_inputs:
+        if variable == "soc_begin":
+            continue
+
+        soc_derivatives[variable] = np.zeros((num_steps + 1, 1))
+
+    for step in range(num_steps):
+        values = battery_power_step_values(
+            requested_power[step],
+            time[step],
+            soc_full[step],
+            parallel_cells,
+            series_cells,
+            max_cell_voltage,
+            internal_resistance,
+            exponential_voltage,
+            exponential_capacity,
+            cap_cell,
+            state_of_health,
+            is_discharge,
+            analysis_type,
+            degradation,
+        )
+        voltage[step] = values["voltage"]
+        current[step] = values["current"]
+        output_power[step] = values["output_power"]
+        capacity[step] = values["capacity"]
+        c_rate[step] = values["c_rate"]
+        soc_full[step + 1] = values["soc_end"]
+
+        for output in ("voltage", "current", "output_power", "capacity", "c_rate"):
+            dsoc = values["d%s_dsoc_begin" % output]
+            derivatives[output]["requested_power"][step, :] = (
+                dsoc * dsoc_current["requested_power"]
+            )
+            derivatives[output]["requested_power"][step, step] += values[
+                "d%s_drequested_power" % output
+            ]
+            derivatives[output]["time"][step, :] = dsoc * dsoc_current["time"]
+            derivatives[output]["time"][step, step] += values["d%s_dtime" % output]
+
+            for variable in scalar_inputs:
+                direct = 0.0
+
+                if variable != "soc_begin":
+                    direct = values["d%s_d%s" % (output, variable)]
+
+                derivatives[output][variable][step, 0] = (
+                    direct + dsoc * dsoc_current[variable][0]
+                )
+
+        next_requested = (
+            values["dsoc_end_dsoc_begin"] * dsoc_current["requested_power"]
+        )
+        next_requested[step] += values["dsoc_end_drequested_power"]
+        next_time = values["dsoc_end_dsoc_begin"] * dsoc_current["time"]
+        next_time[step] += values["dsoc_end_dtime"]
+        dsoc_current["requested_power"] = next_requested
+        dsoc_current["time"] = next_time
+        soc_derivatives["requested_power"][step + 1, :] = next_requested
+        soc_derivatives["time"][step + 1, :] = next_time
+
+        for variable in scalar_inputs:
+            direct = 0.0
+
+            if variable != "soc_begin":
+                direct = values["dsoc_end_d%s" % variable]
+
+            dsoc_current[variable][0] = (
+                direct + values["dsoc_end_dsoc_begin"] * dsoc_current[variable][0]
+            )
+            soc_derivatives[variable][step + 1, 0] = dsoc_current[variable][0]
+
+    if drop_initial_soc:
+        soc = soc_full[1:]
+        soc_derivatives = {
+            variable: value[1:, :]
+            for variable, value in soc_derivatives.items()
+        }
+    else:
+        soc = soc_full
+
+    result = {
+        "voltage": voltage,
+        "current": current,
+        "output_power": output_power,
+        "capacity": capacity,
+        "soc": soc,
+        "c_rate": c_rate,
+        "dsoc_drequested_power": soc_derivatives["requested_power"],
+        "dsoc_dtime": soc_derivatives["time"],
+    }
+
+    for output in ("voltage", "current", "output_power", "capacity", "c_rate"):
+        for variable in battery_power_history_input_names():
+            result["d%s_d%s" % (output, variable)] = derivatives[output][variable]
+
+    for variable in scalar_inputs:
+        result["dsoc_d%s" % variable] = soc_derivatives[variable]
+
+    return result
 
 
 def battery_power_step_values(

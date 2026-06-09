@@ -13,6 +13,7 @@ from fast_openmdao import (
     AvailableCellCapacity,
     BatteryCyclingAging,
     BatteryCurrent,
+    BatteryPowerHistory,
     BatteryPowerStep,
     BatteryWeightFromEnergy,
 )
@@ -129,6 +130,43 @@ def test_battery_power_step_matches_fast_python_discharge_and_charge():
             assert np.isclose(problem.get_val(output)[0], expected[expected_index][-1])
 
 
+def test_battery_power_history_matches_fast_python_discharge_and_charge():
+    """Check fixed-length battery history parity with FAST-Python."""
+
+    aircraft = make_power_step_aircraft()
+    powers = np.asarray([1000.0, 850.0, 620.0])
+    times = np.asarray([60.0, 75.0, 45.0])
+
+    for is_discharge, drop_initial_soc, requested_power, fast_function in [
+        (True, False, powers, discharging),
+        (False, True, -0.5 * powers, charging),
+    ]:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "history",
+            BatteryPowerHistory(
+                num_steps=len(powers),
+                is_discharge=is_discharge,
+                drop_initial_soc=drop_initial_soc,
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+        set_power_history_values(problem, requested_power, times)
+        problem.run_model()
+        expected = fast_function(aircraft, requested_power, times, 80.0, 10, 100)
+
+        for output, expected_index in [
+            ("voltage", 0),
+            ("current", 1),
+            ("output_power", 2),
+            ("capacity", 3),
+            ("soc", 4),
+            ("c_rate", 5),
+        ]:
+            assert np.allclose(problem.get_val(output), expected[expected_index])
+
+
 def test_battery_cycling_aging_matches_fast_python_empirical_formula():
     """Check cycling-aging SOH parity with FAST-Python chemistry constants."""
 
@@ -217,6 +255,20 @@ def test_battery_primitives_declare_analytic_partials():
             power_step_values(-500.0),
         ),
         (
+            "power_history",
+            BatteryPowerHistory(num_steps=3, is_discharge=True),
+            power_history_values(np.asarray([1000.0, 850.0, 620.0])),
+        ),
+        (
+            "charge_history",
+            BatteryPowerHistory(
+                num_steps=3,
+                is_discharge=False,
+                drop_initial_soc=True,
+            ),
+            power_history_values(np.asarray([-500.0, -425.0, -310.0])),
+        ),
+        (
             "aging",
             BatteryCyclingAging(chemistry=1),
             cycling_aging_values(),
@@ -245,7 +297,7 @@ def test_battery_primitives_declare_analytic_partials():
         )
 
         for partial_data in partials[name].values():
-            tolerance = 1.0e-4 if "step" in name else 1.0e-6
+            tolerance = 5.0e-4 if "history" in name else 1.0e-4 if "step" in name else 1.0e-6
             assert partial_data["abs error"].forward < tolerance
 
 
@@ -335,6 +387,15 @@ def power_step_values(requested_power):
     }
 
 
+def power_history_values(requested_power):
+    """Return OpenMDAO inputs for a battery power history."""
+
+    values = power_step_values(float(np.asarray(requested_power).reshape(-1)[0]))
+    values["requested_power"] = requested_power
+    values["time"] = np.asarray([60.0, 75.0, 45.0])
+    return values
+
+
 def cycling_aging_values():
     """Return OpenMDAO inputs for FAST empirical battery cycling aging."""
 
@@ -356,6 +417,16 @@ def set_power_step_values(problem, requested_power):
     """Set scalar OpenMDAO battery power-step inputs."""
 
     for variable, value in power_step_values(requested_power).items():
+        problem.set_val(variable, value)
+
+
+def set_power_history_values(problem, requested_power, time):
+    """Set OpenMDAO battery power-history inputs."""
+
+    for variable, value in power_history_values(requested_power).items():
+        if variable == "time":
+            value = time
+
         problem.set_val(variable, value)
 
 
