@@ -80,6 +80,7 @@ COVERAGE_ALIASES = {
         "DesignOperationalConstraints",
         "DesignSplitBounds",
     },
+    "cp_antiderivative": {"AirIntegratedHeat", "JetAIntegratedHeat"},
     "cp_air": {"AirIntegratedHeat", "AirSpecificHeat"},
     "cp_jeta": {"JetAIntegratedHeat"},
     "cruise_breguet_apply_source_delta": {"CruiseBreguetSourceDelta"},
