@@ -31,7 +31,7 @@ from fast_openmdao.engine import (
     TotalPressure,
     TotalTemperature,
 )
-from fast_openmdao.mission import FlightConditions
+from fast_openmdao.mission import CruiseTimeTargetDistance, FlightConditions
 from fast_openmdao.oew import TurbopropAirframeWeight
 from fast_openmdao.problem import make_fast_optimization_problem, make_fast_problem
 from fast_openmdao.projection import (
@@ -60,6 +60,7 @@ __all__ = [
     "BatteryCurrent",
     "ChokedArea",
     "CruiseDynamicPressure",
+    "CruiseTimeTargetDistance",
     "ElectricMotorSpecificPowerProjection",
     "EngineLapse",
     "FAR25EngineGradient",

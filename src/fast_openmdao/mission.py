@@ -78,6 +78,79 @@ class FlightConditions(om.ExplicitComponent):
                 ]
 
 
+class CruiseTimeTargetDistance(om.ExplicitComponent):
+    """Convert FAST cruise time target in minutes to distance in meters.
+
+    Inputs:
+        altitude_begin: Beginning altitude in meters.
+        altitude_end: Ending altitude in meters.
+        velocity_begin: Beginning TAS/EAS speed in m/s or Mach number.
+        velocity_end: Ending TAS/EAS speed in m/s or Mach number.
+        target_minutes: Cruise time target in minutes.
+
+    Outputs:
+        distance: Cruise distance in meters.
+
+    Assumptions:
+        Beginning and ending velocity types are discrete options matching
+        FAST-Python's TAS, EAS, or Mach labels.
+    """
+
+    def initialize(self):
+        self.options.declare("type_begin", default="TAS")
+        self.options.declare("type_end", default="TAS")
+
+    def setup(self):
+        self.add_input("altitude_begin", val=1000.0, units="m")
+        self.add_input("altitude_end", val=1000.0, units="m")
+        self.add_input("velocity_begin", val=100.0)
+        self.add_input("velocity_end", val=100.0)
+        self.add_input("target_minutes", val=10.0, units="min")
+        self.add_output("distance", val=60000.0, units="m")
+        self.declare_partials(
+            of="distance",
+            wrt=[
+                "altitude_begin",
+                "altitude_end",
+                "velocity_begin",
+                "velocity_end",
+                "target_minutes",
+            ],
+        )
+
+    def compute(self, inputs, outputs):
+        values = cruise_time_target_distance_values(
+            inputs["altitude_begin"][0],
+            inputs["altitude_end"][0],
+            inputs["velocity_begin"][0],
+            inputs["velocity_end"][0],
+            self.options["type_begin"],
+            self.options["type_end"],
+            inputs["target_minutes"][0],
+        )
+        outputs["distance"] = values["distance"]
+
+    def compute_partials(self, inputs, partials):
+        values = cruise_time_target_distance_values(
+            inputs["altitude_begin"][0],
+            inputs["altitude_end"][0],
+            inputs["velocity_begin"][0],
+            inputs["velocity_end"][0],
+            self.options["type_begin"],
+            self.options["type_end"],
+            inputs["target_minutes"][0],
+        )
+
+        for name in (
+            "altitude_begin",
+            "altitude_end",
+            "velocity_begin",
+            "velocity_end",
+            "target_minutes",
+        ):
+            partials["distance", name] = values[f"ddistance_d{name}"]
+
+
 def flight_condition_values(altitude, disa, velocity_type, velocity):
     """Return FAST flight-condition values and analytical derivatives."""
 
@@ -129,6 +202,44 @@ def flight_condition_values(altitude, disa, velocity_type, velocity):
         dsound_speed_ddisa,
     )
     return values
+
+
+def cruise_time_target_distance_values(
+    altitude_begin,
+    altitude_end,
+    velocity_begin,
+    velocity_end,
+    type_begin,
+    type_end,
+    target_minutes,
+):
+    """Return cruise time-target distance and analytical derivatives."""
+
+    begin = flight_condition_values(
+        altitude_begin,
+        0.0,
+        type_begin,
+        velocity_begin,
+    )
+    end = flight_condition_values(
+        altitude_end,
+        0.0,
+        type_end,
+        velocity_end,
+    )
+    tas_begin = begin["tas"]
+    tas_end = end["tas"]
+    dtime = 60.0 * target_minutes
+    distance = 0.5 * (tas_begin + tas_end) * dtime
+
+    return {
+        "distance": distance,
+        "ddistance_daltitude_begin": 0.5 * dtime * begin["dtas_daltitude"],
+        "ddistance_daltitude_end": 0.5 * dtime * end["dtas_daltitude"],
+        "ddistance_dvelocity_begin": 0.5 * dtime * begin["dtas_dvelocity"],
+        "ddistance_dvelocity_end": 0.5 * dtime * end["dtas_dvelocity"],
+        "ddistance_dtarget_minutes": 30.0 * (tas_begin + tas_end),
+    }
 
 
 def flight_condition_output_names():

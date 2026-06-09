@@ -66,7 +66,7 @@ The public `fast_openmdao` package currently exports:
   `ChokedArea`, `FlowArea`, `JetAIntegratedHeat`, `MassFlowParameter`,
   `StaticDensity`, `StaticPressure`, `StaticTemperature`, `TotalPressure`,
   `TotalTemperature`
-- Mission: `FlightConditions`
+- Mission: `CruiseTimeTargetDistance`, `FlightConditions`
 - OEW: `TurbopropAirframeWeight`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
@@ -252,8 +252,10 @@ optimized values against FAST-Python residual functions.
    derivatives. Done.
 18. Convert turboprop airframe-weight linear fit with analytical partial
    derivatives. Done.
-19. Add complex-step derivative checks where supported by FAST-Python internals.
-20. Build reusable groups for mission, propulsion, weights, and objective
+19. Convert cruise time-target distance helper with analytical partial
+   derivatives. Done.
+20. Add complex-step derivative checks where supported by FAST-Python internals.
+21. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

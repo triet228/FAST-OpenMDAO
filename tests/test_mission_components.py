@@ -9,8 +9,8 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import FlightConditions
-from fast_python.mission import compute_flight_conditions
+from fast_openmdao import CruiseTimeTargetDistance, FlightConditions
+from fast_python.mission import compute_flight_conditions, cruise_time_target_to_distance
 
 
 def test_flight_conditions_match_fast_python_for_velocity_types():
@@ -68,6 +68,59 @@ def test_flight_conditions_declares_analytic_partials():
             assert partial_data["abs error"].forward < 1.0e-5
 
 
+def test_cruise_time_target_distance_matches_fast_python():
+    """Check cruise time target conversion parity with FAST-Python."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "target",
+        CruiseTimeTargetDistance(type_begin="TAS", type_end="EAS"),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("altitude_begin", 1000.0, units="m")
+    problem.set_val("altitude_end", 2000.0, units="m")
+    problem.set_val("velocity_begin", 100.0)
+    problem.set_val("velocity_end", 90.0)
+    problem.set_val("target_minutes", 10.0, units="min")
+    problem.run_model()
+
+    mission = make_cruise_target_mission()
+
+    assert np.isclose(
+        problem.get_val("distance", units="m")[0],
+        cruise_time_target_to_distance(mission, 0, 10.0),
+    )
+
+
+def test_cruise_time_target_distance_declares_analytic_partials():
+    """Check cruise time target conversion partials against finite difference."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "target",
+        CruiseTimeTargetDistance(type_begin="TAS", type_end="EAS"),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("altitude_begin", 1000.0, units="m")
+    problem.set_val("altitude_end", 2000.0, units="m")
+    problem.set_val("velocity_begin", 100.0)
+    problem.set_val("velocity_end", 90.0)
+    problem.set_val("target_minutes", 10.0, units="min")
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-5,
+    )
+
+    for partial_data in partials["target"].values():
+        assert partial_data["abs error"].forward < 1.0e-5
+
+
 def output_names():
     """Return output names in FAST-Python flight-condition order."""
 
@@ -80,3 +133,16 @@ def output_names():
         "density",
         "viscosity",
     )
+
+
+def make_cruise_target_mission():
+    """Return minimal mission profile for cruise time-target conversion."""
+
+    return {
+        "AltBeg": [1000.0],
+        "AltEnd": [2000.0],
+        "VelBeg": [100.0],
+        "VelEnd": [90.0],
+        "TypeBeg": ["TAS"],
+        "TypeEnd": ["EAS"],
+    }
