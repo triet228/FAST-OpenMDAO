@@ -42,7 +42,11 @@ from fast_openmdao.constraint import (
     OEIMultiplier,
     PsLossSigmoid,
 )
-from fast_openmdao.cost import BatteryReplacementCost
+from fast_openmdao.cost import (
+    BMSCostFraction,
+    BatteryCapacityCost,
+    BatteryReplacementCost,
+)
 from fast_openmdao.database import (
     DatabaseFanThrustNormalization,
     DatabaseGeometryLoads,
@@ -186,6 +190,7 @@ __all__ = [
     "BatteryEnergyCutoff",
     "BatteryEnergyHistory",
     "BatteryChargeOCV",
+    "BatteryCapacityCost",
     "BatteryCyclingAging",
     "BatteryHistoryColumnMatrix",
     "BatteryHistoryMatrix",
@@ -202,6 +207,7 @@ __all__ = [
     "BatteryPowerTimeBroadcast",
     "BatteryVector",
     "BatteryWeightFromEnergy",
+    "BMSCostFraction",
     "BurnerFlow",
     "ChokedArea",
     "CableWeightForSizing",

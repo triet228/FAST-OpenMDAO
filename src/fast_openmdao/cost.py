@@ -79,6 +79,83 @@ class BatteryReplacementCost(om.ExplicitComponent):
         ]
 
 
+class BMSCostFraction(om.ExplicitComponent):
+    """Compute FAST battery-management-system cost fraction curve.
+
+    Inputs:
+        year: Calendar year used by FAST's projected battery cost curves.
+
+    Outputs:
+        bms_cost_fraction: BMS cost as a percentage of battery capacity cost.
+
+    Assumptions:
+        Battery chemistry and whether BMS cost is included are discrete choices,
+        so they are OpenMDAO options instead of continuous design variables.
+    """
+
+    def initialize(self):
+        self.options.declare("chemistry", default=1)
+        self.options.declare("bms", default=1)
+
+    def setup(self):
+        self.add_input("year", val=2026.0)
+        self.add_output("bms_cost_fraction", val=1.0)
+        self.declare_partials(of="bms_cost_fraction", wrt="year")
+
+    def compute(self, inputs, outputs):
+        value, _ = bms_cost_fraction_with_derivative(
+            self.options["chemistry"],
+            self.options["bms"],
+            inputs["year"][0],
+        )
+        outputs["bms_cost_fraction"] = value
+
+    def compute_partials(self, inputs, partials):
+        _, derivative = bms_cost_fraction_with_derivative(
+            self.options["chemistry"],
+            self.options["bms"],
+            inputs["year"][0],
+        )
+        partials["bms_cost_fraction", "year"] = derivative
+
+
+class BatteryCapacityCost(om.ExplicitComponent):
+    """Compute FAST unit battery capacity replacement cost curve.
+
+    Inputs:
+        year: Calendar year used by FAST's projected battery cost curves.
+
+    Outputs:
+        battery_capacity_cost: Replacement capacity cost in dollars per kWh.
+
+    Assumptions:
+        Battery chemistry is a discrete option; the polynomial cost curve is
+        smooth only with respect to year.
+    """
+
+    def initialize(self):
+        self.options.declare("chemistry", default=1)
+
+    def setup(self):
+        self.add_input("year", val=2026.0)
+        self.add_output("battery_capacity_cost", val=1.0)
+        self.declare_partials(of="battery_capacity_cost", wrt="year")
+
+    def compute(self, inputs, outputs):
+        value, _ = capacity_cost_with_derivative(
+            self.options["chemistry"],
+            inputs["year"][0],
+        )
+        outputs["battery_capacity_cost"] = value
+
+    def compute_partials(self, inputs, partials):
+        _, derivative = capacity_cost_with_derivative(
+            self.options["chemistry"],
+            inputs["year"][0],
+        )
+        partials["battery_capacity_cost", "year"] = derivative
+
+
 def battery_cost_aircraft(chemistry, battery_specific_energy, battery_weight):
     """Return a minimal FAST aircraft dictionary for cost parity calls."""
 

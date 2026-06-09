@@ -18,10 +18,10 @@ derivative-native FAST equation components:
   run.
 - `Gravity` and `StandardAtmosphere`: native OpenMDAO components matching
   `fast_python.atmosphere` with analytical partial derivatives.
-- `KPPProjection`, `BatteryReplacementCost`, `UnitConversion`, and
-  `UnitArrayConversion`: native OpenMDAO utility components for projection,
-  cost, and scalar/fixed-shape conversion equations with analytical partial
-  derivatives.
+- `KPPProjection`, battery cost curve/replacement-cost components,
+  `UnitConversion`, and `UnitArrayConversion`: native OpenMDAO utility
+  components for projection, cost, and scalar/fixed-shape conversion equations
+  with analytical partial derivatives.
 - `FlightConditions`: native mission primitive matching
   `fast_python.mission.compute_flight_conditions` with analytical partial
   derivatives.
@@ -159,7 +159,7 @@ The public `fast_openmdao` package currently exports:
   `JetCeilingConstraint`, `JetCruiseConstraint`, `JetFAR25NamedClimbConstraint`,
   `JetLandingFieldLengthConstraint`, `JetTakeoffFieldLengthConstraint`,
   `OEIMultiplier`, `PsLossSigmoid`
-- Cost: `BatteryReplacementCost`
+- Cost: `BMSCostFraction`, `BatteryCapacityCost`, `BatteryReplacementCost`
 - Database: `DatabaseFanThrustNormalization`, `DatabaseGeometryLoads`,
   `DatabasePropPowerNormalization`, `DatabaseWeightFractions`,
   `MacLiftDragEstimate`, `TurbofanCruiseLiftDragEstimate`,
