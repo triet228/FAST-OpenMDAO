@@ -122,7 +122,7 @@ The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
 - Analysis: `AnalysisWeightUpdate`, `ConvergenceError`, `SourceWeightVector`,
-  `WeightSum`
+  `WeightSum`, `WingAreaFromLoading`
 - Battery: `AvailableCellCapacity`, `BatteryChargeOCV`, `BatteryCyclingAging`,
   `BatteryCurrent`, `DetailedBatterySizing`, `BatteryPowerHistory`,
   `BatteryPowerStep`, `BatteryWeightFromEnergy`

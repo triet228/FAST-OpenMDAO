@@ -7,6 +7,7 @@ from fast_openmdao.analysis import (
     ConvergenceError,
     SourceWeightVector,
     WeightSum,
+    WingAreaFromLoading,
 )
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.battery import (
@@ -247,6 +248,7 @@ __all__ = [
     "TurbofanAirframeWeight",
     "UnitConversion",
     "WeightSum",
+    "WingAreaFromLoading",
     "__version__",
     "make_fast_optimization_problem",
     "make_fast_problem",

@@ -73,6 +73,32 @@ class WeightSum(om.ExplicitComponent):
         outputs["weight_sum"] = np.sum(inputs["weight_values"])
 
 
+class WingAreaFromLoading(om.ExplicitComponent):
+    """Compute FAST analysis setup wing area from MTOW and wing loading."""
+
+    def setup(self):
+        self.add_input("mtow", val=1000.0, units="kg")
+        self.add_input("wing_loading", val=100.0, units="kg/m**2")
+        self.add_output("wing_area", val=10.0, units="m**2")
+        self.declare_partials(of="wing_area", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["wing_area"] = wing_area_from_loading_values(
+            inputs["mtow"][0],
+            inputs["wing_loading"][0],
+        )["wing_area"]
+
+    def compute_partials(self, inputs, partials):
+        values = wing_area_from_loading_values(
+            inputs["mtow"][0],
+            inputs["wing_loading"][0],
+        )
+        partials["wing_area", "mtow"] = values["dwing_area_dmtow"]
+        partials["wing_area", "wing_loading"] = values[
+            "dwing_area_dwing_loading"
+        ]
+
+
 class SourceWeightVector(om.ExplicitComponent):
     """Expand FAST source-weight input into a fixed OpenMDAO vector.
 
@@ -336,3 +362,16 @@ def analysis_weight_update_values(
         values["doew_new_doew"] = np.asarray([[1.0]])
 
     return values
+
+
+def wing_area_from_loading_values(mtow, wing_loading):
+    """Return FAST analysis setup wing area and derivatives."""
+
+    mtow = float(mtow)
+    wing_loading = float(wing_loading)
+    wing_area = mtow / wing_loading
+    return {
+        "wing_area": wing_area,
+        "dwing_area_dmtow": 1.0 / wing_loading,
+        "dwing_area_dwing_loading": -mtow / wing_loading ** 2,
+    }

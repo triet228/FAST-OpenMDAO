@@ -15,6 +15,7 @@ from fast_openmdao import (
     ConvergenceError,
     SourceWeightVector,
     WeightSum,
+    WingAreaFromLoading,
 )
 from fast_python.analysis import convergence_error, initial_source_weight, sum_weight
 
@@ -94,6 +95,45 @@ def test_weight_sum_declares_analytic_partials():
     )
 
     for partial_data in partials["weight"].values():
+        assert partial_data["abs error"].forward < 1.0e-8
+
+
+def test_wing_area_from_loading_matches_fast_python_eap_setup():
+    """Check FAST analysis setup wing-area parity."""
+
+    aircraft = make_analysis_weight_update_aircraft()
+    expected = run_fast_python_single_iteration(aircraft)
+    problem = om.Problem()
+    problem.model.add_subsystem("wing", WingAreaFromLoading(), promotes=["*"])
+    problem.setup()
+    problem.set_val("mtow", 1200.0, units="kg")
+    problem.set_val("wing_loading", 120.0, units="kg/m**2")
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("wing_area", units="m**2")[0],
+        expected["Specs"]["Aero"]["S"],
+    )
+
+
+def test_wing_area_from_loading_declares_analytic_partials():
+    """Check wing area setup derivatives against finite difference."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem("wing", WingAreaFromLoading(), promotes=["*"])
+    problem.setup()
+    problem.set_val("mtow", 1200.0, units="kg")
+    problem.set_val("wing_loading", 120.0, units="kg/m**2")
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["wing"].values():
         assert partial_data["abs error"].forward < 1.0e-8
 
 
