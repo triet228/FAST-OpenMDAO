@@ -177,6 +177,52 @@ class SourceWeightVector(om.ExplicitComponent):
             partials["source_weight_vector", "source_weight"] = np.ones(source_count)
 
 
+class SourceWeightRestore(om.ExplicitComponent):
+    """Restore FAST source-weight values to the configured output shape.
+
+    Inputs:
+        source_weight_vector: One value per source.
+
+    Outputs:
+        restored_source_weight: Scalar when ``source_count == 1`` and a vector
+            otherwise, matching FAST-Python's scalar-or-list restore behavior
+            with a fixed OpenMDAO shape.
+    """
+
+    def initialize(self):
+        self.options.declare("source_count", default=1)
+
+    def setup(self):
+        source_count = self.options["source_count"]
+        output_shape = () if source_count == 1 else (source_count,)
+        self.add_input("source_weight_vector", val=np.ones(source_count), units="kg")
+        self.add_output("restored_source_weight", val=np.ones(output_shape), units="kg")
+
+        if source_count == 1:
+            self.declare_partials(
+                of="restored_source_weight",
+                wrt="source_weight_vector",
+                val=np.ones(1),
+            )
+        else:
+            rows = np.arange(source_count)
+            self.declare_partials(
+                of="restored_source_weight",
+                wrt="source_weight_vector",
+                rows=rows,
+                cols=rows,
+                val=np.ones(source_count),
+            )
+
+    def compute(self, inputs, outputs):
+        values = np.asarray(inputs["source_weight_vector"], dtype=float).reshape(-1)
+
+        if self.options["source_count"] == 1:
+            outputs["restored_source_weight"] = values[0]
+        else:
+            outputs["restored_source_weight"] = values
+
+
 class AnalysisWeightUpdate(om.ExplicitComponent):
     """Update FAST analysis-loop MTOW, source weights, and OEW.
 

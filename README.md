@@ -103,8 +103,9 @@ derivative-native FAST equation components:
   analytical partial derivatives.
 - Battery requested-power/time broadcast and initial-SOC normalization helpers
   with analytical partial derivatives for fixed shapes.
-- Analysis source-weight vectorization plus analysis and OEW summation helpers
-  for scalar/vector weight values, and detailed-battery flag setup, with
+- Analysis source-weight vectorization/restoration plus analysis and OEW
+  summation helpers for scalar/vector weight values, and detailed-battery flag
+  setup, with
   analytical partial derivatives where continuous inputs apply.
 - Optimization helper primitives for available electric motor power and
   battery energy plus interior-point feasible slack-step limits,
@@ -151,8 +152,9 @@ derivative-native FAST equation components:
 The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
-- Analysis: `AnalysisWeightUpdate`, `ConvergenceError`, `SourceWeightVector`,
-  `DetailedBatteryFlag`, `WeightSum`, `WingAreaFromLoading`
+- Analysis: `AnalysisWeightUpdate`, `ConvergenceError`, `SourceWeightRestore`,
+  `SourceWeightVector`, `DetailedBatteryFlag`, `WeightSum`,
+  `WingAreaFromLoading`
 - Battery: `AvailableCellCapacity`, `BatteryChargeOCV`, `BatteryCyclingAging`,
   `BatteryCurrent`, `BatteryHistoryColumnMatrix`, `BatteryHistoryMatrix`,
   `BatteryInitialSOC`, `BatteryNonzeroMean`, `BatteryPowerHistory`,

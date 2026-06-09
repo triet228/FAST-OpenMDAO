@@ -14,6 +14,7 @@ from fast_openmdao import (
     AnalysisWeightUpdate,
     ConvergenceError,
     DetailedBatteryFlag,
+    SourceWeightRestore,
     SourceWeightVector,
     WeightSum,
     WingAreaFromLoading,
@@ -22,6 +23,7 @@ from fast_python.analysis import (
     convergence_error,
     detailed_battery_enabled,
     initial_source_weight,
+    restore_source_weight,
     sum_weight,
 )
 
@@ -248,6 +250,69 @@ def test_source_weight_vector_declares_analytic_partials():
 
     for partial_data in partials["source"].values():
         assert partial_data["abs error"].forward < 1.0e-8
+
+
+def test_source_weight_restore_matches_fast_python():
+    """Check FAST source-weight scalar/list restoration parity."""
+
+    scalar_problem = om.Problem()
+    scalar_problem.model.add_subsystem(
+        "source",
+        SourceWeightRestore(source_count=1),
+        promotes=["*"],
+    )
+    scalar_problem.setup()
+    scalar_problem.set_val("source_weight_vector", [11.0], units="kg")
+    scalar_problem.run_model()
+
+    assert np.isclose(
+        scalar_problem.get_val("restored_source_weight", units="kg")[0],
+        restore_source_weight([11.0]),
+    )
+
+    vector = np.asarray([11.0, 3.0, 4.0])
+    vector_problem = om.Problem()
+    vector_problem.model.add_subsystem(
+        "source",
+        SourceWeightRestore(source_count=3),
+        promotes=["*"],
+    )
+    vector_problem.setup()
+    vector_problem.set_val("source_weight_vector", vector, units="kg")
+    vector_problem.run_model()
+
+    assert np.allclose(
+        vector_problem.get_val("restored_source_weight", units="kg"),
+        restore_source_weight(vector),
+    )
+
+
+def test_source_weight_restore_declares_analytic_partials():
+    """Check source-weight restore derivatives against finite difference."""
+
+    for source_count, values in [
+        (1, np.asarray([11.0])),
+        (3, np.asarray([11.0, 3.0, 4.0])),
+    ]:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "source",
+            SourceWeightRestore(source_count=source_count),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("source_weight_vector", values, units="kg")
+        problem.run_model()
+
+        partials = problem.check_partials(
+            out_stream=None,
+            method="fd",
+            form="central",
+            step=1.0e-6,
+        )
+
+        for partial_data in partials["source"].values():
+            assert partial_data["abs error"].forward < 1.0e-8
 
 
 def test_analysis_weight_update_matches_fast_python_eap_iteration():
