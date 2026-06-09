@@ -2,6 +2,7 @@
 
 """OpenMDAO components for FAST propulsion primitive equations."""
 
+import numpy as np
 import openmdao.api as om
 
 from fast_python.atmosphere import standard_atmosphere
@@ -151,6 +152,87 @@ class TransmitterFanEfficiency(om.ExplicitComponent):
             raise ValueError(f"Invalid aircraft class: {self.options['aircraft_class']}")
 
 
+class PowerSupplementCheck(om.ExplicitComponent):
+    """Compute FAST supplemental transmitter power for fixed architecture topology.
+
+    Inputs:
+        required_power: Required transmitter power matrix in W.
+        split: Operational split matrix for the active propagation direction.
+        efficiency: Efficiency matrix paired with ``split``.
+        fan_efficiency: Fan or propeller efficiency for parallel assistance.
+
+    Outputs:
+        supplemental_power: Supplemental transmitter power matrix in W.
+
+    Assumptions:
+        Architecture and transmitter type vectors are discrete design choices
+        fixed at setup. The component keeps FAST's matrix convention where gas
+        turbines are type 1, electric transmitters are type 0, and thrust sinks
+        are type 2.
+    """
+
+    def initialize(self):
+        self.options.declare("num_points", default=1)
+        self.options.declare("architecture")
+        self.options.declare("transmitter_type")
+
+    def setup(self):
+        num_points = self.options["num_points"]
+        transmitter_type = np.asarray(self.options["transmitter_type"]).reshape(-1)
+        num_transmitters = len(transmitter_type)
+
+        self.add_input(
+            "required_power",
+            val=np.ones((num_points, num_transmitters)),
+            units="W",
+        )
+        self.add_input(
+            "split",
+            val=np.ones((num_transmitters, num_transmitters)),
+        )
+        self.add_input(
+            "efficiency",
+            val=np.ones((num_transmitters, num_transmitters)),
+        )
+        self.add_input("fan_efficiency", val=0.9)
+        self.add_output(
+            "supplemental_power",
+            val=np.zeros((num_points, num_transmitters)),
+            units="W",
+        )
+        self.declare_partials(of="supplemental_power", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["supplemental_power"] = power_supplement_values(
+            inputs["required_power"],
+            self.options["architecture"],
+            inputs["split"],
+            inputs["efficiency"],
+            self.options["transmitter_type"],
+            inputs["fan_efficiency"][0],
+        )["supplemental_power"]
+
+    def compute_partials(self, inputs, partials):
+        values = power_supplement_values(
+            inputs["required_power"],
+            self.options["architecture"],
+            inputs["split"],
+            inputs["efficiency"],
+            self.options["transmitter_type"],
+            inputs["fan_efficiency"][0],
+        )
+        partials["supplemental_power", "required_power"] = values[
+            "dsupplemental_drequired_power"
+        ]
+        partials["supplemental_power", "split"] = values["dsupplemental_dsplit"]
+        partials["supplemental_power", "efficiency"] = values[
+            "dsupplemental_defficiency"
+        ]
+        partials["supplemental_power", "fan_efficiency"] = values[
+            "dsupplemental_dfan_efficiency"
+        ]
+
+
 def engine_lapse_value(sea_level_static, aircraft_class, density):
     """Return scalar FAST engine-lapse value."""
 
@@ -192,3 +274,99 @@ def safe_component_weight_value(power, power_to_weight):
         return 0.0
 
     return power / power_to_weight
+
+
+def power_supplement_values(
+    required_power,
+    architecture,
+    split,
+    efficiency,
+    transmitter_type,
+    fan_efficiency,
+):
+    """Return FAST supplemental power and dense analytical partials."""
+
+    required_power = np.asarray(required_power, dtype=float)
+    architecture = np.asarray(architecture, dtype=float)
+    split = np.asarray(split, dtype=float)
+    efficiency = np.asarray(efficiency, dtype=float)
+    transmitter_type = np.asarray(transmitter_type).reshape(-1)
+    num_points, num_transmitters = required_power.shape
+    supplemental = np.zeros((num_points, num_transmitters))
+    nout = num_points * num_transmitters
+    nrequired = required_power.size
+    nmatrix = split.size
+    drequired = np.zeros((nout, nrequired))
+    dsplit = np.zeros((nout, nmatrix))
+    defficiency = np.zeros((nout, nmatrix))
+    dfan = np.zeros((nout, 1))
+
+    gas_turbines = np.where(transmitter_type == 1)[0]
+
+    for gas_turbine in gas_turbines:
+        current_row = architecture[gas_turbine, :]
+        connections = (current_row == 1) & (transmitter_type != 2)
+
+        if not np.any(connections):
+            continue
+
+        connected_indices = np.where(connections)[0]
+        factors = split[connections, gas_turbine] / efficiency[
+            connections,
+            gas_turbine,
+        ]
+        supplemental[:, gas_turbine] -= required_power[:, connected_indices] @ factors
+
+        for point in range(num_points):
+            output_index = point * num_transmitters + gas_turbine
+
+            for local_index, component in enumerate(connected_indices):
+                matrix_index = component * num_transmitters + gas_turbine
+                required_index = point * num_transmitters + component
+                required = required_power[point, component]
+                factor = factors[local_index]
+                drequired[output_index, required_index] -= factor
+                dsplit[output_index, matrix_index] -= required / efficiency[
+                    component,
+                    gas_turbine,
+                ]
+                defficiency[output_index, matrix_index] += (
+                    required
+                    * split[component, gas_turbine]
+                    / efficiency[component, gas_turbine] ** 2
+                )
+
+    parallel_components = np.where(np.sum(architecture, axis=0) > 1)[0]
+
+    for component in parallel_components:
+        connected = architecture[:, component] > 0
+        driving = np.where(connected & (transmitter_type == 1))[0]
+
+        if len(driving) != 1:
+            continue
+
+        helping = np.where(connected & (transmitter_type == 0))[0]
+
+        if len(helping) == 0:
+            continue
+
+        driver = driving[0]
+        supplemental[:, driver] += (
+            np.sum(required_power[:, helping], axis=1) * fan_efficiency
+        )
+
+        for point in range(num_points):
+            output_index = point * num_transmitters + driver
+            dfan[output_index, 0] += np.sum(required_power[point, helping])
+
+            for helper in helping:
+                required_index = point * num_transmitters + helper
+                drequired[output_index, required_index] += fan_efficiency
+
+    return {
+        "supplemental_power": supplemental,
+        "dsupplemental_drequired_power": drequired,
+        "dsupplemental_dsplit": dsplit,
+        "dsupplemental_defficiency": defficiency,
+        "dsupplemental_dfan_efficiency": dfan,
+    }

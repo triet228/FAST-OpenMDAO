@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     EngineLapse,
+    PowerSupplementCheck,
     SafeComponentWeight,
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
@@ -18,6 +19,7 @@ from fast_openmdao import (
 from fast_python.propulsion import (
     engine_lapse,
     get_thrust_sink_efficiency,
+    power_supplement_check,
     safe_component_weight,
     transmitter_fan_efficiency,
 )
@@ -96,9 +98,47 @@ def test_efficiency_selectors_match_fast_python():
     )
 
 
+def test_power_supplement_check_matches_fast_python():
+    """Check supplemental transmitter power parity with FAST-Python."""
+
+    architecture, transmitter_type, required_power, split, efficiency = (
+        make_power_supplement_case()
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "supplement",
+        PowerSupplementCheck(
+            num_points=required_power.shape[0],
+            architecture=architecture,
+            transmitter_type=transmitter_type,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("required_power", required_power, units="W")
+    problem.set_val("split", split)
+    problem.set_val("efficiency", efficiency)
+    problem.set_val("fan_efficiency", 0.88)
+    problem.run_model()
+
+    expected = power_supplement_check(
+        required_power,
+        architecture,
+        split,
+        efficiency,
+        transmitter_type,
+        0.88,
+    )
+
+    assert np.allclose(problem.get_val("supplemental_power", units="W"), expected)
+
+
 def test_propulsion_primitives_declare_analytic_partials():
     """Check propulsion primitive derivatives against finite difference."""
 
+    architecture, transmitter_type, required_power, split, efficiency = (
+        make_power_supplement_case()
+    )
     cases = [
         (
             "lapse",
@@ -119,6 +159,20 @@ def test_propulsion_primitives_declare_analytic_partials():
             "transmitter",
             TransmitterFanEfficiency(aircraft_class="Turbofan"),
             {"fan_efficiency": 0.91},
+        ),
+        (
+            "supplement",
+            PowerSupplementCheck(
+                num_points=required_power.shape[0],
+                architecture=architecture,
+                transmitter_type=transmitter_type,
+            ),
+            {
+                "required_power": required_power,
+                "split": split,
+                "efficiency": efficiency,
+                "fan_efficiency": 0.88,
+            },
         ),
     ]
 
@@ -159,3 +213,37 @@ def make_efficiency_specs():
             },
         },
     }
+
+
+def make_power_supplement_case():
+    """Return a fixed hybrid transmitter topology for supplemental power checks."""
+
+    architecture = np.asarray(
+        [
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+        ]
+    )
+    transmitter_type = np.asarray([1.0, 0.0, 0.0])
+    required_power = np.asarray(
+        [
+            [120.0, 25.0, 10.0],
+            [135.0, 30.0, 12.0],
+        ]
+    )
+    split = np.asarray(
+        [
+            [1.0, 0.4, 0.2],
+            [0.1, 1.0, 0.5],
+            [0.3, 0.6, 1.0],
+        ]
+    )
+    efficiency = np.asarray(
+        [
+            [0.92, 0.90, 0.89],
+            [0.88, 0.93, 0.91],
+            [0.87, 0.86, 0.94],
+        ]
+    )
+    return architecture, transmitter_type, required_power, split, efficiency
