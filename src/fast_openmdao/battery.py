@@ -8,6 +8,32 @@ import numpy as np
 import openmdao.api as om
 
 
+CYCLING_AGING_PARAMETERS = {
+    1: {
+        "beta": 0.001673,
+        "coeff_T": 21.6745,
+        "coeff_DOD": 0.022,
+        "coeff_Cch": 0.2553,
+        "coeff_Cdch": 0.1571,
+        "coeff_mSOC": -0.0212,
+        "alpha": 0.915,
+        "temp_ref": 293.15,
+        "mSOC_ref": 42.0,
+    },
+    2: {
+        "beta": 0.003414,
+        "coeff_T": 5.8755,
+        "coeff_DOD": -0.0045,
+        "coeff_Cch": 0.1038,
+        "coeff_Cdch": 0.296,
+        "coeff_mSOC": 0.0513,
+        "alpha": 0.869,
+        "temp_ref": 293.15,
+        "mSOC_ref": 42.0,
+    },
+}
+
+
 class AvailableCellCapacity(om.ExplicitComponent):
     """Return effective single-cell capacity after optional degradation scaling."""
 
@@ -117,6 +143,68 @@ class BatteryWeightFromEnergy(om.ExplicitComponent):
         partials["battery_weight", "battery_specific_energy"] = values[
             "dbattery_weight_dbattery_specific_energy"
         ]
+
+
+class BatteryCyclingAging(om.ExplicitComponent):
+    """Predict FAST cycling-aging SOH from reduced mission battery statistics."""
+
+    def initialize(self):
+        self.options.declare("chemistry", default=1)
+
+    def setup(self):
+        self.add_input("depth_of_discharge", val=30.0)
+        self.add_input("discharge_c_rate", val=0.5)
+        self.add_input("charge_c_rate", val=0.4)
+        self.add_input("mean_soc", val=65.0)
+        self.add_input("discharge_capacity_delta", val=8.0)
+        self.add_input("charge_capacity_delta", val=8.0)
+        self.add_input("cap_cell", val=2.4)
+        self.add_input("parallel_cells", val=10.0)
+        self.add_input("cumulative_fecs", val=100.0)
+        self.add_input("operating_temperature", val=25.0, units="degC")
+        self.add_output("state_of_health", val=99.0)
+        self.add_output("full_equivalent_cycles", val=100.0)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = battery_cycling_aging_values(
+            self.options["chemistry"],
+            inputs["depth_of_discharge"][0],
+            inputs["discharge_c_rate"][0],
+            inputs["charge_c_rate"][0],
+            inputs["mean_soc"][0],
+            inputs["discharge_capacity_delta"][0],
+            inputs["charge_capacity_delta"][0],
+            inputs["cap_cell"][0],
+            inputs["parallel_cells"][0],
+            inputs["cumulative_fecs"][0],
+            inputs["operating_temperature"][0],
+        )
+        outputs["state_of_health"] = values["state_of_health"]
+        outputs["full_equivalent_cycles"] = values["full_equivalent_cycles"]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_cycling_aging_values(
+            self.options["chemistry"],
+            inputs["depth_of_discharge"][0],
+            inputs["discharge_c_rate"][0],
+            inputs["charge_c_rate"][0],
+            inputs["mean_soc"][0],
+            inputs["discharge_capacity_delta"][0],
+            inputs["charge_capacity_delta"][0],
+            inputs["cap_cell"][0],
+            inputs["parallel_cells"][0],
+            inputs["cumulative_fecs"][0],
+            inputs["operating_temperature"][0],
+        )
+
+        for variable in battery_cycling_aging_input_names():
+            partials["state_of_health", variable] = values[
+                "dstate_of_health_d%s" % variable
+            ]
+            partials["full_equivalent_cycles", variable] = values[
+                "dfull_equivalent_cycles_d%s" % variable
+            ]
 
 
 class BatteryPowerStep(om.ExplicitComponent):
@@ -274,6 +362,23 @@ def battery_power_step_input_names():
     )
 
 
+def battery_cycling_aging_input_names():
+    """Return scalar input names for BatteryCyclingAging derivatives."""
+
+    return (
+        "depth_of_discharge",
+        "discharge_c_rate",
+        "charge_c_rate",
+        "mean_soc",
+        "discharge_capacity_delta",
+        "charge_capacity_delta",
+        "cap_cell",
+        "parallel_cells",
+        "cumulative_fecs",
+        "operating_temperature",
+    )
+
+
 def battery_power_step_output_names():
     """Return scalar output names for BatteryPowerStep."""
 
@@ -285,6 +390,101 @@ def battery_power_step_output_names():
         "soc_end",
         "c_rate",
     )
+
+
+def battery_cycling_aging_values(
+    chemistry,
+    depth_of_discharge,
+    discharge_c_rate,
+    charge_c_rate,
+    mean_soc,
+    discharge_capacity_delta,
+    charge_capacity_delta,
+    cap_cell,
+    parallel_cells,
+    cumulative_fecs,
+    operating_temperature,
+):
+    """Return FAST empirical cycling-aging SOH and analytical derivatives."""
+
+    if chemistry not in CYCLING_AGING_PARAMETERS:
+        raise ValueError('Invalid chemistry. Use "1" for NMC or "2" for LFP.')
+
+    params = CYCLING_AGING_PARAMETERS[chemistry]
+    capacity_sum = discharge_capacity_delta + charge_capacity_delta
+    fec = capacity_sum / (2.0 * cap_cell * parallel_cells) + cumulative_fecs
+
+    if fec <= 0.0:
+        raise ValueError("BatteryCyclingAging requires positive FEC.")
+
+    temp_actual = operating_temperature + 273.15
+    theta_temp = params["coeff_T"] * (
+        (temp_actual - params["temp_ref"]) / temp_actual
+    )
+    theta_dod = params["coeff_DOD"] * depth_of_discharge
+    theta_c = params["coeff_Cch"] * charge_c_rate
+    theta_c += params["coeff_Cdch"] * discharge_c_rate
+    soc_shape = 1.0 + params["coeff_mSOC"] * mean_soc * (
+        1.0 - mean_soc / (2.0 * params["mSOC_ref"])
+    )
+    exp_term = math.exp(theta_temp + theta_dod + theta_c)
+    fec_term = fec ** params["alpha"]
+    base_degradation = params["beta"] * exp_term * fec_term
+    degradation = base_degradation * soc_shape
+    state_of_health = 100.0 - degradation
+
+    dfec = {
+        "depth_of_discharge": 0.0,
+        "discharge_c_rate": 0.0,
+        "charge_c_rate": 0.0,
+        "mean_soc": 0.0,
+        "discharge_capacity_delta": 1.0 / (2.0 * cap_cell * parallel_cells),
+        "charge_capacity_delta": 1.0 / (2.0 * cap_cell * parallel_cells),
+        "cap_cell": -capacity_sum / (2.0 * cap_cell ** 2 * parallel_cells),
+        "parallel_cells": -capacity_sum / (2.0 * cap_cell * parallel_cells ** 2),
+        "cumulative_fecs": 1.0,
+        "operating_temperature": 0.0,
+    }
+    ddegradation = {
+        "depth_of_discharge": degradation * params["coeff_DOD"],
+        "discharge_c_rate": degradation * params["coeff_Cdch"],
+        "charge_c_rate": degradation * params["coeff_Cch"],
+        "mean_soc": base_degradation
+        * params["coeff_mSOC"]
+        * (1.0 - mean_soc / params["mSOC_ref"]),
+        "discharge_capacity_delta": degradation
+        * params["alpha"]
+        / fec
+        * dfec["discharge_capacity_delta"],
+        "charge_capacity_delta": degradation
+        * params["alpha"]
+        / fec
+        * dfec["charge_capacity_delta"],
+        "cap_cell": degradation * params["alpha"] / fec * dfec["cap_cell"],
+        "parallel_cells": degradation
+        * params["alpha"]
+        / fec
+        * dfec["parallel_cells"],
+        "cumulative_fecs": degradation
+        * params["alpha"]
+        / fec
+        * dfec["cumulative_fecs"],
+        "operating_temperature": degradation
+        * params["coeff_T"]
+        * params["temp_ref"]
+        / temp_actual ** 2,
+    }
+
+    values = {
+        "state_of_health": state_of_health,
+        "full_equivalent_cycles": fec,
+    }
+
+    for variable in battery_cycling_aging_input_names():
+        values["dstate_of_health_d%s" % variable] = -ddegradation[variable]
+        values["dfull_equivalent_cycles_d%s" % variable] = dfec[variable]
+
+    return values
 
 
 def battery_power_step_values(

@@ -6,6 +6,7 @@ from fast_openmdao.analysis import ConvergenceError, SourceWeightVector, WeightS
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.battery import (
     AvailableCellCapacity,
+    BatteryCyclingAging,
     BatteryCurrent,
     BatteryPowerStep,
     BatteryWeightFromEnergy,
@@ -101,6 +102,7 @@ __all__ = [
     "AirTemperatureFromHeatAdded",
     "AirTemperatureFromHeatRemoved",
     "BatteryEnergyAvailable",
+    "BatteryCyclingAging",
     "BatteryReplacementCost",
     "BatterySpecificEnergyProjection",
     "AvailableCellCapacity",

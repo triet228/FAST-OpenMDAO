@@ -67,8 +67,9 @@ derivative-native FAST equation components:
 - Generic and named FAR 25 climb residual components with analytical partial
   derivatives.
 - Battery scalar primitives for effective cell capacity, selected current root,
-  one-step equivalent-circuit power dynamics, and simple energy-based battery
-  source weight with analytical partial derivatives.
+  empirical cycling-aging SOH, one-step equivalent-circuit power dynamics, and
+  simple energy-based battery source weight with analytical partial
+  derivatives.
 - Analysis source-weight vectorization plus analysis and OEW summation helpers
   for scalar/vector weight values with analytical partial derivatives.
 - Optimization helper primitives for available electric motor power and
@@ -100,8 +101,8 @@ The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
 - Analysis: `ConvergenceError`, `SourceWeightVector`, `WeightSum`
-- Battery: `AvailableCellCapacity`, `BatteryCurrent`, `BatteryPowerStep`,
-  `BatteryWeightFromEnergy`
+- Battery: `AvailableCellCapacity`, `BatteryCyclingAging`, `BatteryCurrent`,
+  `BatteryPowerStep`, `BatteryWeightFromEnergy`
 - Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
   `FAR25EngineGradient`, `JetAEOClimbConstraint`, `JetApproachConstraint`,
   `JetCeilingConstraint`, `JetCruiseConstraint`, `JetFAR25NamedClimbConstraint`,
@@ -368,8 +369,10 @@ residual functions.
    derivatives. Done.
 46. Convert cable sizing weight helper with analytical partial derivatives.
    Done.
-47. Add complex-step derivative checks where supported by FAST-Python internals.
-48. Build reusable groups for mission, propulsion, weights, and objective
+47. Convert empirical battery cycling-aging SOH helper with analytical partial
+   derivatives. Done.
+48. Add complex-step derivative checks where supported by FAST-Python internals.
+49. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

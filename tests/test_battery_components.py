@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     AvailableCellCapacity,
+    BatteryCyclingAging,
     BatteryCurrent,
     BatteryPowerStep,
     BatteryWeightFromEnergy,
@@ -18,6 +19,7 @@ from fast_openmdao import (
 from fast_python.battery import (
     available_cell_capacity,
     charging,
+    cycling_aging_parameters,
     discharging,
     resize_battery,
     solve_battery_current,
@@ -127,6 +129,43 @@ def test_battery_power_step_matches_fast_python_discharge_and_charge():
             assert np.isclose(problem.get_val(output)[0], expected[expected_index][-1])
 
 
+def test_battery_cycling_aging_matches_fast_python_empirical_formula():
+    """Check cycling-aging SOH parity with FAST-Python chemistry constants."""
+
+    for chemistry in [1, 2]:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "aging",
+            BatteryCyclingAging(chemistry=chemistry),
+            promotes=["*"],
+        )
+        problem.setup()
+        set_cycling_aging_values(problem)
+        problem.run_model()
+
+        params = cycling_aging_parameters(chemistry)
+        values = cycling_aging_values()
+        fec = (
+            values["discharge_capacity_delta"] + values["charge_capacity_delta"]
+        ) / (2.0 * values["cap_cell"] * values["parallel_cells"])
+        fec += values["cumulative_fecs"]
+        temp_actual = values["operating_temperature"] + 273.15
+        theta_temp = params["coeff_T"] * (
+            (temp_actual - params["temp_ref"]) / temp_actual
+        )
+        theta_dod = params["coeff_DOD"] * values["depth_of_discharge"]
+        theta_c = params["coeff_Cch"] * values["charge_c_rate"]
+        theta_c += params["coeff_Cdch"] * values["discharge_c_rate"]
+        soc_shape = 1.0 + params["coeff_mSOC"] * values["mean_soc"] * (
+            1.0 - values["mean_soc"] / (2.0 * params["mSOC_ref"])
+        )
+        degradation = params["beta"] * np.exp(theta_temp + theta_dod + theta_c)
+        degradation *= soc_shape * fec ** params["alpha"]
+
+        assert np.isclose(problem.get_val("full_equivalent_cycles")[0], fec)
+        assert np.isclose(problem.get_val("state_of_health")[0], 100.0 - degradation)
+
+
 def test_battery_primitives_declare_analytic_partials():
     """Check battery primitive derivatives against finite difference."""
 
@@ -176,6 +215,16 @@ def test_battery_primitives_declare_analytic_partials():
             "charge_step",
             BatteryPowerStep(is_discharge=False),
             power_step_values(-500.0),
+        ),
+        (
+            "aging",
+            BatteryCyclingAging(chemistry=1),
+            cycling_aging_values(),
+        ),
+        (
+            "aging_lfp",
+            BatteryCyclingAging(chemistry=2),
+            cycling_aging_values(),
         ),
     ]
 
@@ -286,8 +335,32 @@ def power_step_values(requested_power):
     }
 
 
+def cycling_aging_values():
+    """Return OpenMDAO inputs for FAST empirical battery cycling aging."""
+
+    return {
+        "depth_of_discharge": 55.0,
+        "discharge_c_rate": 0.8,
+        "charge_c_rate": 0.6,
+        "mean_soc": 62.0,
+        "discharge_capacity_delta": 10.0,
+        "charge_capacity_delta": 8.0,
+        "cap_cell": 2.4,
+        "parallel_cells": 12.0,
+        "cumulative_fecs": 120.0,
+        "operating_temperature": 30.0,
+    }
+
+
 def set_power_step_values(problem, requested_power):
     """Set scalar OpenMDAO battery power-step inputs."""
 
     for variable, value in power_step_values(requested_power).items():
+        problem.set_val(variable, value)
+
+
+def set_cycling_aging_values(problem):
+    """Set scalar OpenMDAO battery cycling-aging inputs."""
+
+    for variable, value in cycling_aging_values().items():
         problem.set_val(variable, value)
