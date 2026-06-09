@@ -56,6 +56,7 @@ def make_fast_problem(
     input_specs=(),
     output_specs=None,
     runner=None,
+    partial_derivatives=None,
     component_name="fast",
     promotes=None,
 ):
@@ -67,6 +68,8 @@ def make_fast_problem(
         input_specs: Scalar OpenMDAO inputs mapped to FAST paths.
         output_specs: Scalar outputs extracted from the FAST result dictionary.
         runner: Optional callable used instead of the default FAST-Python run.
+        partial_derivatives: Optional analytic scalar partial derivatives keyed
+            by (output, input) names.
         component_name: Subsystem name used in the OpenMDAO model.
         promotes: Optional OpenMDAO promotions list.
 
@@ -87,6 +90,7 @@ def make_fast_problem(
             input_specs=input_specs,
             output_specs=default_outputs(output_specs),
             runner=runner,
+            partial_derivatives=partial_derivatives,
         ),
         promotes=promotes,
     )
@@ -99,6 +103,7 @@ def make_fast_optimization_problem(
     input_specs=(),
     output_specs=None,
     runner=None,
+    partial_derivatives=None,
     component_name="fast",
     promotes=None,
     design_vars=(),
@@ -115,6 +120,8 @@ def make_fast_optimization_problem(
         input_specs: Scalar inputs mapped to FAST paths.
         output_specs: Scalar outputs extracted from the FAST result.
         runner: Optional callable used instead of the default FAST-Python run.
+        partial_derivatives: Optional analytic scalar partial derivatives keyed
+            by (output, input) names.
         component_name: Subsystem name used in the OpenMDAO model.
         promotes: Optional OpenMDAO promotions list.
         design_vars: Design variable specs with at least a name field.
@@ -134,6 +141,7 @@ def make_fast_optimization_problem(
         input_specs=input_specs,
         output_specs=output_specs,
         runner=runner,
+        partial_derivatives=partial_derivatives,
         component_name=component_name,
         promotes=promotes,
     )

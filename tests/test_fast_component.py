@@ -14,7 +14,8 @@ from fast_openmdao import (
     make_fast_optimization_problem,
     make_fast_problem,
 )
-from tests.fixtures import make_compact_aircraft, make_compact_mission
+from fast_openmdao.examples.compact_electric import make_compact_aircraft
+from fast_openmdao.examples.compact_electric import run_demo
 
 
 def test_component_maps_openmdao_inputs_to_fast_paths():
@@ -37,7 +38,7 @@ def test_component_maps_openmdao_inputs_to_fast_paths():
 
 
 def test_component_supports_openmdao_total_derivatives():
-    """Check finite-difference partials make totals available to drivers."""
+    """Check supplied analytic partials make totals available to drivers."""
 
     problem = make_fast_problem(
         aircraft=make_fake_aircraft(),
@@ -45,6 +46,7 @@ def test_component_supports_openmdao_total_derivatives():
         input_specs=fake_input_specs(),
         output_specs=fake_output_specs(),
         runner=fake_runner,
+        partial_derivatives=fake_partial_derivatives(),
     )
     problem.model.add_design_var("mission_range")
     problem.model.add_design_var("cruise_lift_to_drag")
@@ -65,6 +67,28 @@ def test_component_supports_openmdao_total_derivatives():
         [[-100.0]],
         rtol=1.0e-5,
     )
+
+
+def test_component_checks_supplied_analytic_partials():
+    """Check analytic component partials agree with finite difference."""
+
+    problem = make_fast_problem(
+        aircraft=make_fake_aircraft(),
+        mission=make_fake_mission(),
+        input_specs=fake_input_specs(),
+        output_specs=fake_output_specs(),
+        runner=fake_runner,
+        partial_derivatives=fake_partial_derivatives(),
+    )
+    problem.setup()
+    problem.set_val("mission_range", 40000.0, units="m")
+    problem.set_val("cruise_lift_to_drag", 20.0)
+    problem.run_model()
+    partials = problem.check_partials(out_stream=None, method="fd")
+
+    for component_partials in partials.values():
+        for partial_data in component_partials.values():
+            assert partial_data["abs error"].forward < 1.0e-4
 
 
 def test_default_runner_executes_fast_python_native_smoke_case():
@@ -124,6 +148,7 @@ def test_optimization_builder_runs_slsqp_driver():
         input_specs=input_specs,
         output_specs=fake_output_specs(),
         runner=fake_runner,
+        partial_derivatives=fake_partial_derivatives(),
         design_vars=[
             {
                 "name": "cruise_lift_to_drag",
@@ -145,6 +170,20 @@ def test_optimization_builder_runs_slsqp_driver():
     assert result.success
     assert problem.get_val("cruise_lift_to_drag")[0] > 19.99
     assert abs(problem.get_val("mtow", units="kg")[0] - 3000.0) < 1.0e-5
+
+
+def test_compact_example_runs_real_fast_python_optimization():
+    """Check the command-line example moves to the lower-energy bound."""
+
+    summary = run_demo(
+        range_initial=20000.0,
+        range_lower=10000.0,
+        range_upper=40000.0,
+    )
+
+    assert summary["success"]
+    assert abs(summary["mission_range"] - 10000.0) < 1.0e-5
+    assert summary["energy_used"] > 0
 
 
 def fake_input_specs():
@@ -184,6 +223,31 @@ def fake_output_specs():
             "units": "kg",
         },
     ]
+
+
+def fake_partial_derivatives():
+    """Return analytic partials for the fake differentiable runner."""
+
+    return {
+        ("mtow", "mission_range"): d_mtow_d_range,
+        ("mtow", "cruise_lift_to_drag"): d_mtow_d_lift_to_drag,
+        ("output_mtow", "mission_range"): d_mtow_d_range,
+        ("output_mtow", "cruise_lift_to_drag"): d_mtow_d_lift_to_drag,
+    }
+
+
+def d_mtow_d_range(_inputs, _result, aircraft, _mission):
+    """Return analytic fake-runner MTOW sensitivity to mission range."""
+
+    return 1.0 / aircraft["Specs"]["Aero"]["L_D"]["Crs"]
+
+
+def d_mtow_d_lift_to_drag(_inputs, _result, aircraft, mission):
+    """Return analytic fake-runner MTOW sensitivity to cruise L/D."""
+
+    mission_range = mission["Target"]["Valu"][0]
+    cruise_lift_to_drag = aircraft["Specs"]["Aero"]["L_D"]["Crs"]
+    return -mission_range / cruise_lift_to_drag ** 2
 
 
 def make_fake_aircraft():

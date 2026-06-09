@@ -10,6 +10,9 @@ dependencies = [
     "scipy>=1.12",
 ]
 
+[project.scripts]
+fast-openmdao-compact = "fast_openmdao.examples.compact_electric:cli"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
@@ -26,4 +29,3 @@ where = ["src"]
 testpaths = ["tests"]
 addopts = "-ra"
 pythonpath = ["src"]
-

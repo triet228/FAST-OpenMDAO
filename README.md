@@ -20,8 +20,11 @@ This repository now has its first OpenMDAO bridge:
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
   aircraft or mission dictionaries.
 - Path-based scalar output specs that extract values from the FAST result.
-- OpenMDAO finite-difference partials so drivers can compute total
-  derivatives while analytic derivatives are developed.
+- Analytic scalar partial derivatives when supplied through
+  `partial_derivatives`, with OpenMDAO finite-difference fallback for
+  black-box FAST-Python quantities.
+- `fast-openmdao-compact`: a small command-line optimization example using the
+  real FAST-Python backend.
 
 ## Repository Layout
 
@@ -91,9 +94,27 @@ problem.setup()
 problem.run_model()
 ```
 
-The component currently uses OpenMDAO finite-difference partials. That makes the
-framework driver-ready while FAST-Python internals are converted toward
-derivative-native implementations.
+When a FAST quantity has an analytical derivative, pass it through
+`partial_derivatives`:
+
+```python
+def d_mtow_d_range(_inputs, _result, aircraft, _mission):
+    return 1.0 / aircraft["Specs"]["Aero"]["L_D"]["Crs"]
+
+
+problem = make_fast_problem(
+    aircraft=aircraft,
+    mission=mission,
+    input_specs=[range_spec],
+    partial_derivatives={
+        ("mtow", "mission_range"): d_mtow_d_range,
+    },
+)
+```
+
+The component declares supplied partials as exact OpenMDAO derivatives. Missing
+partials still use finite difference, which keeps black-box FAST-Python runs
+driver-ready while internals are converted toward derivative-native equations.
 
 ## Minimal Optimization Setup
 
@@ -127,13 +148,23 @@ problem.setup()
 problem.run_driver()
 ```
 
+## Compact Example
+
+Run the real FAST-Python compact electric optimization smoke example:
+
+```powershell
+fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40000
+```
+
 ## Development Roadmap
 
 1. Add a minimal OpenMDAO component that wraps a `FAST-Python` case. Done.
 2. Expose scalar FAST inputs as OpenMDAO design variables. Done.
 3. Add finite-difference checks around the component bridge. Done.
 4. Add a driver-ready optimization problem builder. Done.
-5. Add optimization examples that run from the command line.
-6. Add complex-step derivative checks where supported by FAST-Python internals.
-7. Build reusable groups for mission, propulsion, weights, and objective
+5. Add optimization examples that run from the command line. Done.
+6. Add analytic partial hooks for components when derivatives are available.
+   Done.
+7. Add complex-step derivative checks where supported by FAST-Python internals.
+8. Build reusable groups for mission, propulsion, weights, and objective
    functions.
