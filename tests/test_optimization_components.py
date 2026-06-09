@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     BatteryEnergyAvailable,
+    DesignSplitBounds,
     ElectricMotorPowerAvailable,
     FeasibleStep,
     OperationalObjective,
@@ -20,6 +21,7 @@ from fast_openmdao import (
 )
 from fast_python.optimization import (
     battery_energy_available,
+    con_size_opt,
     electric_motor_power_available,
     feas_step,
     operational_objective_value,
@@ -188,6 +190,30 @@ def test_operational_split_constraints_match_fast_python():
     assert np.allclose(fixed_problem.get_val("split_constraints"), fixed_expected)
 
 
+def test_design_split_bounds_match_fast_python_con_size_opt():
+    """Check FAST ConSizeOpt design split bound residuals."""
+
+    design_splits = np.asarray([0.2, 0.5, 0.8])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "bounds",
+        DesignSplitBounds(vec_size=design_splits.size),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("design_splits", design_splits)
+    problem.run_model()
+
+    expected, _, _, _ = con_size_opt(
+        design_splits,
+        0,
+        make_design_split_bound_aircraft(design_splits.size),
+    )
+
+    assert np.allclose(problem.get_val("lower_bounds"), expected[:design_splits.size])
+    assert np.allclose(problem.get_val("upper_bounds"), expected[design_splits.size:])
+
+
 def test_optimization_objectives_match_fast_python():
     """Check operational and power-management objective parity."""
 
@@ -289,6 +315,13 @@ def test_optimization_helpers_declare_analytic_partials():
             },
         ),
         (
+            "design_bounds",
+            DesignSplitBounds(vec_size=3),
+            {
+                "design_splits": np.asarray([0.2, 0.5, 0.8]),
+            },
+        ),
+        (
             "operational_objective",
             OperationalObjective(objective_type="Energy"),
             {
@@ -370,6 +403,32 @@ def make_operational_split_aircraft(npoint, nopers, ndvars, narg, lam_max):
             "npoint": npoint,
             "nopers": nopers,
             "ndvars": ndvars,
+        },
+    }
+
+
+def make_design_split_bound_aircraft(num_design_splits):
+    """Return minimal aircraft with active design split constraints only."""
+
+    return {
+        "Settings": {
+            "Analysis": {
+                "Type": 0,
+            },
+        },
+        "Specs": {
+            "Propulsion": {
+                "PropArch": {},
+            },
+        },
+        "PowerOpt": {
+            "Settings": {
+                "DesnTS": 1,
+            },
+            "Constraints": {},
+            "nopers": 0,
+            "ndesns": num_design_splits,
+            "ndvars": num_design_splits,
         },
     }
 

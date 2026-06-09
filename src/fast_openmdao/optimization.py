@@ -228,6 +228,44 @@ class OperationalSplitConstraints(om.ExplicitComponent):
             ]
 
 
+class DesignSplitBounds(om.ExplicitComponent):
+    """Compute FAST design split lower and upper bound residuals.
+
+    Inputs:
+        design_splits: Design split variables from FAST ``ConSizeOpt``.
+
+    Outputs:
+        lower_bounds: FAST residual ``-design_splits``.
+        upper_bounds: FAST residual ``design_splits - 1``.
+    """
+
+    def initialize(self):
+        self.options.declare("vec_size", default=1)
+
+    def setup(self):
+        vec_size = self.options["vec_size"]
+        rows = np.arange(vec_size)
+        self.add_input("design_splits", val=np.ones(vec_size) * 0.5)
+        self.add_output("lower_bounds", val=np.zeros(vec_size))
+        self.add_output("upper_bounds", val=np.zeros(vec_size))
+        self.declare_partials(
+            of=["lower_bounds", "upper_bounds"],
+            wrt="design_splits",
+            rows=rows,
+            cols=rows,
+        )
+
+    def compute(self, inputs, outputs):
+        values = design_split_bound_values(inputs["design_splits"])
+        outputs["lower_bounds"] = values["lower"]
+        outputs["upper_bounds"] = values["upper"]
+
+    def compute_partials(self, inputs, partials):
+        values = design_split_bound_values(inputs["design_splits"])
+        partials["lower_bounds", "design_splits"] = values["dlower_ddesign_splits"]
+        partials["upper_bounds", "design_splits"] = values["dupper_ddesign_splits"]
+
+
 class OperationalObjective(om.ExplicitComponent):
     """Compute FAST OpsOptimize's unscaled objective selector.
 
@@ -460,6 +498,19 @@ def power_limit_constraint_values(used, available, eps):
         "dlower_davailable": dlower_davailable,
         "dupper_dused": dupper_dused,
         "dupper_davailable": dupper_davailable,
+    }
+
+
+def design_split_bound_values(design_splits):
+    """Return FAST design split bound residuals and derivatives."""
+
+    design_splits = np.asarray(design_splits, dtype=float).reshape(-1)
+    size = design_splits.size
+    return {
+        "lower": -design_splits,
+        "upper": design_splits - 1.0,
+        "dlower_ddesign_splits": -np.ones(size),
+        "dupper_ddesign_splits": np.ones(size),
     }
 
 
