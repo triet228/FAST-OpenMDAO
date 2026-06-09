@@ -22,6 +22,7 @@ from fast_openmdao import (
     SeriesHybridArchitecture,
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
+    TurboelectricArchitecture,
     TurbopropEngineWeightForSizing,
 )
 from fast_python.propulsion import (
@@ -38,6 +39,7 @@ from fast_python.propulsion import (
     safe_component_weight,
     series_hybrid_architecture,
     transmitter_fan_efficiency,
+    turboelectric_architecture,
 )
 
 
@@ -185,6 +187,40 @@ def test_series_hybrid_architecture_matches_fast_python():
         problem.get_val("downstream_split"),
         expected[2](values["power_split"]),
     )
+    assert np.allclose(problem.get_val("upstream_efficiency"), expected[3])
+    assert np.allclose(problem.get_val("downstream_efficiency"), expected[4])
+    assert np.allclose(problem.get_val("source_type"), expected[5])
+    assert np.allclose(problem.get_val("transmitter_type"), expected[6])
+
+
+def test_turboelectric_architecture_matches_fast_python():
+    """Check TE architecture matrix builder parity with FAST-Python."""
+
+    values = make_turboelectric_architecture_values()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "architecture",
+        TurboelectricArchitecture(num_engines=values["num_engines"]),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("electric_motor_efficiency", values["electric_motor_efficiency"])
+    problem.set_val(
+        "electric_generator_efficiency",
+        values["electric_generator_efficiency"],
+    )
+    problem.set_val("thrust_sink_efficiency", values["thrust_sink_efficiency"])
+    problem.run_model()
+
+    expected = turboelectric_architecture(
+        values["num_engines"],
+        values["electric_motor_efficiency"],
+        values["electric_generator_efficiency"],
+        values["thrust_sink_efficiency"],
+    )
+    assert np.allclose(problem.get_val("architecture"), expected[0])
+    assert np.allclose(problem.get_val("upstream_split"), expected[1])
+    assert np.allclose(problem.get_val("downstream_split"), expected[2])
     assert np.allclose(problem.get_val("upstream_efficiency"), expected[3])
     assert np.allclose(problem.get_val("downstream_efficiency"), expected[4])
     assert np.allclose(problem.get_val("source_type"), expected[5])
@@ -473,6 +509,7 @@ def test_propulsion_primitives_declare_analytic_partials():
     fuel_derivative_case["initial_fuel_energy_left"] = 1000.0
     architecture_values = make_parallel_hybrid_architecture_values()
     series_architecture_values = make_series_hybrid_architecture_values()
+    turboelectric_architecture_values = make_turboelectric_architecture_values()
     cases = [
         (
             "parallel_hybrid",
@@ -503,6 +540,23 @@ def test_propulsion_primitives_declare_analytic_partials():
                     "electric_generator_efficiency"
                 ],
                 "thrust_sink_efficiency": series_architecture_values[
+                    "thrust_sink_efficiency"
+                ],
+            },
+        ),
+        (
+            "turboelectric",
+            TurboelectricArchitecture(
+                num_engines=turboelectric_architecture_values["num_engines"],
+            ),
+            {
+                "electric_motor_efficiency": turboelectric_architecture_values[
+                    "electric_motor_efficiency"
+                ],
+                "electric_generator_efficiency": turboelectric_architecture_values[
+                    "electric_generator_efficiency"
+                ],
+                "thrust_sink_efficiency": turboelectric_architecture_values[
                     "thrust_sink_efficiency"
                 ],
             },
@@ -711,6 +765,17 @@ def make_series_hybrid_architecture_values():
         "electric_motor_efficiency": 0.93,
         "electric_generator_efficiency": 0.91,
         "thrust_sink_efficiency": 0.84,
+    }
+
+
+def make_turboelectric_architecture_values():
+    """Return scalar inputs for FAST turboelectric architecture construction."""
+
+    return {
+        "num_engines": 2,
+        "electric_motor_efficiency": 0.92,
+        "electric_generator_efficiency": 0.9,
+        "thrust_sink_efficiency": 0.83,
     }
 
 

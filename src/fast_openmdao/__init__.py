@@ -99,6 +99,7 @@ from fast_openmdao.propulsion import (
     SeriesHybridArchitecture,
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
+    TurboelectricArchitecture,
     TurbopropEngineWeightForSizing,
 )
 from fast_openmdao.units import UnitConversion
@@ -192,6 +193,7 @@ __all__ = [
     "TurbopropLinearSizing",
     "ThrustSinkEfficiency",
     "TransmitterFanEfficiency",
+    "TurboelectricArchitecture",
     "TurbopropEngineWeightForSizing",
     "TurbopropAirframeWeight",
     "TurbofanAirframeWeight",
