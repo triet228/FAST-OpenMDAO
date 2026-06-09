@@ -1262,6 +1262,79 @@ class CruisePowerAvailableConstraint(om.ExplicitComponent):
         ] = values["dconstraint_dgas_turbine_power_available"]
 
 
+class DesignOperationalConstraints(om.ExplicitComponent):
+    """Assemble FAST sizing and operational split inequality constraints."""
+
+    def initialize(self):
+        self.options.declare("num_design_vars", default=1)
+        self.options.declare("num_operational", default=0)
+        self.options.declare("num_design", default=0)
+        self.options.declare("pem_size", default=0)
+        self.options.declare("pgt_size", default=0)
+        self.options.declare("ebatt_size", default=0)
+        self.options.declare("cruise_size", default=0)
+        self.options.declare("use_pem", default=False)
+        self.options.declare("use_pgt", default=False)
+        self.options.declare("use_ebatt", default=False)
+        self.options.declare("use_design_bounds", default=False)
+        self.options.declare("use_operational_bounds", default=False)
+        self.options.declare("use_cruise_power", default=False)
+        self.options.declare("operational_split_specs", default=())
+        self.options.declare("eps", default=1.0e-6)
+
+    def setup(self):
+        size = design_operational_constraint_size(
+            self.options["pem_size"],
+            self.options["pgt_size"],
+            self.options["ebatt_size"],
+            self.options["cruise_size"],
+            self.options["num_operational"],
+            self.options["num_design"],
+            self.options["operational_split_specs"],
+            self.options["use_pem"],
+            self.options["use_pgt"],
+            self.options["use_ebatt"],
+            self.options["use_design_bounds"],
+            self.options["use_operational_bounds"],
+            self.options["use_cruise_power"],
+        )
+        design_size = self.options["num_design_vars"]
+        self.add_input("design_variables", val=np.zeros(design_size))
+        self.add_output("constraints", val=np.zeros(size))
+        self.declare_partials(
+            of="constraints",
+            wrt="design_variables",
+            rows=np.repeat(np.arange(size), design_size),
+            cols=np.tile(np.arange(design_size), size),
+        )
+
+        for name, active, input_size in design_operational_power_inputs(self.options):
+            if active:
+                self.add_input(name, val=np.ones(input_size))
+                self.declare_partials(
+                    of="constraints",
+                    wrt=name,
+                    rows=np.repeat(np.arange(size), input_size),
+                    cols=np.tile(np.arange(input_size), size),
+                )
+
+    def compute(self, inputs, outputs):
+        values = design_operational_constraint_values(inputs, self.options)
+        outputs["constraints"] = values["constraints"]
+
+    def compute_partials(self, inputs, partials):
+        values = design_operational_constraint_values(inputs, self.options)
+        partials["constraints", "design_variables"] = values[
+            "dconstraints_ddesign_variables"
+        ].reshape(-1)
+
+        for name, active, _ in design_operational_power_inputs(self.options):
+            if active:
+                partials["constraints", name] = values[
+                    "dconstraints_d%s" % name
+                ].reshape(-1)
+
+
 class OperationalObjective(om.ExplicitComponent):
     """Compute FAST OpsOptimize's unscaled objective selector.
 
@@ -2459,6 +2532,308 @@ def cruise_power_available_constraint_values(cruise_power, available, eps):
         "dconstraint_dcruise_power": dcruise,
         "dconstraint_dgas_turbine_power_available": davailable,
     }
+
+
+def design_operational_power_inputs(options):
+    """Return active aggregate constraint power-input metadata."""
+
+    return (
+        ("des_pem", options["use_pem"], options["pem_size"]),
+        ("des_pem_available", options["use_pem"], options["pem_size"]),
+        ("des_pgt", options["use_pgt"], options["pgt_size"]),
+        ("des_pgt_available", options["use_pgt"], options["pgt_size"]),
+        ("des_ebatt", options["use_ebatt"], options["ebatt_size"]),
+        ("des_ebatt_available", options["use_ebatt"], options["ebatt_size"]),
+        ("cruise_power", options["use_cruise_power"], options["cruise_size"]),
+        (
+            "gas_turbine_power_available",
+            options["use_cruise_power"],
+            options["cruise_size"],
+        ),
+    )
+
+
+def normalized_operational_split_specs(specs):
+    """Return fixed operational split specs as tuples with active flags."""
+
+    normalized = []
+
+    for spec in specs:
+        values = tuple(spec)
+
+        if len(values) == 4:
+            npoint, nsplit, design_active, lam_max = values
+            active = True
+        elif len(values) == 5:
+            npoint, nsplit, design_active, lam_max, active = values
+        else:
+            raise ValueError("Operational split specs need four or five fields.")
+
+        normalized.append(
+            (
+                int(npoint),
+                int(nsplit),
+                bool(design_active),
+                float(lam_max),
+                bool(active),
+            )
+        )
+
+    return tuple(normalized)
+
+
+def operational_split_constraint_size(specs):
+    """Return active operational split residual count."""
+
+    size = 0
+
+    for npoint, nsplit, _, _, active in normalized_operational_split_specs(specs):
+        if active:
+            size += npoint * nsplit
+
+    return size
+
+
+def design_operational_constraint_size(
+    pem_size,
+    pgt_size,
+    ebatt_size,
+    cruise_size,
+    num_operational,
+    num_design,
+    split_specs,
+    use_pem,
+    use_pgt,
+    use_ebatt,
+    use_design_bounds,
+    use_operational_bounds,
+    use_cruise_power,
+):
+    """Return FAST aggregate ConSizeOpt residual vector length."""
+
+    size = 0
+
+    if use_pem:
+        size += 2 * int(pem_size)
+
+    if use_pgt:
+        size += 2 * int(pgt_size)
+
+    if use_ebatt:
+        size += 2 * int(ebatt_size)
+
+    if use_design_bounds:
+        size += 2 * int(num_design)
+
+    if use_operational_bounds:
+        size += int(num_operational)
+        size += operational_split_constraint_size(split_specs)
+
+    if use_cruise_power:
+        size += int(cruise_size)
+
+    return size
+
+
+def design_operational_constraint_values(inputs, options):
+    """Return aggregate ConSizeOpt constraints and dense Jacobian blocks."""
+
+    size = design_operational_constraint_size(
+        options["pem_size"],
+        options["pgt_size"],
+        options["ebatt_size"],
+        options["cruise_size"],
+        options["num_operational"],
+        options["num_design"],
+        options["operational_split_specs"],
+        options["use_pem"],
+        options["use_pgt"],
+        options["use_ebatt"],
+        options["use_design_bounds"],
+        options["use_operational_bounds"],
+        options["use_cruise_power"],
+    )
+    design_variables = np.asarray(inputs["design_variables"], dtype=float).reshape(-1)
+    constraints = np.zeros(size)
+    derivatives = {
+        "design_variables": np.zeros((size, design_variables.size)),
+    }
+
+    for name, active, input_size in design_operational_power_inputs(options):
+        if active:
+            derivatives[name] = np.zeros((size, input_size))
+
+    row = 0
+    row = add_design_operational_power_limit(
+        inputs,
+        constraints,
+        derivatives,
+        row,
+        "des_pem",
+        "des_pem_available",
+        options["use_pem"],
+        options["eps"],
+    )
+    row = add_design_operational_power_limit(
+        inputs,
+        constraints,
+        derivatives,
+        row,
+        "des_pgt",
+        "des_pgt_available",
+        options["use_pgt"],
+        options["eps"],
+    )
+    row = add_design_operational_power_limit(
+        inputs,
+        constraints,
+        derivatives,
+        row,
+        "des_ebatt",
+        "des_ebatt_available",
+        options["use_ebatt"],
+        options["eps"],
+    )
+
+    if options["use_design_bounds"]:
+        nopers = int(options["num_operational"])
+        ndesns = int(options["num_design"])
+        values = design_split_bound_values(design_variables[nopers:nopers + ndesns])
+        constraints[row:row + ndesns] = values["lower"]
+        derivatives["design_variables"][row:row + ndesns, nopers:nopers + ndesns] = (
+            -np.eye(ndesns)
+        )
+        row += ndesns
+        constraints[row:row + ndesns] = values["upper"]
+        derivatives["design_variables"][row:row + ndesns, nopers:nopers + ndesns] = (
+            np.eye(ndesns)
+        )
+        row += ndesns
+
+    if options["use_operational_bounds"]:
+        row = add_design_operational_split_limits(
+            constraints,
+            derivatives,
+            row,
+            design_variables,
+            options["num_operational"],
+            options["operational_split_specs"],
+            options["eps"],
+        )
+
+    if options["use_cruise_power"]:
+        values = cruise_power_available_constraint_values(
+            inputs["cruise_power"],
+            inputs["gas_turbine_power_available"],
+            options["eps"],
+        )
+        block_size = values["constraint"].size
+        constraints[row:row + block_size] = values["constraint"]
+        rows = np.arange(block_size)
+        derivatives["cruise_power"][
+            row + rows, rows
+        ] = values["dconstraint_dcruise_power"]
+        derivatives["gas_turbine_power_available"][
+            row + rows, rows
+        ] = values["dconstraint_dgas_turbine_power_available"]
+        row += block_size
+
+    result = {"constraints": constraints}
+    for name, derivative in derivatives.items():
+        result["dconstraints_d%s" % name] = derivative
+
+    return result
+
+
+def add_design_operational_power_limit(
+    inputs,
+    constraints,
+    derivatives,
+    row,
+    used_name,
+    available_name,
+    active,
+    eps,
+):
+    """Append paired active power-limit residuals to aggregate constraints."""
+
+    if not active:
+        return row
+
+    values = power_limit_constraint_values(
+        inputs[used_name],
+        inputs[available_name],
+        eps,
+    )
+    block_size = values["lower"].size
+    rows = np.arange(block_size)
+    constraints[row:row + block_size] = values["lower"]
+    derivatives[used_name][row + rows, rows] = values["dlower_dused"]
+    derivatives[available_name][row + rows, rows] = values["dlower_davailable"]
+    row += block_size
+    constraints[row:row + block_size] = values["upper"]
+    derivatives[used_name][row + rows, rows] = values["dupper_dused"]
+    derivatives[available_name][row + rows, rows] = values["dupper_davailable"]
+    row += block_size
+    return row
+
+
+def add_design_operational_split_limits(
+    constraints,
+    derivatives,
+    row,
+    design_variables,
+    num_operational,
+    split_specs,
+    eps,
+):
+    """Append operational lower and split-limit residuals."""
+
+    nopers = int(num_operational)
+    constraints[row:row + nopers] = -design_variables[:nopers]
+    derivatives["design_variables"][row:row + nopers, :nopers] = -np.eye(nopers)
+    row += nopers
+    split_index = 0
+
+    for npoint, nsplit, design_active, lam_max, active in (
+        normalized_operational_split_specs(split_specs)
+    ):
+        if not active:
+            continue
+
+        for _ in range(nsplit):
+            start = split_index * npoint
+            stop = start + npoint
+            operational = design_variables[start:stop]
+            design_values = np.ones(1) * lam_max
+
+            if design_active:
+                design_values = np.asarray([design_variables[nopers + split_index]])
+
+            values = operational_split_constraint_values(
+                operational,
+                npoint,
+                1,
+                design_active,
+                design_values,
+                lam_max,
+                eps,
+            )
+            constraints[row:row + npoint] = values["constraints"]
+            rows = np.arange(npoint)
+            derivatives["design_variables"][
+                row + rows, start + rows
+            ] = values["dconstraints_doperational_splits"]
+
+            if design_active:
+                derivatives["design_variables"][
+                    row + rows, nopers + split_index
+                ] = values["dconstraints_ddesign_splits"]
+
+            row += npoint
+            split_index += 1
+
+    return row
 
 
 def operational_split_constraint_values(

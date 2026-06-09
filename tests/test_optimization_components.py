@@ -14,6 +14,7 @@ from fast_openmdao import (
     ConcatenateMatrices,
     ConcatenateVectors,
     CruisePowerAvailableConstraint,
+    DesignOperationalConstraints,
     DesignSplitBounds,
     ElectricMotorPowerAvailable,
     FeasibleStep,
@@ -377,6 +378,32 @@ def test_optimized_split_schedules_match_fast_python_get_splits():
 
     for name, expected_values in zip(("ts", "tsps", "psps", "pses"), expected):
         assert np.allclose(problem.get_val("filled_%s" % name), expected_values)
+
+
+def test_design_operational_constraints_match_fast_python_con_size_opt():
+    """Check aggregate FAST ConSizeOpt inequality constraint parity."""
+
+    case = make_design_operational_constraints_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "constraints",
+        design_operational_constraints_component(),
+        promotes=["*"],
+    )
+    problem.setup()
+
+    for name, value in design_operational_constraints_inputs().items():
+        problem.set_val(name, value)
+
+    problem.run_model()
+    expected, equality, _, _ = con_size_opt(
+        case["design_variables"],
+        0,
+        case["aircraft"],
+    )
+
+    assert equality.size == 0
+    assert np.allclose(problem.get_val("constraints"), expected)
 
 
 def test_gradient_block_matches_fast_python():
@@ -931,6 +958,11 @@ def test_optimization_helpers_declare_analytic_partials():
             optimized_split_schedules_derivative_inputs(),
         ),
         (
+            "design_operational_constraints",
+            design_operational_constraints_component(),
+            design_operational_constraints_inputs(),
+        ),
+        (
             "gradient_block",
             GradientBlock(input_shape=(2,), num_design_vars=3),
             {
@@ -1292,6 +1324,117 @@ def optimized_split_schedules_derivative_component():
         segment_points=case["segment_points"],
         split_counts=case["split_counts"],
     )
+
+
+def make_design_operational_constraints_case():
+    """Return deterministic values for aggregate ConSizeOpt checks."""
+
+    design_variables = np.asarray([0.2, 0.3, 0.4, 0.5, 0.6])
+    aircraft = {
+        "Specs": {
+            "Propulsion": {
+                "PropArch": {
+                    "PSType": [0, 1],
+                    "ESType": [0],
+                },
+            },
+            "Power": {
+                "LamPSES": {
+                    "SLS": 0.8,
+                },
+            },
+        },
+        "Settings": {
+            "Analysis": {
+                "Type": 1,
+            },
+            "nargTS": 1,
+            "nargTSPS": 0,
+            "nargPSPS": 0,
+            "nargPSES": 1,
+        },
+        "PowerOpt": {
+            "Settings": {
+                "DesnTS": 1,
+                "OperTS": 1,
+                "DesnTSPS": 0,
+                "OperTSPS": 0,
+                "DesnPSPS": 0,
+                "OperPSPS": 0,
+                "DesnPSES": 0,
+                "OperPSES": 1,
+            },
+            "nopers": 4,
+            "ndesns": 1,
+            "ndvars": 5,
+            "npoint": 2,
+            "Constraints": {
+                "DesPem": [10, 20],
+                "DesPemAv": 100,
+                "DesPgt": [15, 25],
+                "DesPgtAv": [50, 100],
+                "DesEbatt": 30,
+                "DesEbattAv": 120,
+                "DesPavGT": 50,
+                "DesCrsPow": 45,
+            },
+        },
+    }
+    return {
+        "design_variables": design_variables,
+        "aircraft": aircraft,
+        "des_pem": np.asarray([10.0, 20.0]),
+        "des_pem_available": np.asarray([100.0, 100.0]),
+        "des_pgt": np.asarray([15.0, 25.0]),
+        "des_pgt_available": np.asarray([50.0, 100.0]),
+        "des_ebatt": np.asarray([30.0]),
+        "des_ebatt_available": np.asarray([120.0]),
+        "cruise_power": np.asarray([45.0]),
+        "gas_turbine_power_available": np.asarray([50.0]),
+    }
+
+
+def design_operational_constraints_component():
+    """Return aggregate ConSizeOpt component for parity and derivative checks."""
+
+    return DesignOperationalConstraints(
+        num_design_vars=5,
+        num_operational=4,
+        num_design=1,
+        pem_size=2,
+        pgt_size=2,
+        ebatt_size=1,
+        cruise_size=1,
+        use_pem=True,
+        use_pgt=True,
+        use_ebatt=True,
+        use_design_bounds=True,
+        use_operational_bounds=True,
+        use_cruise_power=True,
+        operational_split_specs=(
+            (2, 1, True, 1.0, True),
+            (2, 0, False, 1.0, False),
+            (2, 0, False, 1.0, False),
+            (2, 1, False, 0.8, True),
+        ),
+    )
+
+
+def design_operational_constraints_inputs():
+    """Return OpenMDAO inputs for aggregate ConSizeOpt checks."""
+
+    case = make_design_operational_constraints_case()
+    return {
+        "design_variables": case["design_variables"],
+        "des_pem": case["des_pem"],
+        "des_pem_available": case["des_pem_available"],
+        "des_pgt": case["des_pgt"],
+        "des_pgt_available": case["des_pgt_available"],
+        "des_ebatt": case["des_ebatt"],
+        "des_ebatt_available": case["des_ebatt_available"],
+        "cruise_power": case["cruise_power"],
+        "gas_turbine_power_available": case["gas_turbine_power_available"],
+    }
 
 
 def make_operational_simplex_tableau_case(objective_type, includes_takeoff):
