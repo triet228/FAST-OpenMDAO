@@ -61,6 +61,7 @@ from fast_openmdao.database import (
     TurbofanMacLiftDragEstimate,
     TurbopropCruiseLiftDragEstimate,
 )
+from fast_openmdao.data_struct import SpecPowerUnitConversion
 from fast_openmdao.engine import (
     AirIntegratedHeat,
     AirSpecificHeat,
@@ -356,6 +357,7 @@ __all__ = [
     "StaticTemperature",
     "StandardAtmosphere",
     "SquaredExponentialKernel",
+    "SpecPowerUnitConversion",
     "ThermalPerfectGamma",
     "TakeoffSegmentKinematics",
     "TotalPressure",

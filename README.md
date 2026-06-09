@@ -158,6 +158,8 @@ single-component derivatives.
 - Database-derived airframe weight, weight fractions, wing loading,
   fixed-branch airplane design-group percent margins, and turboprop default
   thrust loading with analytical partial derivatives.
+- Data-structure preprocessing power-to-weight and specific-energy unit
+  conversion helper with analytical partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
   design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
@@ -194,6 +196,7 @@ The public `fast_openmdao` package currently exports:
   `DatabasePropThrustLoading`, `DatabaseWeightFractions`,
   `MacLiftDragEstimate`, `TurbofanCruiseLiftDragEstimate`,
   `TurbofanMacLiftDragEstimate`, `TurbopropCruiseLiftDragEstimate`
+- Data structure: `SpecPowerUnitConversion`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
   `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FanFlowSplit`,
@@ -503,8 +506,10 @@ residual functions.
 54. Re-audit FAST-Python modules and classify remaining code as support,
     orchestration, adaptive loops, or driver setup where it is not a
     standalone differentiable equation kernel. Done.
-55. Add complex-step derivative checks where supported by FAST-Python internals.
-56. Build reusable groups for mission, propulsion, weights, and objective
+55. Convert SpecProcessing power-unit conversion helper with analytical partial
+    derivatives. Done.
+56. Add complex-step derivative checks where supported by FAST-Python internals.
+57. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.
