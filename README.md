@@ -11,7 +11,7 @@ groups, derivative checks, and optimization examples while keeping
 
 ## Current Status
 
-This repository has a working OpenMDAO bridge plus the first
+This repository has a working OpenMDAO bridge plus a growing set of
 derivative-native FAST equation components:
 
 - `FastPythonComponent`: an `om.ExplicitComponent` that wraps a `FAST-Python`
@@ -51,6 +51,30 @@ derivative-native FAST equation components:
 - `fast-openmdao-compact`: a small command-line optimization example using the
   real FAST-Python backend.
 
+## Converted Component Index
+
+The public `fast_openmdao` package currently exports:
+
+- Atmosphere: `Gravity`, `StandardAtmosphere`
+- Battery: `AvailableCellCapacity`, `BatteryCurrent`
+- Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
+  `FAR25EngineGradient`, `JetApproachConstraint`, `JetCruiseConstraint`,
+  `JetLandingFieldLengthConstraint`, `JetTakeoffFieldLengthConstraint`,
+  `OEIMultiplier`, `PsLossSigmoid`
+- Cost: `BatteryReplacementCost`
+- Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
+  `ChokedArea`, `FlowArea`, `JetAIntegratedHeat`, `MassFlowParameter`,
+  `StaticDensity`, `StaticPressure`, `StaticTemperature`, `TotalPressure`,
+  `TotalTemperature`
+- Mission: `FlightConditions`
+- Projection: `BatterySpecificEnergyProjection`,
+  `ElectricMotorSpecificPowerProjection`, `KPPProjection`
+- Propulsion: `EngineLapse`, `SafeComponentWeight`, `ThrustSinkEfficiency`,
+  `TransmitterFanEfficiency`
+- Units: `UnitConversion`
+- Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
+  `make_fast_optimization_problem`
+
 ## Repository Layout
 
 ```text
@@ -89,7 +113,7 @@ again to refresh editable installs.
 ## Validate
 
 ```powershell
-python -m pytest -q
+conda run -n FAST-OpenMDAO python -m pytest -q
 ```
 
 ## Minimal OpenMDAO Usage
@@ -182,6 +206,16 @@ Run the real FAST-Python compact electric optimization smoke example:
 fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40000
 ```
 
+Validate the OpenMDAO optimum against repeated FAST-Python point evaluations:
+
+```powershell
+fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40000 --validate-samples 7
+```
+
+The test suite also includes constraint-residual optimization checks that solve
+OpenMDAO zero-residual points and verify the optimized values against
+FAST-Python residual functions.
+
 ## Development Roadmap
 
 1. Add a minimal OpenMDAO component that wraps a `FAST-Python` case. Done.
@@ -199,8 +233,7 @@ fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40
 10. Convert scalar mission flight-condition primitive with analytical partial
    derivatives. Done.
 11. Convert scalar engine primitive equations and fitted specific-heat
-   equations with analytical partial
-   derivatives. Done.
+   equations with analytical partial derivatives. Done.
 12. Convert scalar propulsion primitive equations with analytical partial
    derivatives. Done.
 13. Convert scalar constraint primitive equations with analytical partial
