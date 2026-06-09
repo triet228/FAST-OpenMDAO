@@ -24,6 +24,7 @@ from fast_openmdao import (
     PropulsionHistoryMatrix,
     PropulsionHistoryMatrixSlice,
     PropulsionHistoryVectorSlice,
+    PropulsionScalarOrListRestore,
     PropulsionTwoDimensionalArray,
     PropulsionVector,
     SafeComponentWeight,
@@ -57,6 +58,7 @@ from fast_python.propulsion import (
     series_hybrid_architecture,
     as_2d,
     as_vector,
+    restore_scalar_or_list,
     transmitter_fan_efficiency,
     turboelectric_architecture,
     update_battery_energy,
@@ -769,6 +771,41 @@ def test_propulsion_shape_normalizers_match_fast_python():
     )
 
 
+def test_propulsion_scalar_or_list_restore_matches_fast_python():
+    """Check FAST propulsion scalar/list restoration parity."""
+
+    scalar_problem = om.Problem()
+    scalar_problem.model.add_subsystem(
+        "restore",
+        PropulsionScalarOrListRestore(value_size=1),
+        promotes=["*"],
+    )
+    scalar_problem.setup()
+    scalar_problem.set_val("values", [11.0])
+    scalar_problem.run_model()
+
+    assert np.isclose(
+        scalar_problem.get_val("restored_values")[0],
+        restore_scalar_or_list([11.0]),
+    )
+
+    vector = np.asarray([11.0, 3.0, 4.0])
+    vector_problem = om.Problem()
+    vector_problem.model.add_subsystem(
+        "restore",
+        PropulsionScalarOrListRestore(value_size=3),
+        promotes=["*"],
+    )
+    vector_problem.setup()
+    vector_problem.set_val("values", vector)
+    vector_problem.run_model()
+
+    assert np.allclose(
+        vector_problem.get_val("restored_values"),
+        restore_scalar_or_list(vector),
+    )
+
+
 def test_propulsion_history_vector_slice_matches_fast_python():
     """Check fixed propulsion history-vector slice assignment parity."""
 
@@ -1179,6 +1216,11 @@ def test_propulsion_primitives_declare_analytic_partials():
             "propulsion_history",
             PropulsionHistoryMatrix(input_shape=(3,), columns=1),
             {"values": np.asarray([10.0, 11.0, 12.0])},
+        ),
+        (
+            "propulsion_restore",
+            PropulsionScalarOrListRestore(value_size=3),
+            {"values": np.asarray([11.0, 3.0, 4.0])},
         ),
         (
             "propulsion_history_vector_slice",

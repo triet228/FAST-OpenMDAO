@@ -83,6 +83,8 @@ derivative-native FAST equation components:
   fixed-branch battery depletion cutoff with analytical partial derivatives.
 - Propulsion fixed-shape split, vector, two-dimensional array, and history
   matrix normalization helpers with analytical partial derivatives.
+- Propulsion fixed-shape scalar/list restoration helper with analytical partial
+  derivatives.
 - Propulsion fixed-slice history vector/matrix assignment helpers with
   analytical partial derivatives.
 - Propulsion conventional/electric, parallel-hybrid, series-hybrid,
@@ -216,7 +218,8 @@ The public `fast_openmdao` package currently exports:
   `PartialTurboelectricArchitecture`, `PowerAvailable`, `PowerFlow`,
   `PowerSupplementCheck`, `PropulsionHistoryMatrix`,
   `PropulsionHistoryMatrixSlice`, `PropulsionHistoryVectorSlice`,
-  `PropulsionTwoDimensionalArray`, `PropulsionVector`, `SafeComponentWeight`,
+  `PropulsionScalarOrListRestore`, `PropulsionTwoDimensionalArray`,
+  `PropulsionVector`, `SafeComponentWeight`,
   `SeriesHybridArchitecture`, `SimpleSourceTransmitterArchitecture`,
   `SplitValuesVector`, `ThrustSinkEfficiency`, `TransmitterFanEfficiency`,
   `TurboelectricArchitecture`, `TurbofanEngineWeightForSizing`,
