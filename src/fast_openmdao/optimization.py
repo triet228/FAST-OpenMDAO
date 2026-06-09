@@ -226,6 +226,48 @@ class OneBasedHistoryValues(om.ExplicitComponent):
         ]
 
 
+class HistoryArray(om.ExplicitComponent):
+    """Select FAST mission-history values using fixed zero-based indices.
+
+    Inputs:
+        history_values: Flattened mission-history vector.
+
+    Outputs:
+        selected_values: Values at the configured zero-based indices.
+
+    Assumptions:
+        Indices are fixed options from FAST simplex setup. The mapping is
+        linear, so the analytical derivative is a constant selection matrix.
+    """
+
+    def initialize(self):
+        self.options.declare("history_size", default=1)
+        self.options.declare("indices", default=(0,))
+
+    def setup(self):
+        history_size = self.options["history_size"]
+        selected_size = len(np.asarray(self.options["indices"]).reshape(-1))
+        self.add_input("history_values", val=np.zeros(history_size))
+        self.add_output("selected_values", val=np.zeros(selected_size))
+        self.declare_partials(of="selected_values", wrt="history_values")
+
+    def compute(self, inputs, outputs):
+        values = history_array_values(
+            inputs["history_values"],
+            self.options["indices"],
+        )
+        outputs["selected_values"] = values["selected_values"]
+
+    def compute_partials(self, inputs, partials):
+        values = history_array_values(
+            inputs["history_values"],
+            self.options["indices"],
+        )
+        partials["selected_values", "history_values"] = values[
+            "dselected_values_dhistory_values"
+        ]
+
+
 class SplitScheduleFill(om.ExplicitComponent):
     """Fill a FAST split schedule from a flattened optimized split vector.
 
@@ -924,6 +966,23 @@ def one_based_history_values_component_values(history_values, indices):
 
     history = np.asarray(history_values, dtype=float).reshape(-1)
     zero_based = np.asarray(indices, dtype=int).reshape(-1) - 1
+    selected = history[zero_based]
+    derivative = np.zeros((zero_based.size, history.size))
+
+    for row, column in enumerate(zero_based):
+        derivative[row, column] = 1.0
+
+    return {
+        "selected_values": selected,
+        "dselected_values_dhistory_values": derivative,
+    }
+
+
+def history_array_values(history_values, indices):
+    """Return zero-based fixed-index history values and selection Jacobian."""
+
+    history = np.asarray(history_values, dtype=float).reshape(-1)
+    zero_based = np.asarray(indices, dtype=int).reshape(-1)
     selected = history[zero_based]
     derivative = np.zeros((zero_based.size, history.size))
 

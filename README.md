@@ -96,7 +96,7 @@ derivative-native FAST equation components:
   residual helpers with analytical partial derivatives for active constraints.
 - Optimization operational split bound residual helper with analytical partial
   derivatives.
-- Optimization fixed-index mission-history selector with analytical partial
+- Optimization fixed-index mission-history selectors with analytical partial
   derivatives.
 - Optimization fixed-index split-schedule filling helper with analytical
   partial derivatives.
@@ -165,7 +165,7 @@ The public `fast_openmdao` package currently exports:
   `TurbopropAirframeWeight`, `TurbopropOEWIterationStep`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,
   `CruisePowerAvailableConstraint`, `DesignSplitBounds`, `FeasibleStep`,
-  `GaussianEliminationPivot`, `HessianUpdate`, `MeritFunction`,
+  `GaussianEliminationPivot`, `HessianUpdate`, `HistoryArray`, `MeritFunction`,
   `OneBasedHistoryValues`, `OperationalObjective`,
   `OperationalSplitConstraints`, `PowerManagementObjective`,
   `PowerLimitConstraints`, `SplitScheduleFill`

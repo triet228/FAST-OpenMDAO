@@ -17,6 +17,7 @@ from fast_openmdao import (
     FeasibleStep,
     GaussianEliminationPivot,
     HessianUpdate,
+    HistoryArray,
     MeritFunction,
     OneBasedHistoryValues,
     OperationalObjective,
@@ -32,6 +33,7 @@ from fast_python.optimization import (
     feas_step,
     fill_split_values,
     gauss_elim,
+    history_array,
     hess_upd,
     merit_function,
     one_based_history_values,
@@ -197,6 +199,27 @@ def test_one_based_history_values_match_fast_python():
     assert np.allclose(
         problem.get_val("selected_values"),
         one_based_history_values(history_values, indices),
+    )
+
+
+def test_history_array_matches_fast_python():
+    """Check zero-based mission-history extraction parity with FAST-Python."""
+
+    history_values = np.asarray([10.0, 20.0, 30.0, 40.0, 50.0])
+    indices = np.asarray([0, 2, 4])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "history",
+        HistoryArray(history_size=history_values.size, indices=indices),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("history_values", history_values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("selected_values"),
+        history_array(history_values, indices),
     )
 
 
@@ -509,6 +532,13 @@ def test_optimization_helpers_declare_analytic_partials():
         (
             "history",
             OneBasedHistoryValues(history_size=5, indices=np.asarray([1, 3, 5])),
+            {
+                "history_values": np.asarray([10.0, 20.0, 30.0, 40.0, 50.0]),
+            },
+        ),
+        (
+            "history_zero_based",
+            HistoryArray(history_size=5, indices=np.asarray([0, 2, 4])),
             {
                 "history_values": np.asarray([10.0, 20.0, 30.0, 40.0, 50.0]),
             },
