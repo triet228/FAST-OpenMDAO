@@ -36,6 +36,7 @@ from fast_openmdao.engine import (
 )
 from fast_openmdao.mission import (
     CruiseBreguetEfficiencyTriplet,
+    CruiseBreguetSourceEnergy,
     CruiseTimeTargetDistance,
     FlightConditions,
 )
@@ -74,6 +75,7 @@ __all__ = [
     "ConvergenceError",
     "CruiseDynamicPressure",
     "CruiseBreguetEfficiencyTriplet",
+    "CruiseBreguetSourceEnergy",
     "CruiseTimeTargetDistance",
     "ElectricMotorSpecificPowerProjection",
     "ElectricMotorPowerAvailable",

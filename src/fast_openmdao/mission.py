@@ -2,6 +2,7 @@
 
 """OpenMDAO components for FAST mission primitive equations."""
 
+import numpy as np
 import openmdao.api as om
 
 from fast_openmdao.atmosphere import GAS_CONSTANT_AIR, atmosphere_layer
@@ -211,6 +212,85 @@ class CruiseBreguetEfficiencyTriplet(om.ExplicitComponent):
                 ]
 
 
+class CruiseBreguetSourceEnergy(om.ExplicitComponent):
+    """Map aggregate Breguet fuel and battery energy onto source columns.
+
+    Inputs:
+        initial_source_energy: Source energy at the beginning row.
+        initial_source_energy_left: Remaining source energy at the beginning
+            row.
+        fuel_energy: Aggregate fuel energy history.
+        battery_energy: Aggregate battery energy history.
+
+    Outputs:
+        source_energy: Per-source used energy matrix.
+        source_energy_left: Per-source remaining energy matrix.
+
+    Assumptions:
+        ``src_type`` is a fixed FAST source-type vector where 1 marks fuel
+        sources and 0 marks battery sources. Aggregate energy deltas are shared
+        evenly across matching source columns, matching FAST-Python
+        ``cruise_breguet_source_energy``.
+    """
+
+    def initialize(self):
+        self.options.declare("src_type", default=(1.0, 0.0))
+        self.options.declare("npoint", default=3)
+
+    def setup(self):
+        src_type = np.asarray(self.options["src_type"], dtype=float).reshape(-1)
+        nsrc = src_type.size
+        npoint = self.options["npoint"]
+        self.add_input("initial_source_energy", val=np.zeros(nsrc), units="J")
+        self.add_input("initial_source_energy_left", val=np.ones(nsrc), units="J")
+        self.add_input("fuel_energy", val=np.zeros(npoint), units="J")
+        self.add_input("battery_energy", val=np.zeros(npoint), units="J")
+        self.add_output(
+            "source_energy",
+            val=np.zeros((npoint, nsrc)),
+            units="J",
+        )
+        self.add_output(
+            "source_energy_left",
+            val=np.zeros((npoint, nsrc)),
+            units="J",
+        )
+        self.declare_partials(of="source_energy", wrt="*")
+        self.declare_partials(of="source_energy_left", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = cruise_breguet_source_energy_values(
+            self.options["src_type"],
+            self.options["npoint"],
+            inputs["initial_source_energy"],
+            inputs["initial_source_energy_left"],
+            inputs["fuel_energy"],
+            inputs["battery_energy"],
+        )
+        outputs["source_energy"] = values["source_energy"]
+        outputs["source_energy_left"] = values["source_energy_left"]
+
+    def compute_partials(self, inputs, partials):
+        values = cruise_breguet_source_energy_values(
+            self.options["src_type"],
+            self.options["npoint"],
+            inputs["initial_source_energy"],
+            inputs["initial_source_energy_left"],
+            inputs["fuel_energy"],
+            inputs["battery_energy"],
+        )
+        for output_name in ("source_energy", "source_energy_left"):
+            for input_name in (
+                "initial_source_energy",
+                "initial_source_energy_left",
+                "fuel_energy",
+                "battery_energy",
+            ):
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
 def flight_condition_values(altitude, disa, velocity_type, velocity):
     """Return FAST flight-condition values and analytical derivatives."""
 
@@ -262,6 +342,131 @@ def flight_condition_values(altitude, disa, velocity_type, velocity):
         dsound_speed_ddisa,
     )
     return values
+
+
+def cruise_breguet_source_energy_values(
+    src_type,
+    npoint,
+    initial_source_energy,
+    initial_source_energy_left,
+    fuel_energy,
+    battery_energy,
+):
+    """Return Breguet source-energy matrices and exact derivative blocks."""
+
+    src_type = np.asarray(src_type, dtype=float).reshape(-1)
+    initial_source_energy = np.asarray(initial_source_energy, dtype=float).reshape(-1)
+    initial_source_energy_left = np.asarray(
+        initial_source_energy_left,
+        dtype=float,
+    ).reshape(-1)
+    fuel_energy = np.asarray(fuel_energy, dtype=float).reshape(-1)
+    battery_energy = np.asarray(battery_energy, dtype=float).reshape(-1)
+    nsrc = src_type.size
+    source_energy = np.tile(initial_source_energy, (npoint, 1))
+    source_energy_left = np.tile(initial_source_energy_left, (npoint, 1))
+
+    apply_breguet_source_delta(
+        source_energy,
+        source_energy_left,
+        np.where(src_type == 1)[0],
+        fuel_energy - fuel_energy[0],
+    )
+    apply_breguet_source_delta(
+        source_energy,
+        source_energy_left,
+        np.where(src_type == 0)[0],
+        battery_energy - battery_energy[0],
+    )
+
+    values = {
+        "source_energy": source_energy,
+        "source_energy_left": source_energy_left,
+    }
+    values.update(
+        cruise_breguet_source_energy_partials(
+            src_type,
+            npoint,
+            nsrc,
+        )
+    )
+    return values
+
+
+def apply_breguet_source_delta(source_energy, source_energy_left, columns, delta):
+    """Apply one aggregate energy delta to selected source columns."""
+
+    if len(columns) == 0:
+        return
+
+    share = delta / len(columns)
+
+    for column in columns:
+        source_energy[:, column] = source_energy[0, column] + share
+        source_energy_left[:, column] = source_energy_left[0, column] - share
+
+
+def cruise_breguet_source_energy_partials(src_type, npoint, nsrc):
+    """Return derivative matrices for Breguet source-energy allocation."""
+
+    source_size = npoint * nsrc
+    energy_initial = np.zeros((source_size, nsrc))
+    energy_left_initial = np.zeros((source_size, nsrc))
+    left_energy_initial = np.zeros((source_size, nsrc))
+    left_energy_left_initial = np.zeros((source_size, nsrc))
+    energy_fuel = np.zeros((source_size, npoint))
+    energy_battery = np.zeros((source_size, npoint))
+    left_fuel = np.zeros((source_size, npoint))
+    left_battery = np.zeros((source_size, npoint))
+
+    for row in range(npoint):
+        for column in range(nsrc):
+            output_index = row * nsrc + column
+            energy_initial[output_index, column] = 1.0
+            left_energy_left_initial[output_index, column] = 1.0
+
+    add_breguet_source_delta_partials(
+        energy_fuel,
+        left_fuel,
+        np.where(src_type == 1)[0],
+        npoint,
+        nsrc,
+    )
+    add_breguet_source_delta_partials(
+        energy_battery,
+        left_battery,
+        np.where(src_type == 0)[0],
+        npoint,
+        nsrc,
+    )
+
+    return {
+        "dsource_energy_dinitial_source_energy": energy_initial,
+        "dsource_energy_dinitial_source_energy_left": energy_left_initial,
+        "dsource_energy_dfuel_energy": energy_fuel,
+        "dsource_energy_dbattery_energy": energy_battery,
+        "dsource_energy_left_dinitial_source_energy": left_energy_initial,
+        "dsource_energy_left_dinitial_source_energy_left": left_energy_left_initial,
+        "dsource_energy_left_dfuel_energy": left_fuel,
+        "dsource_energy_left_dbattery_energy": left_battery,
+    }
+
+
+def add_breguet_source_delta_partials(energy_partials, left_partials, columns, npoint, nsrc):
+    """Add aggregate-delta derivative entries for selected source columns."""
+
+    if len(columns) == 0:
+        return
+
+    scale = 1.0 / len(columns)
+
+    for row in range(npoint):
+        for column in columns:
+            output_index = row * nsrc + column
+            energy_partials[output_index, row] += scale
+            energy_partials[output_index, 0] -= scale
+            left_partials[output_index, row] -= scale
+            left_partials[output_index, 0] += scale
 
 
 def cruise_breguet_efficiency_values(
