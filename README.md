@@ -29,6 +29,9 @@ derivative-native FAST equation components:
   derivatives.
 - Propulsion scalar primitives for engine lapse, safe component weight, and
   efficiency selection with analytical partial derivatives.
+- Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
+  engine-gradient selection, and cruise dynamic pressure with analytical
+  partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
   design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
@@ -191,8 +194,10 @@ fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40
    derivatives. Done.
 12. Convert scalar propulsion primitive equations with analytical partial
    derivatives. Done.
-13. Add complex-step derivative checks where supported by FAST-Python internals.
-14. Build reusable groups for mission, propulsion, weights, and objective
+13. Convert scalar constraint primitive equations with analytical partial
+   derivatives. Done.
+14. Add complex-step derivative checks where supported by FAST-Python internals.
+15. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

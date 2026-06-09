@@ -4,6 +4,12 @@
 
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.components import FastPythonComponent
+from fast_openmdao.constraint import (
+    CruiseDynamicPressure,
+    FAR25EngineGradient,
+    OEIMultiplier,
+    PsLossSigmoid,
+)
 from fast_openmdao.cost import BatteryReplacementCost
 from fast_openmdao.engine import (
     ChokedArea,
@@ -36,14 +42,18 @@ __all__ = [
     "BatteryReplacementCost",
     "BatterySpecificEnergyProjection",
     "ChokedArea",
+    "CruiseDynamicPressure",
     "ElectricMotorSpecificPowerProjection",
     "EngineLapse",
+    "FAR25EngineGradient",
     "FastPythonComponent",
     "FlightConditions",
     "FlowArea",
     "Gravity",
     "KPPProjection",
     "MassFlowParameter",
+    "OEIMultiplier",
+    "PsLossSigmoid",
     "SafeComponentWeight",
     "StaticDensity",
     "StaticPressure",
