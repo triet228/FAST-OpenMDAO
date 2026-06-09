@@ -27,6 +27,7 @@ from fast_openmdao import (
     OperationalObjective,
     OperationalSimplexTableau,
     OperationalSplitConstraints,
+    OptimizedSplitSchedules,
     PowerManagementObjective,
     PowerLimitConstraints,
     SanitizedArray,
@@ -47,6 +48,7 @@ from fast_python.optimization import (
     fill_split_values,
     gauss_elim,
     as_gradient_block,
+    get_splits,
     gradient_matrix,
     history_array,
     hess_upd,
@@ -336,6 +338,45 @@ def test_split_schedule_fill_matches_fast_python():
     )
 
     assert np.allclose(problem.get_val("filled_splits"), expected)
+
+
+def test_optimized_split_schedules_match_fast_python_get_splits():
+    """Check aggregate FAST get_splits schedule assembly parity."""
+
+    case = make_optimized_split_schedules_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "schedules",
+        OptimizedSplitSchedules(
+            num_rows=case["target_ts"].shape[0],
+            num_points=case["num_points"],
+            optimized_size=case["optimized_splits"].size,
+            lam_index=case["lam_index"],
+            segment_points=case["segment_points"],
+            split_counts=case["split_counts"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+
+    for name in ("ts", "tsps", "psps", "pses"):
+        problem.set_val("target_%s" % name, case["target_%s" % name])
+
+    problem.set_val("optimized_splits", case["optimized_splits"])
+    problem.run_model()
+
+    expected = get_splits(
+        case["aircraft"],
+        case["segment_begin"],
+        case["segment_end"],
+        case["target_ts"],
+        case["target_tsps"],
+        case["target_psps"],
+        case["target_pses"],
+    )
+
+    for name, expected_values in zip(("ts", "tsps", "psps", "pses"), expected):
+        assert np.allclose(problem.get_val("filled_%s" % name), expected_values)
 
 
 def test_gradient_block_matches_fast_python():
@@ -885,6 +926,11 @@ def test_optimization_helpers_declare_analytic_partials():
             },
         ),
         (
+            "optimized_schedules",
+            optimized_split_schedules_derivative_component(),
+            optimized_split_schedules_derivative_inputs(),
+        ),
+        (
             "gradient_block",
             GradientBlock(input_shape=(2,), num_design_vars=3),
             {
@@ -1163,6 +1209,89 @@ def make_split_schedule_fill_case():
         "num_points": 4,
         "offset": 1,
     }
+
+
+def make_optimized_split_schedules_case():
+    """Return deterministic values for aggregate FAST get_splits checks."""
+
+    split_counts = (1, 2, 1, 2)
+    num_points = 4
+    optimized = np.linspace(0.01, 0.24, sum(split_counts) * num_points)
+    lam_index = np.asarray([1, 2, 3, 4])
+    segment_points = np.asarray([0, 2, 3])
+    case = {
+        "segment_begin": 2,
+        "segment_end": 5,
+        "num_points": num_points,
+        "split_counts": split_counts,
+        "optimized_splits": optimized,
+        "lam_index": lam_index,
+        "segment_points": segment_points,
+        "target_ts": np.asarray([[0.11], [0.21], [0.31]]),
+        "target_tsps": np.asarray(
+            [
+                [0.12, 0.13],
+                [0.22, 0.23],
+                [0.32, 0.33],
+            ]
+        ),
+        "target_psps": np.asarray([[0.14], [0.24], [0.34]]),
+        "target_pses": np.asarray(
+            [
+                [0.15, 0.16],
+                [0.25, 0.26],
+                [0.35, 0.36],
+            ]
+        ),
+    }
+    case["aircraft"] = {
+        "Settings": {
+            "nargTS": split_counts[0],
+            "nargTSPS": split_counts[1],
+            "nargPSPS": split_counts[2],
+            "nargPSES": split_counts[3],
+        },
+        "PowerOpt": {
+            "SegIndex": np.asarray([2, 7, 4, 3]),
+            "LamIndex": lam_index,
+            "Splits": optimized,
+            "npoint": num_points,
+            "Settings": {
+                "OperTS": 1,
+                "OperTSPS": 1,
+                "OperPSPS": 1,
+                "OperPSES": 1,
+            },
+        },
+    }
+    return case
+
+
+def optimized_split_schedules_derivative_inputs():
+    """Return OpenMDAO inputs for optimized split schedule derivative checks."""
+
+    case = make_optimized_split_schedules_case()
+    return {
+        "target_ts": case["target_ts"],
+        "target_tsps": case["target_tsps"],
+        "target_psps": case["target_psps"],
+        "target_pses": case["target_pses"],
+        "optimized_splits": case["optimized_splits"],
+    }
+
+
+def optimized_split_schedules_derivative_component():
+    """Return aggregate split-schedule component for derivative checks."""
+
+    case = make_optimized_split_schedules_case()
+    return OptimizedSplitSchedules(
+        num_rows=case["target_ts"].shape[0],
+        num_points=case["num_points"],
+        optimized_size=case["optimized_splits"].size,
+        lam_index=case["lam_index"],
+        segment_points=case["segment_points"],
+        split_counts=case["split_counts"],
+    )
 
 
 def make_operational_simplex_tableau_case(objective_type, includes_takeoff):

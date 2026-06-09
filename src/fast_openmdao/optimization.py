@@ -476,6 +476,73 @@ class SplitScheduleFill(om.ExplicitComponent):
         ]
 
 
+class OptimizedSplitSchedules(om.ExplicitComponent):
+    """Assemble FAST operational split schedules for one mission segment."""
+
+    def initialize(self):
+        self.options.declare("num_rows", default=1)
+        self.options.declare("num_points", default=1)
+        self.options.declare("optimized_size", default=1)
+        self.options.declare("lam_index", default=(1,))
+        self.options.declare("segment_points", default=(0,))
+        self.options.declare("split_counts", default=(1, 1, 1, 1))
+
+    def setup(self):
+        num_rows = self.options["num_rows"]
+        optimized_size = self.options["optimized_size"]
+        counts = optimized_split_counts(self.options["split_counts"])
+        self.add_input("optimized_splits", val=np.zeros(optimized_size))
+
+        for name, count in zip(optimized_split_schedule_names(), counts):
+            shape = (num_rows, count)
+            size = int(np.prod(shape))
+            self.add_input("target_%s" % name, val=np.zeros(shape))
+            self.add_output("filled_%s" % name, val=np.zeros(shape))
+            self.declare_partials(
+                of="filled_%s" % name,
+                wrt="target_%s" % name,
+                rows=np.arange(size),
+                cols=np.arange(size),
+            )
+            self.declare_partials(
+                of="filled_%s" % name,
+                wrt="optimized_splits",
+                rows=np.repeat(np.arange(size), optimized_size),
+                cols=np.tile(np.arange(optimized_size), size),
+            )
+
+    def compute(self, inputs, outputs):
+        values = optimized_split_schedule_values(
+            inputs,
+            self.options["lam_index"],
+            self.options["segment_points"],
+            self.options["num_points"],
+            self.options["split_counts"],
+        )
+
+        for name in optimized_split_schedule_names():
+            outputs["filled_%s" % name] = values["filled_%s" % name]
+
+    def compute_partials(self, inputs, partials):
+        values = optimized_split_schedule_values(
+            inputs,
+            self.options["lam_index"],
+            self.options["segment_points"],
+            self.options["num_points"],
+            self.options["split_counts"],
+        )
+
+        for name in optimized_split_schedule_names():
+            output_name = "filled_%s" % name
+            target_name = "target_%s" % name
+            partials[output_name, target_name] = np.diag(values[
+                "d%s_d%s" % (output_name, target_name)
+            ])
+            partials[output_name, "optimized_splits"] = values[
+                "d%s_doptimized_splits" % output_name
+            ].reshape(-1)
+
+
 class GradientBlock(om.ExplicitComponent):
     """Format FAST finite-difference gradient values as a gradient block.
 
@@ -1987,6 +2054,96 @@ def split_schedule_fill_values(
         "dfilled_splits_dtarget_splits": dtarget,
         "dfilled_splits_doptimized_splits": doptimized,
     }
+
+
+def optimized_split_schedule_names():
+    """Return FAST get_splits split-family names."""
+
+    return ("ts", "tsps", "psps", "pses")
+
+
+def optimized_split_schedule_input_names():
+    """Return OptimizedSplitSchedules input names."""
+
+    target_names = tuple(
+        "target_%s" % name for name in optimized_split_schedule_names()
+    )
+    return target_names + ("optimized_splits",)
+
+
+def optimized_split_schedule_output_names():
+    """Return OptimizedSplitSchedules output names."""
+
+    return tuple("filled_%s" % name for name in optimized_split_schedule_names())
+
+
+def optimized_split_counts(split_counts):
+    """Return four fixed FAST split family counts as positive integers."""
+
+    counts = tuple(int(value) for value in np.asarray(split_counts).reshape(-1))
+
+    if len(counts) != 4:
+        raise ValueError("OptimizedSplitSchedules requires four split counts.")
+
+    if any(count < 1 for count in counts):
+        raise ValueError("OptimizedSplitSchedules split counts must be positive.")
+
+    return counts
+
+
+def optimized_split_schedule_values(
+    inputs,
+    lam_index,
+    segment_points,
+    num_points,
+    split_counts,
+):
+    """Return FAST get_splits schedules and dense constant Jacobians."""
+
+    names = optimized_split_schedule_names()
+    input_names = optimized_split_schedule_input_names()
+    output_names = optimized_split_schedule_output_names()
+    counts = optimized_split_counts(split_counts)
+    optimized = np.asarray(inputs["optimized_splits"], dtype=float).reshape(-1)
+    result = {}
+    output_sizes = {}
+    input_sizes = {"optimized_splits": optimized.size}
+    offset = 0
+
+    for name, count in zip(names, counts):
+        target_name = "target_%s" % name
+        output_name = "filled_%s" % name
+        target = np.asarray(inputs[target_name], dtype=float)
+        filled = split_schedule_fill_values(
+            target,
+            optimized,
+            lam_index,
+            segment_points,
+            num_points,
+            count,
+            offset,
+        )
+        result[output_name] = filled["filled_splits"]
+        result["d%s_d%s" % (output_name, target_name)] = filled[
+            "dfilled_splits_dtarget_splits"
+        ]
+        result["d%s_doptimized_splits" % output_name] = filled[
+            "dfilled_splits_doptimized_splits"
+        ]
+        input_sizes[target_name] = target.size
+        output_sizes[output_name] = target.size
+        offset += count
+
+    for output_name in output_names:
+        for input_name in input_names:
+            key = "d%s_d%s" % (output_name, input_name)
+
+            if key not in result:
+                result[key] = np.zeros(
+                    (output_sizes[output_name], input_sizes[input_name])
+                )
+
+    return result
 
 
 def gradient_block_output_rows(input_shape, num_design_vars):
