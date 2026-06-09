@@ -22,6 +22,7 @@ from fast_openmdao import (
     LocalReynolds,
     MassFlowParameter,
     OffDesignNozzleMach,
+    SimpleOffDesignTurbofan,
     StaticDensity,
     StaticPressure,
     StaticTemperature,
@@ -45,6 +46,7 @@ from fast_python.engine import (
     ps_pt,
     pt_ps,
     rhos_rhot,
+    simple_off_design,
     ts_tt,
     tt_ts,
 )
@@ -285,6 +287,42 @@ def test_engine_local_efficiency_and_reynolds_match_fast_python():
     )
 
 
+def test_simple_off_design_turbofan_matches_fast_python():
+    """Check BADA-style simple off-design turbofan parity."""
+
+    aircraft = make_simple_off_design_aircraft()
+    off_params = {
+        "FlightCon": {
+            "Alt": 1000.0,
+            "Mach": 0.2,
+        },
+        "Thrust": 10000.0,
+    }
+    expected = simple_off_design(aircraft, off_params, 1000.0, 1, 0)
+    problem = om.Problem()
+    problem.model.add_subsystem("off_design", SimpleOffDesignTurbofan(), promotes=["*"])
+    problem.setup()
+    problem.set_val("altitude", 1000.0, units="m")
+    problem.set_val("mach", 0.2)
+    problem.set_val("required_thrust", 10000.0, units="N")
+    problem.set_val("electric_load", 1000.0, units="W")
+    problem.set_val("thrust_available", 20000.0, units="N")
+    problem.set_val("sea_level_static_thrust", 20000.0, units="N")
+    problem.set_val("thrust_supplement", 0.0, units="N")
+    problem.set_val("fuel_coeff_3", 0.0)
+    problem.set_val("fuel_coeff_2", 0.0)
+    problem.set_val("fuel_coeff_1", 2.0)
+    problem.set_val("fuel_coeff_altitude", 0.0)
+    problem.set_val("he_coefficient", 1.0)
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("fuel_flow")[0], expected["Fuel"])
+    assert np.isclose(problem.get_val("thrust", units="N")[0], expected["Thrust"])
+    assert np.isclose(problem.get_val("tsfc")[0], expected["TSFC"])
+    assert np.isclose(problem.get_val("tsfc_imperial")[0], expected["TSFC_Imperial"])
+    assert np.isclose(problem.get_val("he_coeff")[0], expected["C"])
+
+
 def test_engine_primitives_declare_analytic_partials():
     """Check engine primitive derivatives against finite difference."""
 
@@ -322,6 +360,24 @@ def test_engine_primitives_declare_analytic_partials():
                 "gamma": 1.36,
             },
         ),
+        (
+            "simple_off_design",
+            SimpleOffDesignTurbofan(),
+            {
+                "altitude": 1000.0,
+                "mach": 0.2,
+                "required_thrust": 10000.0,
+                "electric_load": 1000.0,
+                "thrust_available": 20000.0,
+                "sea_level_static_thrust": 20000.0,
+                "thrust_supplement": 0.0,
+                "fuel_coeff_3": 0.01,
+                "fuel_coeff_2": 0.1,
+                "fuel_coeff_1": 2.0,
+                "fuel_coeff_altitude": 1.0e-7,
+                "he_coefficient": 1.0,
+            },
+        ),
     ]
 
     for name, component, values in cases:
@@ -343,3 +399,37 @@ def test_engine_primitives_declare_analytic_partials():
         for partial_data in partials[name].values():
             tolerance = 1.0e-3 if name == "nozzle" else 1.0e-4
             assert partial_data["abs error"].forward < tolerance
+
+
+def make_simple_off_design_aircraft():
+    """Return a compact FAST-Python aircraft for simple off-design tests."""
+
+    return {
+        "Specs": {
+            "Propulsion": {
+                "SLSThrust": [20000.0],
+                "ThrustSupp": [0.0],
+                "PropArch": {
+                    "SrcType": [1],
+                },
+                "Engine": {
+                    "Cff3": 0.0,
+                    "Cff2": 0.0,
+                    "Cff1": 2.0,
+                    "Cffch": 0.0,
+                    "HEcoeff": 1.0,
+                },
+            }
+        },
+        "Mission": {
+            "History": {
+                "SI": {
+                    "Power": {
+                        "Tav": [
+                            [0.0, 20000.0],
+                        ],
+                    }
+                }
+            }
+        },
+    }

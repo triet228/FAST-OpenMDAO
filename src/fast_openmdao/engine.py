@@ -6,8 +6,11 @@ import math
 
 import openmdao.api as om
 
+from fast_openmdao.atmosphere import atmosphere_layer
+
 
 GAS_CONSTANT_AIR = 287.0
+TSFC_SI_TO_IMPERIAL = 3600.0 / 0.224808943099711 * 2.204622621848776
 
 
 class TotalPressure(om.ExplicitComponent):
@@ -517,6 +520,241 @@ class LocalReynolds(om.ExplicitComponent):
         ]
         partials["local_reynolds", "mach"] = values["dreynolds_dmach"]
         partials["local_reynolds", "gamma"] = values["dreynolds_dgamma"]
+
+
+class SimpleOffDesignTurbofan(om.ExplicitComponent):
+    """Evaluate FAST's BADA-style simple off-design turbofan fuel model."""
+
+    def setup(self):
+        self.add_input("altitude", val=1000.0, units="m")
+        self.add_input("mach", val=0.2)
+        self.add_input("required_thrust", val=10000.0, units="N")
+        self.add_input("electric_load", val=1000.0, units="W")
+        self.add_input("thrust_available", val=20000.0, units="N")
+        self.add_input("sea_level_static_thrust", val=20000.0, units="N")
+        self.add_input("thrust_supplement", val=0.0, units="N")
+        self.add_input("fuel_coeff_3", val=0.0)
+        self.add_input("fuel_coeff_2", val=0.0)
+        self.add_input("fuel_coeff_1", val=2.0)
+        self.add_input("fuel_coeff_altitude", val=0.0)
+        self.add_input("he_coefficient", val=1.0)
+        self.add_output("fuel_flow", val=1.0)
+        self.add_output("thrust", val=10000.0, units="N")
+        self.add_output("tsfc", val=1.0e-5)
+        self.add_output("tsfc_imperial", val=0.1)
+        self.add_output("he_coeff", val=1.0)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = simple_off_design_turbofan_values(
+            inputs["altitude"][0],
+            inputs["mach"][0],
+            inputs["required_thrust"][0],
+            inputs["electric_load"][0],
+            inputs["thrust_available"][0],
+            inputs["sea_level_static_thrust"][0],
+            inputs["thrust_supplement"][0],
+            inputs["fuel_coeff_3"][0],
+            inputs["fuel_coeff_2"][0],
+            inputs["fuel_coeff_1"][0],
+            inputs["fuel_coeff_altitude"][0],
+            inputs["he_coefficient"][0],
+        )
+        outputs["fuel_flow"] = values["fuel_flow"]
+        outputs["thrust"] = values["thrust"]
+        outputs["tsfc"] = values["tsfc"]
+        outputs["tsfc_imperial"] = values["tsfc_imperial"]
+        outputs["he_coeff"] = values["he_coeff"]
+
+    def compute_partials(self, inputs, partials):
+        values = simple_off_design_turbofan_values(
+            inputs["altitude"][0],
+            inputs["mach"][0],
+            inputs["required_thrust"][0],
+            inputs["electric_load"][0],
+            inputs["thrust_available"][0],
+            inputs["sea_level_static_thrust"][0],
+            inputs["thrust_supplement"][0],
+            inputs["fuel_coeff_3"][0],
+            inputs["fuel_coeff_2"][0],
+            inputs["fuel_coeff_1"][0],
+            inputs["fuel_coeff_altitude"][0],
+            inputs["he_coefficient"][0],
+        )
+
+        for output in (
+            "fuel_flow",
+            "thrust",
+            "tsfc",
+            "tsfc_imperial",
+            "he_coeff",
+        ):
+            for variable in simple_off_design_input_names():
+                partials[output, variable] = values[
+                    "d%s_d%s" % (output, variable)
+                ]
+
+
+def simple_off_design_input_names():
+    """Return scalar input names for SimpleOffDesignTurbofan derivatives."""
+
+    return (
+        "altitude",
+        "mach",
+        "required_thrust",
+        "electric_load",
+        "thrust_available",
+        "sea_level_static_thrust",
+        "thrust_supplement",
+        "fuel_coeff_3",
+        "fuel_coeff_2",
+        "fuel_coeff_1",
+        "fuel_coeff_altitude",
+        "he_coefficient",
+    )
+
+
+def simple_off_design_turbofan_values(
+    altitude,
+    mach,
+    required_thrust,
+    electric_load,
+    thrust_available,
+    sea_level_static_thrust,
+    thrust_supplement,
+    fuel_coeff_3,
+    fuel_coeff_2,
+    fuel_coeff_1,
+    fuel_coeff_altitude,
+    he_coefficient,
+):
+    """Return FAST simple off-design turbofan outputs and derivatives."""
+
+    derivatives = {}
+
+    for output in (
+        "fuel_flow",
+        "thrust",
+        "tsfc",
+        "tsfc_imperial",
+        "he_coeff",
+    ):
+        for variable in simple_off_design_input_names():
+            derivatives["d%s_d%s" % (output, variable)] = 0.0
+
+    atmosphere = atmosphere_layer(altitude)
+    temperature = atmosphere["temperature"]
+    dtemperature_daltitude = atmosphere["dtemperature_daltitude"]
+    speed_factor = math.sqrt(1.4 * GAS_CONSTANT_AIR * temperature)
+    tas = mach * speed_factor
+
+    if math.isfinite(tas) and tas != 0.0:
+        thrust_preclip = required_thrust - electric_load / tas
+        dtas_dmach = speed_factor
+        dtas_daltitude = (
+            mach
+            * 0.5
+            * math.sqrt(1.4 * GAS_CONSTANT_AIR)
+            / math.sqrt(temperature)
+            * dtemperature_daltitude
+        )
+        dthrust_daltitude = electric_load * dtas_daltitude / tas ** 2
+        dthrust_dmach = electric_load * dtas_dmach / tas ** 2
+        dthrust_drequired = 1.0
+        dthrust_delectric = -1.0 / tas
+    else:
+        thrust_preclip = required_thrust
+        dthrust_daltitude = 0.0
+        dthrust_dmach = 0.0
+        dthrust_drequired = 1.0
+        dthrust_delectric = 0.0
+
+    if thrust_preclip < -1.0e-6:
+        thrust = 0.0
+        thrust_derivatives = {}
+    elif thrust_preclip > thrust_available:
+        thrust = thrust_available
+        thrust_derivatives = {"thrust_available": 1.0}
+    else:
+        thrust = thrust_preclip
+        thrust_derivatives = {
+            "altitude": dthrust_daltitude,
+            "mach": dthrust_dmach,
+            "required_thrust": dthrust_drequired,
+            "electric_load": dthrust_delectric,
+        }
+
+    supplement = max(thrust_supplement, 0.0)
+    sls_thrust_conv = (sea_level_static_thrust + supplement) / 1000.0
+    thrust_kn = thrust / 1000.0
+    denominator = he_coefficient * sls_thrust_conv
+    thrust_frac = thrust_kn / denominator
+    fuel_flow = (
+        fuel_coeff_3 * thrust_frac ** 3
+        + fuel_coeff_2 * thrust_frac ** 2
+        + fuel_coeff_1 * thrust_frac
+        + fuel_coeff_altitude * thrust_kn * altitude
+    )
+
+    if thrust_kn <= 0.0:
+        tsfc = 0.0
+    else:
+        tsfc = fuel_flow / thrust
+
+    derivatives["dhe_coeff_dhe_coefficient"] = 1.0
+    dfuel_dfrac = (
+        3.0 * fuel_coeff_3 * thrust_frac ** 2
+        + 2.0 * fuel_coeff_2 * thrust_frac
+        + fuel_coeff_1
+    )
+    dfuel_dthrust_kn = dfuel_dfrac / denominator + fuel_coeff_altitude * altitude
+    dfuel_ddenominator = -dfuel_dfrac * thrust_frac / denominator
+
+    for variable, derivative in thrust_derivatives.items():
+        derivatives["dthrust_d%s" % variable] = derivative
+        derivatives["dfuel_flow_d%s" % variable] += (
+            dfuel_dthrust_kn * derivative / 1000.0
+        )
+
+    derivatives["dfuel_flow_daltitude"] += fuel_coeff_altitude * thrust_kn
+    derivatives["dfuel_flow_dfuel_coeff_3"] = thrust_frac ** 3
+    derivatives["dfuel_flow_dfuel_coeff_2"] = thrust_frac ** 2
+    derivatives["dfuel_flow_dfuel_coeff_1"] = thrust_frac
+    derivatives["dfuel_flow_dfuel_coeff_altitude"] = thrust_kn * altitude
+    derivatives["dfuel_flow_dhe_coefficient"] = (
+        dfuel_ddenominator * sls_thrust_conv
+    )
+    derivatives["dfuel_flow_dsea_level_static_thrust"] = (
+        dfuel_ddenominator * he_coefficient / 1000.0
+    )
+
+    if thrust_supplement >= 0.0:
+        derivatives["dfuel_flow_dthrust_supplement"] = (
+            dfuel_ddenominator * he_coefficient / 1000.0
+        )
+
+    if thrust_kn > 0.0:
+        for variable in simple_off_design_input_names():
+            dfuel = derivatives["dfuel_flow_d%s" % variable]
+            dthrust = derivatives["dthrust_d%s" % variable]
+            derivatives["dtsfc_d%s" % variable] = (
+                dfuel * thrust - fuel_flow * dthrust
+            ) / thrust ** 2
+            derivatives["dtsfc_imperial_d%s" % variable] = (
+                TSFC_SI_TO_IMPERIAL * derivatives["dtsfc_d%s" % variable]
+            )
+
+    derivatives.update(
+        {
+            "fuel_flow": fuel_flow,
+            "thrust": thrust,
+            "tsfc": tsfc,
+            "tsfc_imperial": tsfc * TSFC_SI_TO_IMPERIAL,
+            "he_coeff": he_coefficient,
+        }
+    )
+
+    return derivatives
 
 
 def isentropic_q(mach, gamma):
