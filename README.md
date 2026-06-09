@@ -71,6 +71,7 @@ The public `fast_openmdao` package currently exports:
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `EngineLapse`, `SafeComponentWeight`, `ThrustSinkEfficiency`,
   `TransmitterFanEfficiency`
+- Regression: `SquaredExponentialKernel`
 - Units: `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
   `make_fast_optimization_problem`
@@ -246,8 +247,10 @@ optimized values against FAST-Python residual functions.
    Done.
 16. Convert shared FAR 25 climb residual with analytical partial derivatives.
    Done.
-17. Add complex-step derivative checks where supported by FAST-Python internals.
-18. Build reusable groups for mission, propulsion, weights, and objective
+17. Convert squared-exponential regression kernel with analytical partial
+   derivatives. Done.
+18. Add complex-step derivative checks where supported by FAST-Python internals.
+19. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

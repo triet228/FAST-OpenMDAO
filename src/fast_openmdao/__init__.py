@@ -38,6 +38,7 @@ from fast_openmdao.projection import (
     ElectricMotorSpecificPowerProjection,
     KPPProjection,
 )
+from fast_openmdao.regression import SquaredExponentialKernel
 from fast_openmdao.propulsion import (
     EngineLapse,
     SafeComponentWeight,
@@ -80,6 +81,7 @@ __all__ = [
     "StaticPressure",
     "StaticTemperature",
     "StandardAtmosphere",
+    "SquaredExponentialKernel",
     "TotalPressure",
     "TotalTemperature",
     "ThrustSinkEfficiency",

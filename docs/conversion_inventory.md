@@ -43,7 +43,7 @@ closed-form derivatives are practical.
 | `projection.py` | converted | `fast_openmdao.projection.KPPProjection` plus battery and electric motor projection aliases. |
 | `propulsion.py` | candidate | Engine lapse, safe component weight, and efficiency selectors converted; power-flow, architecture, sizing, fuel-use, and history components remain. |
 | `reference.py` | support | Reference case store and archive access. |
-| `regression.py` | candidate | Regression kernels and GP predictor components where differentiable. |
+| `regression.py` | candidate | Squared-exponential kernel converted; GP predictor components remain. |
 | `retrofit.py` | support | Retrofit option factory placeholder. |
 | `safety.py` | support | Discrete fault-tree logic; not a continuous derivative component. |
 | `specs.py` | support | Aircraft and engine spec factories. |
