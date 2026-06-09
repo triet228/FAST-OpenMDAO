@@ -430,6 +430,107 @@ class GradientMatrix(om.ExplicitComponent):
         ]
 
 
+class ConcatenateVectors(om.ExplicitComponent):
+    """Concatenate fixed FAST constraint-vector pieces.
+
+    Inputs:
+        vector_piece_N: Nonempty one-dimensional constraint vector piece.
+
+    Outputs:
+        concatenated_vector: FAST constraint vector with empty pieces skipped.
+
+    Assumptions:
+        Piece sizes are fixed at setup, matching the shape-normalization role
+        of ``fast_python.optimization.concatenate_vectors``.
+    """
+
+    def initialize(self):
+        self.options.declare("piece_sizes", default=(1,))
+
+    def setup(self):
+        piece_sizes = tuple(int(size) for size in self.options["piece_sizes"])
+        output_size = sum(size for size in piece_sizes if size > 0)
+        self.add_output("concatenated_vector", val=np.zeros(output_size))
+
+        start = 0
+        for index, size in enumerate(piece_sizes):
+            if size <= 0:
+                continue
+
+            name = f"vector_piece_{index}"
+            self.add_input(name, val=np.zeros(size))
+            rows = np.arange(start, start + size)
+            cols = np.arange(size)
+            self.declare_partials(
+                of="concatenated_vector",
+                wrt=name,
+                rows=rows,
+                cols=cols,
+                val=np.ones(size),
+            )
+            start += size
+
+    def compute(self, inputs, outputs):
+        outputs["concatenated_vector"] = concatenate_vector_values(
+            inputs,
+            self.options["piece_sizes"],
+        )["concatenated_vector"]
+
+
+class ConcatenateMatrices(om.ExplicitComponent):
+    """Stack fixed FAST gradient-matrix pieces by rows.
+
+    Inputs:
+        matrix_piece_N: Nonempty gradient matrix piece with fixed column count.
+
+    Outputs:
+        concatenated_matrix: FAST gradient matrix with empty pieces skipped.
+
+    Assumptions:
+        Piece row counts and the shared column count are fixed at setup,
+        matching ``fast_python.optimization.concatenate_matrices``.
+    """
+
+    def initialize(self):
+        self.options.declare("piece_rows", default=(1,))
+        self.options.declare("num_cols", default=1)
+
+    def setup(self):
+        piece_rows = tuple(int(rows) for rows in self.options["piece_rows"])
+        num_cols = self.options["num_cols"]
+        output_rows = sum(rows for rows in piece_rows if rows > 0)
+        self.add_output(
+            "concatenated_matrix",
+            val=np.zeros((output_rows, num_cols)),
+        )
+
+        start = 0
+        for index, rows_count in enumerate(piece_rows):
+            if rows_count <= 0:
+                continue
+
+            name = f"matrix_piece_{index}"
+            size = rows_count * num_cols
+            self.add_input(name, val=np.zeros((rows_count, num_cols)))
+            rows = np.arange(start * num_cols, (start + rows_count) * num_cols)
+            cols = np.arange(size)
+            self.declare_partials(
+                of="concatenated_matrix",
+                wrt=name,
+                rows=rows,
+                cols=cols,
+                val=np.ones(size),
+            )
+            start += rows_count
+
+    def compute(self, inputs, outputs):
+        outputs["concatenated_matrix"] = concatenate_matrix_values(
+            inputs,
+            self.options["piece_rows"],
+            self.options["num_cols"],
+        )["concatenated_matrix"]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -1187,6 +1288,47 @@ def gradient_matrix_values(gradient_values, num_rows, num_cols):
         "gradient_matrix": values.reshape(num_rows, num_cols),
         "dgradient_matrix_dgradient_values": np.ones(values.size),
     }
+
+
+def concatenate_vector_values(inputs, piece_sizes):
+    """Return FAST vector concatenation for fixed nonempty input pieces."""
+
+    pieces = []
+
+    for index, size in enumerate(piece_sizes):
+        if size <= 0:
+            continue
+
+        pieces.append(
+            np.asarray(inputs[f"vector_piece_{index}"], dtype=float).reshape(-1)
+        )
+
+    if not pieces:
+        return {"concatenated_vector": np.asarray([])}
+
+    return {"concatenated_vector": np.concatenate(pieces)}
+
+
+def concatenate_matrix_values(inputs, piece_rows, num_cols):
+    """Return FAST matrix row stacking for fixed nonempty input pieces."""
+
+    pieces = []
+
+    for index, rows_count in enumerate(piece_rows):
+        if rows_count <= 0:
+            continue
+
+        pieces.append(
+            np.asarray(inputs[f"matrix_piece_{index}"], dtype=float).reshape(
+                -1,
+                num_cols,
+            )
+        )
+
+    if not pieces:
+        return {"concatenated_matrix": np.zeros((0, num_cols))}
+
+    return {"concatenated_matrix": np.vstack(pieces)}
 
 
 def get_slack_values(inputs, num_inequality):

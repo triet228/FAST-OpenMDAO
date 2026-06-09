@@ -11,6 +11,8 @@ import openmdao.api as om
 
 from fast_openmdao import (
     BatteryEnergyAvailable,
+    ConcatenateMatrices,
+    ConcatenateVectors,
     CruisePowerAvailableConstraint,
     DesignSplitBounds,
     ElectricMotorPowerAvailable,
@@ -30,6 +32,8 @@ from fast_openmdao import (
 )
 from fast_python.optimization import (
     battery_energy_available,
+    concatenate_matrices,
+    concatenate_vectors,
     con_size_opt,
     electric_motor_power_available,
     feas_step,
@@ -311,6 +315,59 @@ def test_gradient_matrix_matches_fast_python():
     assert np.allclose(
         problem.get_val("gradient_matrix"),
         gradient_matrix(gradient_values, 2, 3),
+    )
+
+
+def test_concatenate_vectors_matches_fast_python():
+    """Check fixed-piece FAST vector concatenation parity."""
+
+    pieces = [
+        np.asarray([0.1, 0.2]),
+        np.asarray([]),
+        np.asarray([0.3, 0.4, 0.5]),
+    ]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "concat",
+        ConcatenateVectors(piece_sizes=[piece.size for piece in pieces]),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("vector_piece_0", pieces[0])
+    problem.set_val("vector_piece_2", pieces[2])
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("concatenated_vector"),
+        concatenate_vectors(pieces),
+    )
+
+
+def test_concatenate_matrices_matches_fast_python():
+    """Check fixed-piece FAST gradient-matrix concatenation parity."""
+
+    pieces = [
+        np.asarray([[0.1, 0.2], [0.3, 0.4]]),
+        np.zeros((0, 2)),
+        np.asarray([[0.5, 0.6]]),
+    ]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "concat",
+        ConcatenateMatrices(
+            piece_rows=[piece.shape[0] for piece in pieces],
+            num_cols=2,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("matrix_piece_0", pieces[0])
+    problem.set_val("matrix_piece_2", pieces[2])
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("concatenated_matrix"),
+        concatenate_matrices(pieces, 2),
     )
 
 
@@ -630,6 +687,22 @@ def test_optimization_helpers_declare_analytic_partials():
             GradientMatrix(num_rows=2, num_cols=3),
             {
                 "gradient_values": np.asarray([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
+            },
+        ),
+        (
+            "concat_vectors",
+            ConcatenateVectors(piece_sizes=(2, 0, 3)),
+            {
+                "vector_piece_0": np.asarray([0.1, 0.2]),
+                "vector_piece_2": np.asarray([0.3, 0.4, 0.5]),
+            },
+        ),
+        (
+            "concat_matrices",
+            ConcatenateMatrices(piece_rows=(2, 0, 1), num_cols=2),
+            {
+                "matrix_piece_0": np.asarray([[0.1, 0.2], [0.3, 0.4]]),
+                "matrix_piece_2": np.asarray([[0.5, 0.6]]),
             },
         ),
         (

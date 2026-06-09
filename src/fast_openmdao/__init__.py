@@ -101,6 +101,8 @@ from fast_openmdao.oew import (
 )
 from fast_openmdao.optimization import (
     BatteryEnergyAvailable,
+    ConcatenateMatrices,
+    ConcatenateVectors,
     CruisePowerAvailableConstraint,
     DesignSplitBounds,
     ElectricMotorPowerAvailable,
@@ -174,6 +176,8 @@ __all__ = [
     "BurnerFlow",
     "ChokedArea",
     "CableWeightForSizing",
+    "ConcatenateMatrices",
+    "ConcatenateVectors",
     "CompressorStageFlow",
     "ConvergenceError",
     "DiffuserFlow",
