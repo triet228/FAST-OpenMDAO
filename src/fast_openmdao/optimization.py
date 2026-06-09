@@ -113,10 +113,102 @@ class PowerLimitConstraints(om.ExplicitComponent):
         partials["upper_limit", "available"] = values["dupper_davailable"]
 
 
+class OperationalSplitConstraints(om.ExplicitComponent):
+    """Compute FAST operational split bound residuals for one split family.
+
+    Inputs:
+        operational_splits: Flattened operational split values, grouped by
+            split variable then mission point.
+        design_splits: Design split limits when ``design_active`` is true.
+
+    Outputs:
+        split_constraints: FAST residuals ``operational / limit - 1``.
+
+    Assumptions:
+        This is one group from
+        ``fast_python.optimization.operational_split_constraint_blocks``.
+        ``design_active`` selects whether each split is bounded by a design
+        variable or by the fixed ``lam_max`` option.
+    """
+
+    def initialize(self):
+        self.options.declare("npoint", default=1)
+        self.options.declare("nsplit", default=1)
+        self.options.declare("design_active", default=True)
+        self.options.declare("lam_max", default=1.0)
+        self.options.declare("eps", default=1.0e-6)
+
+    def setup(self):
+        npoint = self.options["npoint"]
+        nsplit = self.options["nsplit"]
+        size = npoint * nsplit
+        self.add_input("operational_splits", val=np.zeros(size))
+
+        if self.options["design_active"]:
+            self.add_input("design_splits", val=np.ones(nsplit))
+
+        self.add_output("split_constraints", val=np.zeros(size))
+        rows = np.arange(size)
+        self.declare_partials(
+            of="split_constraints",
+            wrt="operational_splits",
+            rows=rows,
+            cols=rows,
+        )
+
+        if self.options["design_active"]:
+            self.declare_partials(
+                of="split_constraints",
+                wrt="design_splits",
+                rows=rows,
+                cols=np.repeat(np.arange(nsplit), npoint),
+            )
+
+    def compute(self, inputs, outputs):
+        values = operational_split_constraint_values(
+            inputs["operational_splits"],
+            self.options["npoint"],
+            self.options["nsplit"],
+            self.options["design_active"],
+            get_design_split_values(inputs, self.options["nsplit"]),
+            self.options["lam_max"],
+            self.options["eps"],
+        )
+        outputs["split_constraints"] = values["constraints"]
+
+    def compute_partials(self, inputs, partials):
+        values = operational_split_constraint_values(
+            inputs["operational_splits"],
+            self.options["npoint"],
+            self.options["nsplit"],
+            self.options["design_active"],
+            get_design_split_values(inputs, self.options["nsplit"]),
+            self.options["lam_max"],
+            self.options["eps"],
+        )
+        partials["split_constraints", "operational_splits"] = values[
+            "dconstraints_doperational_splits"
+        ]
+
+        if self.options["design_active"]:
+            partials["split_constraints", "design_splits"] = values[
+                "dconstraints_ddesign_splits"
+            ]
+
+
 def available_product_value(specific_capacity, installed_weight):
     """Return FAST available power or energy product."""
 
     return specific_capacity * installed_weight
+
+
+def get_design_split_values(inputs, nsplit):
+    """Return design split values when present."""
+
+    if "design_splits" not in inputs:
+        return np.ones(nsplit)
+
+    return inputs["design_splits"]
 
 
 def power_limit_constraint_values(used, available, eps):
@@ -148,6 +240,49 @@ def power_limit_constraint_values(used, available, eps):
         "dlower_davailable": dlower_davailable,
         "dupper_dused": dupper_dused,
         "dupper_davailable": dupper_davailable,
+    }
+
+
+def operational_split_constraint_values(
+    operational_splits,
+    npoint,
+    nsplit,
+    design_active,
+    design_splits,
+    lam_max,
+    eps,
+):
+    """Return operational split residuals and analytical derivatives."""
+
+    operational_splits = np.asarray(operational_splits, dtype=float).reshape(-1)
+    design_splits = np.asarray(design_splits, dtype=float).reshape(-1)
+    constraints = np.zeros(npoint * nsplit)
+    doper = np.zeros(npoint * nsplit)
+    ddesign = np.zeros(npoint * nsplit)
+
+    for split_index in range(nsplit):
+        start = split_index * npoint
+        stop = start + npoint
+
+        if design_active:
+            limit = design_splits[split_index]
+        else:
+            limit = lam_max
+
+        raw = operational_splits[start:stop] / limit - 1.0
+        constraints[start:stop] = sanitize_values(raw, eps)
+        finite = np.isfinite(raw) & (limit != 0.0)
+        doper[start:stop][finite] = 1.0 / limit
+
+        if design_active:
+            ddesign[start:stop][finite] = (
+                -operational_splits[start:stop][finite] / limit ** 2
+            )
+
+    return {
+        "constraints": constraints,
+        "dconstraints_doperational_splits": doper,
+        "dconstraints_ddesign_splits": ddesign,
     }
 
 

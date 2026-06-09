@@ -12,11 +12,13 @@ import openmdao.api as om
 from fast_openmdao import (
     BatteryEnergyAvailable,
     ElectricMotorPowerAvailable,
+    OperationalSplitConstraints,
     PowerLimitConstraints,
 )
 from fast_python.optimization import (
     battery_energy_available,
     electric_motor_power_available,
+    operational_split_constraint_blocks,
     power_limit_constraints,
 )
 
@@ -88,6 +90,76 @@ def test_power_limit_constraints_match_fast_python():
     assert np.allclose(problem.get_val("upper_limit"), expected_upper)
 
 
+def test_operational_split_constraints_match_fast_python():
+    """Check operational split residual parity with FAST-Python."""
+
+    operational_splits = np.asarray([0.2, 0.3, 0.4, 0.1, 0.2, 0.3])
+    design_splits = np.asarray([0.5, 0.4])
+    x = np.concatenate([operational_splits, design_splits])
+    aircraft = make_operational_split_aircraft(
+        npoint=3,
+        nopers=6,
+        ndvars=8,
+        narg=2,
+        lam_max=0.8,
+    )
+    expected = operational_split_constraint_blocks(
+        x,
+        aircraft,
+        [("TS", 1, 1)],
+        1.0e-6,
+    )["TS"]
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "splits",
+        OperationalSplitConstraints(
+            npoint=3,
+            nsplit=2,
+            design_active=True,
+            eps=1.0e-6,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("operational_splits", operational_splits)
+    problem.set_val("design_splits", design_splits)
+    problem.run_model()
+
+    assert np.allclose(problem.get_val("split_constraints"), expected)
+
+    fixed_aircraft = make_operational_split_aircraft(
+        npoint=3,
+        nopers=6,
+        ndvars=6,
+        narg=2,
+        lam_max=0.8,
+    )
+    fixed_expected = operational_split_constraint_blocks(
+        operational_splits,
+        fixed_aircraft,
+        [("TS", 1, 0)],
+        1.0e-6,
+    )["TS"]
+    fixed_problem = om.Problem()
+    fixed_problem.model.add_subsystem(
+        "splits",
+        OperationalSplitConstraints(
+            npoint=3,
+            nsplit=2,
+            design_active=False,
+            lam_max=0.8,
+            eps=1.0e-6,
+        ),
+        promotes=["*"],
+    )
+    fixed_problem.setup()
+    fixed_problem.set_val("operational_splits", operational_splits)
+    fixed_problem.run_model()
+
+    assert np.allclose(fixed_problem.get_val("split_constraints"), fixed_expected)
+
+
 def test_optimization_helpers_declare_analytic_partials():
     """Check optimization helper derivatives against finite difference."""
 
@@ -114,6 +186,32 @@ def test_optimization_helpers_declare_analytic_partials():
             {
                 "used": np.asarray([20.0, 50.0, 75.0]),
                 "available": np.asarray([100.0, 80.0, 75.0]),
+            },
+        ),
+        (
+            "splits",
+            OperationalSplitConstraints(
+                npoint=3,
+                nsplit=2,
+                design_active=True,
+                eps=1.0e-6,
+            ),
+            {
+                "operational_splits": np.asarray([0.2, 0.3, 0.4, 0.1, 0.2, 0.3]),
+                "design_splits": np.asarray([0.5, 0.4]),
+            },
+        ),
+        (
+            "fixed_splits",
+            OperationalSplitConstraints(
+                npoint=3,
+                nsplit=2,
+                design_active=False,
+                lam_max=0.8,
+                eps=1.0e-6,
+            ),
+            {
+                "operational_splits": np.asarray([0.2, 0.3, 0.4, 0.1, 0.2, 0.3]),
             },
         ),
     ]
@@ -158,5 +256,27 @@ def make_optimization_aircraft():
                 "EM": 135.0,
                 "Batt": 860.0,
             },
+        },
+    }
+
+
+def make_operational_split_aircraft(npoint, nopers, ndvars, narg, lam_max):
+    """Return minimal aircraft dictionary for split constraint helpers."""
+
+    return {
+        "Settings": {
+            "nargTS": narg,
+        },
+        "Specs": {
+            "Power": {
+                "LamTS": {
+                    "SLS": lam_max,
+                },
+            },
+        },
+        "PowerOpt": {
+            "npoint": npoint,
+            "nopers": nopers,
+            "ndvars": ndvars,
         },
     }
