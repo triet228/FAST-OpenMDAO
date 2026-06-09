@@ -16,6 +16,7 @@ from fast_openmdao import (
 )
 from fast_openmdao.examples.compact_electric import make_compact_aircraft
 from fast_openmdao.examples.compact_electric import run_demo
+from fast_openmdao.examples.compact_electric import validate_demo_against_fast_python_samples
 
 
 def test_component_maps_openmdao_inputs_to_fast_paths():
@@ -184,6 +185,21 @@ def test_compact_example_runs_real_fast_python_optimization():
     assert summary["success"]
     assert abs(summary["mission_range"] - 10000.0) < 1.0e-5
     assert summary["energy_used"] > 0
+
+
+def test_compact_openmdao_optimum_matches_fast_python_sample_sweep():
+    """Check OpenMDAO optimization agrees with repeated FAST-Python evaluations."""
+
+    validation = validate_demo_against_fast_python_samples(
+        range_initial=20000.0,
+        range_lower=10000.0,
+        range_upper=40000.0,
+        sample_count=7,
+    )
+
+    assert validation["agrees_with_samples"]
+    assert validation["range_error"] < 1.0e-4
+    assert validation["energy_error"] < 1.0e-4
 
 
 def fake_input_specs():

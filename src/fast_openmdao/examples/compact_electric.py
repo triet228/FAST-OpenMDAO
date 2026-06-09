@@ -4,6 +4,7 @@
 
 import argparse
 import os
+from copy import deepcopy
 
 os.environ.setdefault("OPENMDAO_REPORTS", "0")
 
@@ -122,6 +123,119 @@ def run_demo(range_initial=20000.0, range_lower=10000.0, range_upper=40000.0):
     }
 
 
+def evaluate_fast_python_point(mission_range):
+    """Evaluate the compact FAST-Python case at one mission range.
+
+    Inputs:
+        mission_range: Mission distance target in meters.
+
+    Outputs:
+        Summary dictionary with mission range, MTOW, and stored-source energy.
+
+    Assumptions:
+        This function is the one-point oracle used to validate OpenMDAO
+        optimization results against repeated FAST-Python evaluations.
+    """
+
+    from fast_python import run
+
+    aircraft = make_compact_aircraft()
+    mission = deepcopy(aircraft.pop("Mission")["Profile"])
+    mission["Target"]["Valu"][0] = mission_range
+    result = run(aircraft, mission)
+    history = result["aircraft"]["Mission"]["History"]["SI"]
+
+    return {
+        "mission_range": float(mission_range),
+        "mtow": float(result["mtow"]),
+        "energy_used": float(history["Energy"]["E_ES"][-1][0]),
+    }
+
+
+def sample_fast_python_range_sweep(
+    range_lower=10000.0,
+    range_upper=40000.0,
+    sample_count=9,
+):
+    """Evaluate FAST-Python repeatedly across the compact range design space.
+
+    Inputs:
+        range_lower: Lower mission range bound in meters.
+        range_upper: Upper mission range bound in meters.
+        sample_count: Number of evenly spaced FAST-Python evaluations.
+
+    Outputs:
+        List of point-evaluation summaries sorted by increasing mission range.
+    """
+
+    if sample_count < 2:
+        raise ValueError("sample_count must be at least 2.")
+
+    step = (range_upper - range_lower) / (sample_count - 1)
+    return [
+        evaluate_fast_python_point(range_lower + index * step)
+        for index in range(sample_count)
+    ]
+
+
+def best_sampled_point(samples):
+    """Return the sampled FAST-Python point with minimum stored-source energy."""
+
+    return min(samples, key=lambda sample: sample["energy_used"])
+
+
+def validate_demo_against_fast_python_samples(
+    range_initial=20000.0,
+    range_lower=10000.0,
+    range_upper=40000.0,
+    sample_count=9,
+    range_tolerance=1.0e-4,
+    energy_tolerance=1.0e-4,
+):
+    """Compare OpenMDAO optimization against repeated FAST-Python evaluations.
+
+    Inputs:
+        range_initial: Initial OpenMDAO mission range target in meters.
+        range_lower: Lower mission range bound in meters.
+        range_upper: Upper mission range bound in meters.
+        sample_count: Number of FAST-Python point evaluations.
+        range_tolerance: Allowed optimized-range mismatch in meters.
+        energy_tolerance: Allowed objective mismatch in joules.
+
+    Outputs:
+        Dictionary containing the OpenMDAO optimum, sampled FAST-Python points,
+        best sampled point, and boolean agreement flags.
+    """
+
+    openmdao_summary = run_demo(
+        range_initial=range_initial,
+        range_lower=range_lower,
+        range_upper=range_upper,
+    )
+    samples = sample_fast_python_range_sweep(
+        range_lower=range_lower,
+        range_upper=range_upper,
+        sample_count=sample_count,
+    )
+    best_sample = best_sampled_point(samples)
+    range_error = abs(openmdao_summary["mission_range"] - best_sample["mission_range"])
+    energy_error = abs(openmdao_summary["energy_used"] - best_sample["energy_used"])
+
+    return {
+        "success": openmdao_summary["success"],
+        "agrees_with_samples": (
+            openmdao_summary["success"]
+            and range_error <= range_tolerance
+            and energy_error <= energy_tolerance
+        ),
+        "openmdao": openmdao_summary,
+        "best_fast_python_sample": best_sample,
+        "fast_python_samples": samples,
+        "range_error": range_error,
+        "energy_error": energy_error,
+    }
+
+
 def cli():
     """Parse command-line arguments and run the compact example."""
 
@@ -131,7 +245,26 @@ def cli():
     parser.add_argument("--range-initial", type=float, default=20000.0)
     parser.add_argument("--range-lower", type=float, default=10000.0)
     parser.add_argument("--range-upper", type=float, default=40000.0)
+    parser.add_argument("--validate-samples", type=int, default=0)
     args = parser.parse_args()
+
+    if args.validate_samples:
+        summary = validate_demo_against_fast_python_samples(
+            range_initial=args.range_initial,
+            range_lower=args.range_lower,
+            range_upper=args.range_upper,
+            sample_count=args.validate_samples,
+        )
+        openmdao_summary = summary["openmdao"]
+        best_sample = summary["best_fast_python_sample"]
+        print(f"Success: {summary['success']}")
+        print(f"Agrees with FAST-Python samples: {summary['agrees_with_samples']}")
+        print(f"OpenMDAO mission range: {openmdao_summary['mission_range']:.6f} m")
+        print(f"OpenMDAO energy used: {openmdao_summary['energy_used']:.6f} J")
+        print(f"Best sampled mission range: {best_sample['mission_range']:.6f} m")
+        print(f"Best sampled energy used: {best_sample['energy_used']:.6f} J")
+        return
+
     summary = run_demo(
         range_initial=args.range_initial,
         range_lower=args.range_lower,
