@@ -145,6 +145,68 @@ class BatteryWeightFromEnergy(om.ExplicitComponent):
         ]
 
 
+class DetailedBatterySizing(om.ExplicitComponent):
+    """Resize detailed battery parallel-cell counts and mass after a mission."""
+
+    def initialize(self):
+        self.options.declare("num_points", default=1)
+        self.options.declare("num_batteries", default=1)
+
+    def setup(self):
+        num_points = self.options["num_points"]
+        num_batteries = self.options["num_batteries"]
+        history_shape = (num_points, num_batteries)
+
+        self.add_input("soc", val=np.ones(history_shape) * 80.0)
+        self.add_input("current", val=np.zeros(history_shape), units="A")
+        self.add_input("cap_cell", val=2.4)
+        self.add_input("nominal_cell_voltage", val=3.6, units="V")
+        self.add_input("min_soc", val=20.0)
+        self.add_input("max_c_rate", val=2.0)
+        self.add_input("initial_parallel_cells", val=np.ones(num_batteries) * 10.0)
+        self.add_input("series_cells", val=np.ones(num_batteries) * 100.0)
+        self.add_input("battery_specific_energy", val=1.0, units="J/kg")
+        self.add_output("parallel_cells", val=np.ones(num_batteries) * 10.0)
+        self.add_output("battery_weight", val=np.ones(num_batteries), units="kg")
+        self.add_output("c_rate", val=np.zeros(history_shape))
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = detailed_battery_sizing_values(
+            inputs["soc"],
+            inputs["current"],
+            inputs["cap_cell"][0],
+            inputs["nominal_cell_voltage"][0],
+            inputs["min_soc"][0],
+            inputs["max_c_rate"][0],
+            inputs["initial_parallel_cells"],
+            inputs["series_cells"],
+            inputs["battery_specific_energy"][0],
+        )
+        outputs["parallel_cells"] = values["parallel_cells"]
+        outputs["battery_weight"] = values["battery_weight"]
+        outputs["c_rate"] = values["c_rate"]
+
+    def compute_partials(self, inputs, partials):
+        values = detailed_battery_sizing_values(
+            inputs["soc"],
+            inputs["current"],
+            inputs["cap_cell"][0],
+            inputs["nominal_cell_voltage"][0],
+            inputs["min_soc"][0],
+            inputs["max_c_rate"][0],
+            inputs["initial_parallel_cells"],
+            inputs["series_cells"],
+            inputs["battery_specific_energy"][0],
+        )
+
+        for output in detailed_battery_sizing_output_names():
+            for variable in detailed_battery_sizing_input_names():
+                partials[output, variable] = values[
+                    "d%s_d%s" % (output, variable)
+                ]
+
+
 class BatteryCyclingAging(om.ExplicitComponent):
     """Predict FAST cycling-aging SOH from reduced mission battery statistics."""
 
@@ -460,6 +522,32 @@ def battery_cycling_aging_input_names():
     )
 
 
+def detailed_battery_sizing_input_names():
+    """Return input names for DetailedBatterySizing derivatives."""
+
+    return (
+        "soc",
+        "current",
+        "cap_cell",
+        "nominal_cell_voltage",
+        "min_soc",
+        "max_c_rate",
+        "initial_parallel_cells",
+        "series_cells",
+        "battery_specific_energy",
+    )
+
+
+def detailed_battery_sizing_output_names():
+    """Return output names for DetailedBatterySizing."""
+
+    return (
+        "parallel_cells",
+        "battery_weight",
+        "c_rate",
+    )
+
+
 def battery_power_step_output_names():
     """Return scalar output names for BatteryPowerStep."""
 
@@ -502,6 +590,145 @@ def battery_power_history_output_names():
         "soc",
         "c_rate",
     )
+
+
+def detailed_battery_sizing_values(
+    soc,
+    current,
+    cap_cell,
+    nominal_cell_voltage,
+    min_soc,
+    max_c_rate,
+    initial_parallel_cells,
+    series_cells,
+    battery_specific_energy,
+):
+    """Return FAST detailed battery cell sizing and local analytical derivatives."""
+
+    soc = np.asarray(soc, dtype=float)
+    current = np.asarray(current, dtype=float)
+    initial_parallel = np.asarray(initial_parallel_cells, dtype=float).reshape(-1)
+    series = np.asarray(series_cells, dtype=float).reshape(-1)
+    num_points, num_batteries = current.shape
+    history_size = current.size
+
+    if soc.shape != current.shape:
+        raise ValueError("DetailedBatterySizing requires matching SOC and current.")
+
+    if len(initial_parallel) != num_batteries or len(series) != num_batteries:
+        raise ValueError("DetailedBatterySizing battery vector sizes must match.")
+
+    delta_soc = np.max(min_soc - soc, axis=0)
+    size_to = delta_soc / 100.0
+    existing_capacity = cap_cell * initial_parallel
+    npar_soc = np.ceil(
+        np.ceil((existing_capacity + size_to * cap_cell * initial_parallel) / cap_cell)
+    )
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        initial_c_rate = current / existing_capacity
+
+    initial_c_rate[~np.isfinite(initial_c_rate)] = 0.0
+    exceed_c_rate = np.abs(initial_c_rate) > max_c_rate
+
+    if np.any(exceed_c_rate):
+        max_crate = np.max(np.abs(initial_c_rate), axis=0)
+        npar_crate = np.ceil(max_crate / max_c_rate) * initial_parallel
+    else:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            c_rate_soc = current / (npar_soc * cap_cell)
+
+        exceed_c_rate_soc = np.abs(c_rate_soc) > max_c_rate
+
+        if np.any(exceed_c_rate_soc):
+            max_crate_soc = np.max(np.abs(c_rate_soc), axis=0)
+            npar_crate = np.ceil(max_crate_soc / max_c_rate) * npar_soc
+        else:
+            npar_crate = np.zeros(num_batteries)
+
+    parallel = np.maximum(npar_soc, npar_crate)
+    battery_weight = (
+        cap_cell
+        * parallel
+        * nominal_cell_voltage
+        * series
+        * 3600.0
+        / battery_specific_energy
+    )
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        c_rate = current / (cap_cell * parallel)
+
+    c_rate[~np.isfinite(c_rate)] = 0.0
+    zero_battery = np.zeros((num_batteries, num_batteries))
+    zero_battery_history = np.zeros((num_batteries, history_size))
+    zero_battery_scalar = np.zeros((num_batteries, 1))
+    zero_history_battery = np.zeros((history_size, num_batteries))
+    zero_history_scalar = np.zeros((history_size, 1))
+    dc_rate_dcurrent = np.zeros((history_size, history_size))
+    dc_rate_dcap = np.zeros((history_size, 1))
+
+    for point in range(num_points):
+        for battery in range(num_batteries):
+            row = point * num_batteries + battery
+            denominator = cap_cell * parallel[battery]
+            if abs(denominator) > 1.0e-14:
+                dc_rate_dcurrent[row, row] = 1.0 / denominator
+                dc_rate_dcap[row, 0] = -current[point, battery] / (
+                    cap_cell ** 2 * parallel[battery]
+                )
+
+    dbattery_dcap = (
+        parallel * nominal_cell_voltage * series * 3600.0 / battery_specific_energy
+    ).reshape(-1, 1)
+    dbattery_dvoltage = (
+        cap_cell * parallel * series * 3600.0 / battery_specific_energy
+    ).reshape(-1, 1)
+    dbattery_dseries = np.diag(
+        cap_cell * parallel * nominal_cell_voltage * 3600.0 / battery_specific_energy
+    )
+    dbattery_dspecific_energy = (
+        -cap_cell
+        * parallel
+        * nominal_cell_voltage
+        * series
+        * 3600.0
+        / battery_specific_energy ** 2
+    ).reshape(-1, 1)
+
+    result = {
+        "parallel_cells": parallel,
+        "battery_weight": battery_weight,
+        "c_rate": c_rate,
+        "dparallel_cells_dsoc": zero_battery_history,
+        "dparallel_cells_dcurrent": zero_battery_history,
+        "dparallel_cells_dcap_cell": zero_battery_scalar,
+        "dparallel_cells_dnominal_cell_voltage": zero_battery_scalar,
+        "dparallel_cells_dmin_soc": zero_battery_scalar,
+        "dparallel_cells_dmax_c_rate": zero_battery_scalar,
+        "dparallel_cells_dinitial_parallel_cells": zero_battery,
+        "dparallel_cells_dseries_cells": zero_battery,
+        "dparallel_cells_dbattery_specific_energy": zero_battery_scalar,
+        "dbattery_weight_dsoc": zero_battery_history,
+        "dbattery_weight_dcurrent": zero_battery_history,
+        "dbattery_weight_dcap_cell": dbattery_dcap,
+        "dbattery_weight_dnominal_cell_voltage": dbattery_dvoltage,
+        "dbattery_weight_dmin_soc": zero_battery_scalar,
+        "dbattery_weight_dmax_c_rate": zero_battery_scalar,
+        "dbattery_weight_dinitial_parallel_cells": zero_battery,
+        "dbattery_weight_dseries_cells": dbattery_dseries,
+        "dbattery_weight_dbattery_specific_energy": dbattery_dspecific_energy,
+        "dc_rate_dsoc": np.zeros((history_size, history_size)),
+        "dc_rate_dcurrent": dc_rate_dcurrent,
+        "dc_rate_dcap_cell": dc_rate_dcap,
+        "dc_rate_dnominal_cell_voltage": zero_history_scalar,
+        "dc_rate_dmin_soc": zero_history_scalar,
+        "dc_rate_dmax_c_rate": zero_history_scalar,
+        "dc_rate_dinitial_parallel_cells": zero_history_battery,
+        "dc_rate_dseries_cells": zero_history_battery,
+        "dc_rate_dbattery_specific_energy": zero_history_scalar,
+    }
+    return result
 
 
 def battery_cycling_aging_values(

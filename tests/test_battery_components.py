@@ -13,6 +13,7 @@ from fast_openmdao import (
     AvailableCellCapacity,
     BatteryCyclingAging,
     BatteryCurrent,
+    DetailedBatterySizing,
     BatteryPowerHistory,
     BatteryPowerStep,
     BatteryWeightFromEnergy,
@@ -97,6 +98,36 @@ def test_battery_weight_from_energy_matches_fast_python_resize_battery():
         problem.get_val("battery_weight", units="kg"),
         np.asarray(result["Specs"]["Weight"]["Batt"]),
     )
+
+
+def test_detailed_battery_sizing_matches_fast_python_resize_battery():
+    """Check detailed ResizeBattery cell sizing parity with FAST-Python."""
+
+    values = detailed_battery_sizing_values()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "sizing",
+        DetailedBatterySizing(
+            num_points=values["soc"].shape[0],
+            num_batteries=values["soc"].shape[1],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_detailed_battery_sizing_values(problem, values)
+    problem.run_model()
+
+    aircraft = make_detailed_resize_battery_aircraft(values)
+    result = resize_battery(aircraft)
+    expected_weight = np.asarray(result["Specs"]["Weight"]["Batt"])
+    expected_parallel = np.asarray(result["Specs"]["Power"]["Battery"]["ParCells"])
+    expected_c_rate = np.asarray(
+        result["Mission"]["History"]["SI"]["Power"]["C_rate"]
+    )
+
+    assert np.allclose(problem.get_val("parallel_cells"), expected_parallel)
+    assert np.allclose(problem.get_val("battery_weight", units="kg"), expected_weight)
+    assert np.allclose(problem.get_val("c_rate"), expected_c_rate)
 
 
 def test_battery_power_step_matches_fast_python_discharge_and_charge():
@@ -245,6 +276,11 @@ def test_battery_primitives_declare_analytic_partials():
             },
         ),
         (
+            "detailed_sizing",
+            DetailedBatterySizing(num_points=3, num_batteries=2),
+            detailed_battery_sizing_derivative_values(),
+        ),
+        (
             "power_step",
             BatteryPowerStep(is_discharge=True),
             power_step_values(1000.0),
@@ -353,6 +389,56 @@ def make_resize_battery_aircraft(src_type, source_energy, specific_energy):
     }
 
 
+def make_detailed_resize_battery_aircraft(values):
+    """Return aircraft data for FAST-Python detailed battery resizing."""
+
+    num_batteries = values["soc"].shape[1]
+    src_type = np.zeros(num_batteries)
+    energy = np.ones_like(values["soc"])
+    return {
+        "Specs": {
+            "Propulsion": {
+                "PropArch": {
+                    "SrcType": src_type.tolist(),
+                    "Arch": np.eye(num_batteries).tolist(),
+                },
+            },
+            "Power": {
+                "SpecEnergy": {
+                    "Batt": values["battery_specific_energy"],
+                },
+                "Battery": {
+                    "SerCells": values["series_cells"],
+                    "ParCells": values["initial_parallel_cells"],
+                },
+            },
+            "Battery": {
+                "NomVolCell": values["nominal_cell_voltage"],
+                "CapCell": values["cap_cell"],
+                "MinSOC": values["min_soc"],
+                "MaxAllowCRate": values["max_c_rate"],
+            },
+        },
+        "Mission": {
+            "History": {
+                "SI": {
+                    "Energy": {
+                        "E_ES": energy.tolist(),
+                        "Eleft_ES": np.zeros_like(energy).tolist(),
+                    },
+                    "Power": {
+                        "SOC": values["soc"].tolist(),
+                        "Current": values["current"].tolist(),
+                    },
+                },
+            },
+        },
+        "Settings": {
+            "DetailedBatt": 1,
+        },
+    }
+
+
 def make_power_step_aircraft():
     """Return minimal aircraft dictionary for FAST-Python battery dynamics."""
 
@@ -367,6 +453,56 @@ def make_power_step_aircraft():
             },
         },
     }
+
+
+def detailed_battery_sizing_values():
+    """Return inputs that trigger FAST detailed battery resizing branches."""
+
+    return {
+        "soc": np.asarray(
+            [
+                [95.0, 88.0],
+                [30.0, 55.0],
+                [18.0, 33.0],
+            ]
+        ),
+        "current": np.asarray(
+            [
+                [16.0, 10.0],
+                [24.0, 18.0],
+                [32.0, 12.0],
+            ]
+        ),
+        "cap_cell": 2.5,
+        "nominal_cell_voltage": 3.7,
+        "min_soc": 20.0,
+        "max_c_rate": 1.0,
+        "initial_parallel_cells": np.asarray([10.0, 12.0]),
+        "series_cells": np.asarray([90.0, 96.0]),
+        "battery_specific_energy": 0.45 * 3.6e6,
+    }
+
+
+def detailed_battery_sizing_derivative_values():
+    """Return detailed sizing inputs away from ceil and max thresholds."""
+
+    values = detailed_battery_sizing_values()
+    values["soc"] = np.asarray(
+        [
+            [96.0, 92.0],
+            [45.0, 55.0],
+            [35.0, 40.0],
+        ]
+    )
+    values["current"] = np.asarray(
+        [
+            [1.6, 1.0],
+            [2.4, 1.8],
+            [3.2, 1.2],
+        ]
+    )
+    values["max_c_rate"] = 5.0
+    return values
 
 
 def power_step_values(requested_power):
@@ -428,6 +564,28 @@ def set_power_history_values(problem, requested_power, time):
             value = time
 
         problem.set_val(variable, value)
+
+
+def set_detailed_battery_sizing_values(problem, values):
+    """Set OpenMDAO detailed battery sizing inputs."""
+
+    problem.set_val("soc", values["soc"])
+    problem.set_val("current", values["current"], units="A")
+    problem.set_val("cap_cell", values["cap_cell"])
+    problem.set_val(
+        "nominal_cell_voltage",
+        values["nominal_cell_voltage"],
+        units="V",
+    )
+    problem.set_val("min_soc", values["min_soc"])
+    problem.set_val("max_c_rate", values["max_c_rate"])
+    problem.set_val("initial_parallel_cells", values["initial_parallel_cells"])
+    problem.set_val("series_cells", values["series_cells"])
+    problem.set_val(
+        "battery_specific_energy",
+        values["battery_specific_energy"],
+        units="J/kg",
+    )
 
 
 def set_cycling_aging_values(problem):
