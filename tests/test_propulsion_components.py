@@ -10,6 +10,7 @@ import numpy as np
 import openmdao.api as om
 
 from fast_openmdao import (
+    CableWeightForSizing,
     EngineLapse,
     EngineThrustRequirement,
     PowerFlow,
@@ -19,6 +20,7 @@ from fast_openmdao import (
     TransmitterFanEfficiency,
 )
 from fast_python.propulsion import (
+    cable_weight_for_sizing,
     engine_lapse,
     engine_thrust_requirement,
     get_thrust_sink_efficiency,
@@ -203,6 +205,33 @@ def test_engine_thrust_requirement_matches_fast_python():
     assert np.allclose(problem.get_val("required_thrust", units="N"), expected)
 
 
+def test_cable_weight_for_sizing_matches_fast_python():
+    """Check cable sizing weight parity with FAST-Python."""
+
+    aircraft, cables, downstream_power = make_cable_weight_case()
+    cable_connections = aircraft["Specs"]["Propulsion"]["PropArch"]["CableConns"]
+    cable_lengths = aircraft["Specs"]["Propulsion"]["PropArch"]["CableLengths"]
+    cable_power_to_weight = aircraft["Specs"]["Power"]["P_W"]["Cables"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "cables",
+        CableWeightForSizing(
+            cables=cables,
+            cable_connections=cable_connections,
+            cable_lengths=cable_lengths,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("downstream_power", downstream_power, units="W")
+    problem.set_val("cable_power_to_weight", cable_power_to_weight)
+    problem.run_model()
+
+    expected = cable_weight_for_sizing(aircraft, cables, downstream_power)
+
+    assert np.isclose(problem.get_val("cable_weight", units="kg")[0], expected)
+
+
 def test_propulsion_primitives_declare_analytic_partials():
     """Check propulsion primitive derivatives against finite difference."""
 
@@ -211,7 +240,23 @@ def test_propulsion_primitives_declare_analytic_partials():
     )
     flow_up, flow_down = make_power_flow_cases()
     thrust_architecture, thrust_type, thrust_output = make_engine_thrust_case()
+    cable_aircraft, cables, downstream_power = make_cable_weight_case()
+    cable_architecture = cable_aircraft["Specs"]["Propulsion"]["PropArch"]
     cases = [
+        (
+            "cables",
+            CableWeightForSizing(
+                cables=cables,
+                cable_connections=cable_architecture["CableConns"],
+                cable_lengths=cable_architecture["CableLengths"],
+            ),
+            {
+                "downstream_power": downstream_power,
+                "cable_power_to_weight": cable_aircraft["Specs"]["Power"]["P_W"][
+                    "Cables"
+                ],
+            },
+        ),
         (
             "thrust",
             EngineThrustRequirement(
@@ -433,3 +478,32 @@ def make_engine_thrust_case():
         ]
     )
     return architecture, transmitter_type, thrust_output
+
+
+def make_cable_weight_case():
+    """Return fixed cable sizing data with two cable transmitters."""
+
+    aircraft = {
+        "Specs": {
+            "Power": {
+                "P_W": {
+                    "Cables": 4.0,
+                },
+            },
+            "Propulsion": {
+                "PropArch": {
+                    "CableConns": [
+                        [1.0, 0.5],
+                        [0.0, 1.0],
+                    ],
+                    "CableLengths": [
+                        [12.0, 8.0],
+                        [9.0, 10.0],
+                    ],
+                },
+            },
+        },
+    }
+    cables = np.asarray([False, True, False, True])
+    downstream_power = np.asarray([0.0, 400000.0, 0.0, 250000.0, 0.0])
+    return aircraft, cables, downstream_power

@@ -58,6 +58,7 @@ from fast_openmdao.projection import (
 )
 from fast_openmdao.regression import SquaredExponentialKernel
 from fast_openmdao.propulsion import (
+    CableWeightForSizing,
     EngineLapse,
     EngineThrustRequirement,
     PowerFlow,
@@ -80,6 +81,7 @@ __all__ = [
     "AvailableCellCapacity",
     "BatteryCurrent",
     "ChokedArea",
+    "CableWeightForSizing",
     "ConvergenceError",
     "CruiseDynamicPressure",
     "CruiseBreguetEfficiencyTriplet",

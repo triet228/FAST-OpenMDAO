@@ -364,6 +364,65 @@ class EngineThrustRequirement(om.ExplicitComponent):
         ]
 
 
+class CableWeightForSizing(om.ExplicitComponent):
+    """Compute FAST cable weight for fixed cable transmitter geometry.
+
+    Inputs:
+        downstream_power: Downstream component power vector in W.
+        cable_power_to_weight: Cable weight coefficient from FAST specs.
+
+    Outputs:
+        cable_weight: Total cable weight contribution in kg.
+
+    Assumptions:
+        Cable transmitter mask, connection matrix, and length matrix are fixed
+        architecture data. FAST ignores the final sink column in downstream
+        sizing power; this component keeps the same convention.
+    """
+
+    def initialize(self):
+        self.options.declare("cables")
+        self.options.declare("cable_connections")
+        self.options.declare("cable_lengths")
+
+    def setup(self):
+        cables = np.asarray(self.options["cables"], dtype=bool).reshape(-1)
+        num_components = len(cables) + 1
+
+        self.add_input(
+            "downstream_power",
+            val=np.zeros(num_components),
+            units="W",
+        )
+        self.add_input("cable_power_to_weight", val=1.0)
+        self.add_output("cable_weight", val=0.0, units="kg")
+        self.declare_partials(of="cable_weight", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["cable_weight"] = cable_weight_for_sizing_values(
+            inputs["downstream_power"],
+            inputs["cable_power_to_weight"][0],
+            self.options["cables"],
+            self.options["cable_connections"],
+            self.options["cable_lengths"],
+        )["cable_weight"]
+
+    def compute_partials(self, inputs, partials):
+        values = cable_weight_for_sizing_values(
+            inputs["downstream_power"],
+            inputs["cable_power_to_weight"][0],
+            self.options["cables"],
+            self.options["cable_connections"],
+            self.options["cable_lengths"],
+        )
+        partials["cable_weight", "downstream_power"] = values[
+            "dcable_weight_ddownstream_power"
+        ]
+        partials["cable_weight", "cable_power_to_weight"] = values[
+            "dcable_weight_dcable_power_to_weight"
+        ]
+
+
 def engine_lapse_value(sea_level_static, aircraft_class, density):
     """Return scalar FAST engine-lapse value."""
 
@@ -544,6 +603,51 @@ def engine_thrust_requirement_values(
     return {
         "required_thrust": required,
         "drequired_dthrust_output": derivatives,
+    }
+
+
+def cable_weight_for_sizing_values(
+    downstream_power,
+    cable_power_to_weight,
+    cables,
+    cable_connections,
+    cable_lengths,
+):
+    """Return FAST cable sizing weight and analytical partials."""
+
+    downstream_power = np.asarray(downstream_power, dtype=float).reshape(-1)
+    cables = np.asarray(cables, dtype=bool).reshape(-1)
+    cable_connections = np.asarray(cable_connections, dtype=float)
+    cable_lengths = np.asarray(cable_lengths, dtype=float)
+    derivatives = np.zeros((1, downstream_power.size))
+
+    if not np.any(cables):
+        return {
+            "cable_weight": 0.0,
+            "dcable_weight_ddownstream_power": derivatives,
+            "dcable_weight_dcable_power_to_weight": np.asarray([[0.0]]),
+        }
+
+    cable_power = downstream_power[:-1][cables]
+    power_matrix = np.tile(cable_power, (cable_connections.shape[0], 1))
+    weighted_geometry = cable_connections * cable_lengths
+    geometry_sum = np.sum(weighted_geometry, axis=0)
+    weight = float(
+        np.sum(cable_power_to_weight * (power_matrix / 1.0e6) * weighted_geometry)
+    )
+    cable_indices = np.where(cables)[0]
+
+    for local_index, component_index in enumerate(cable_indices):
+        derivatives[0, component_index] = (
+            cable_power_to_weight * geometry_sum[local_index] / 1.0e6
+        )
+
+    return {
+        "cable_weight": weight,
+        "dcable_weight_ddownstream_power": derivatives,
+        "dcable_weight_dcable_power_to_weight": np.asarray(
+            [[np.sum((power_matrix / 1.0e6) * weighted_geometry)]]
+        ),
     }
 
 
