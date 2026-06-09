@@ -21,6 +21,9 @@ derivative-native FAST equation components:
 - `KPPProjection`, `BatteryReplacementCost`, and `UnitConversion`: native
   OpenMDAO utility components for projection, cost, and scalar conversion
   equations with analytical partial derivatives.
+- `FlightConditions`: native mission primitive matching
+  `fast_python.mission.compute_flight_conditions` with analytical partial
+  derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
   design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
@@ -177,8 +180,10 @@ fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40
    partial derivatives. Done.
 9. Convert projection, cost, and scalar unit-conversion utilities with
    analytical partial derivatives. Done.
-10. Add complex-step derivative checks where supported by FAST-Python internals.
-11. Build reusable groups for mission, propulsion, weights, and objective
+10. Convert scalar mission flight-condition primitive with analytical partial
+   derivatives. Done.
+11. Add complex-step derivative checks where supported by FAST-Python internals.
+12. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

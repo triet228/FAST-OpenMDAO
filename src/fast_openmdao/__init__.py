@@ -5,6 +5,7 @@
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.components import FastPythonComponent
 from fast_openmdao.cost import BatteryReplacementCost
+from fast_openmdao.mission import FlightConditions
 from fast_openmdao.problem import make_fast_optimization_problem, make_fast_problem
 from fast_openmdao.projection import (
     BatterySpecificEnergyProjection,
@@ -20,6 +21,7 @@ __all__ = [
     "BatterySpecificEnergyProjection",
     "ElectricMotorSpecificPowerProjection",
     "FastPythonComponent",
+    "FlightConditions",
     "Gravity",
     "KPPProjection",
     "StandardAtmosphere",
