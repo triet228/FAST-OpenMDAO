@@ -6,6 +6,53 @@ import numpy as np
 import openmdao.api as om
 
 
+class LM100JHybridArchitecture(om.ExplicitComponent):
+    """Build LM100J_Hybrid's custom propulsion architecture matrices.
+
+    Inputs:
+        power_split: Scalar split used by the custom operation matrices.
+
+    Outputs:
+        architecture: Fixed 11 by 11 component connectivity matrix.
+        upstream_split: Fixed 11 by 11 upstream operation matrix.
+        downstream_split: Fixed 11 by 11 downstream operation matrix.
+        upstream_efficiency: Fixed 11 by 11 upstream efficiency matrix.
+        downstream_efficiency: Fixed 11 by 11 downstream efficiency matrix.
+        source_type: Fixed two-source FAST source-type vector.
+        transmitter_type: Fixed eight-transmitter FAST transmitter-type vector.
+
+    Assumptions:
+        The custom LM100J topology is a preset, so only the operation matrices
+        are differentiable with respect to the split. Preset dictionaries and
+        aircraft metadata remain FAST-Python data-factory behavior.
+    """
+
+    def setup(self):
+        self.add_input("power_split", val=0.5)
+        self.add_output("architecture", val=np.zeros((11, 11)))
+        self.add_output("upstream_split", val=np.zeros((11, 11)))
+        self.add_output("downstream_split", val=np.zeros((11, 11)))
+        self.add_output("upstream_efficiency", val=np.ones((11, 11)))
+        self.add_output("downstream_efficiency", val=np.ones((11, 11)))
+        self.add_output("source_type", val=np.zeros(2))
+        self.add_output("transmitter_type", val=np.zeros(8))
+        self.declare_partials(of="*", wrt="power_split")
+
+    def compute(self, inputs, outputs):
+        values = lm100j_hybrid_architecture_values(inputs["power_split"][0])
+
+        for name in lm100j_hybrid_architecture_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = lm100j_hybrid_architecture_values(inputs["power_split"][0])
+
+        for name in lm100j_hybrid_architecture_output_names():
+            partials[name, "power_split"] = values[
+                "d%s_dpower_split" % name
+            ].reshape(-1)
+
+
 class LM100JHybridOperationMatrices(om.ExplicitComponent):
     """Build LM100J_Hybrid custom operation matrices from one power split.
 
@@ -41,6 +88,94 @@ class LM100JHybridOperationMatrices(om.ExplicitComponent):
         partials["downstream_split", "power_split"] = values[
             "ddownstream_split_dpower_split"
         ].reshape(-1)
+
+
+def lm100j_hybrid_architecture_output_names():
+    """Return output names for the LM100J_Hybrid architecture component."""
+
+    return [
+        "architecture",
+        "upstream_split",
+        "downstream_split",
+        "upstream_efficiency",
+        "downstream_efficiency",
+        "source_type",
+        "transmitter_type",
+    ]
+
+
+def lm100j_hybrid_architecture_values(power_split):
+    """Return LM100J_Hybrid architecture matrices and split derivatives."""
+
+    operation = lm100j_hybrid_operation_matrix_values(power_split)
+    architecture = np.asarray(
+        [
+            [0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ],
+        dtype=float,
+    )
+    upstream_efficiency = np.asarray(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 0.96, 0.96, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 0.80, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 0.80, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 0.80, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 0.80, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ],
+        dtype=float,
+    )
+    downstream_efficiency = np.asarray(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0.96, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0.96, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 0.80, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 0.80, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 0.80, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 0.80, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ],
+        dtype=float,
+    )
+    values = {
+        "architecture": architecture,
+        "upstream_split": operation["upstream_split"],
+        "downstream_split": operation["downstream_split"],
+        "upstream_efficiency": upstream_efficiency,
+        "downstream_efficiency": downstream_efficiency,
+        "source_type": np.asarray([1, 0], dtype=float),
+        "transmitter_type": np.asarray([1, 1, 0, 0, 2, 2, 2, 2], dtype=float),
+    }
+
+    for name in lm100j_hybrid_architecture_output_names():
+        values["d%s_dpower_split" % name] = np.zeros_like(values[name])
+
+    values["dupstream_split_dpower_split"] = operation[
+        "dupstream_split_dpower_split"
+    ]
+    values["ddownstream_split_dpower_split"] = operation[
+        "ddownstream_split_dpower_split"
+    ]
+    return values
 
 
 def lm100j_hybrid_operation_matrix_values(power_split):

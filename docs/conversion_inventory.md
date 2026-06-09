@@ -50,7 +50,7 @@ closed-form derivatives are practical.
 | `regression.py` | complete-equation-scope | Squared-exponential kernel, fixed-preprocessing GP posterior prediction, fixed-shape vector/2D/target normalization, numeric-scalar/column preprocessing, sample-variance, weighted-hyperparameter scaling, prior-mean, and inverse-covariance preprocessing helpers converted; remaining database search, data-build row filtering, and variable input classification are support/orchestration. |
 | `retrofit.py` | support | Retrofit option factory placeholder. |
 | `safety.py` | support | Continuous failure-probability helper converted; discrete fault-tree logic remains support rather than differentiable OpenMDAO components. |
-| `specs.py` | support | LM100J_Hybrid custom operation split matrices converted; remaining aircraft and engine spec factories are dictionary assembly and preset data. |
+| `specs.py` | support | LM100J_Hybrid custom architecture and operation split matrices converted; remaining aircraft and engine spec factories are dictionary assembly and preset data. |
 | `units.py` | converted | `fast_openmdao.units.UnitConversion` for scalar OpenMDAO variables and `UnitArrayConversion` for fixed-shape unit arrays. |
 
 ## Conversion Rules
