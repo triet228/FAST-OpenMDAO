@@ -131,8 +131,8 @@ The public `fast_openmdao` package currently exports:
   `JetLandingFieldLengthConstraint`, `JetTakeoffFieldLengthConstraint`,
   `OEIMultiplier`, `PsLossSigmoid`
 - Cost: `BatteryReplacementCost`
-- Database: `DatabaseWeightFractions`, `MacLiftDragEstimate`,
-  `TurbopropCruiseLiftDragEstimate`
+- Database: `DatabaseGeometryLoads`, `DatabaseWeightFractions`,
+  `MacLiftDragEstimate`, `TurbopropCruiseLiftDragEstimate`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
   `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FlowArea`,

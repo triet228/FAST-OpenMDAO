@@ -31,6 +31,7 @@ from fast_openmdao.constraint import (
 )
 from fast_openmdao.cost import BatteryReplacementCost
 from fast_openmdao.database import (
+    DatabaseGeometryLoads,
     DatabaseWeightFractions,
     MacLiftDragEstimate,
     TurbopropCruiseLiftDragEstimate,
@@ -157,6 +158,7 @@ __all__ = [
     "CruisePowerAvailableConstraint",
     "CruiseSegmentKinematicsPower",
     "CruiseTimeTargetDistance",
+    "DatabaseGeometryLoads",
     "DatabaseWeightFractions",
     "DesignSplitBounds",
     "DetailedTakeoffSegmentKinematicsPower",

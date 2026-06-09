@@ -161,6 +161,104 @@ class DatabaseWeightFractions(om.ExplicitComponent):
                 ]
 
 
+class DatabaseGeometryLoads(om.ExplicitComponent):
+    """Compute FAST database geometry and load preprocessing values.
+
+    Inputs:
+        mtow: Maximum takeoff weight in kg.
+        mzfw: Maximum zero-fuel weight in kg.
+        fuel_weight: Fuel weight in kg.
+        engine_dry_weight: Dry weight per engine in kg.
+        cargo_weight: Cargo weight in kg.
+        max_payload: Direct payload value in kg when selected by option.
+        max_passengers: Passenger count used by FAST's 95 kg/passenger rule.
+        wing_span: Wing span in m.
+        wing_area: Wing area in m**2.
+        tip_chord: Wing tip chord in m.
+        root_chord: Wing root chord in m.
+
+    Outputs:
+        taper_ratio: Tip chord divided by root chord.
+        aspect_ratio: Span squared divided by wing area.
+        payload: FAST database payload estimate in kg.
+        burden: Payload plus fuel plus installed engine dry weight in kg.
+        structure_burden: Ratio of non-burden weight to burden weight.
+        mzfw_mtow: MZFW to MTOW ratio.
+
+    Assumptions:
+        FAST switches between passenger/cargo payload and direct max-payload
+        based on missing database fields. That discrete choice is an option so
+        the component remains smooth for optimization.
+    """
+
+    def initialize(self):
+        self.options.declare("num_engines", default=1)
+        self.options.declare("payload_source", default="pax_cargo")
+
+    def setup(self):
+        self.add_input("mtow", val=10000.0, units="kg")
+        self.add_input("mzfw", val=8000.0, units="kg")
+        self.add_input("fuel_weight", val=2000.0, units="kg")
+        self.add_input("engine_dry_weight", val=500.0, units="kg")
+        self.add_input("cargo_weight", val=0.0, units="kg")
+        self.add_input("max_payload", val=3000.0, units="kg")
+        self.add_input("max_passengers", val=40.0)
+        self.add_input("wing_span", val=25.0, units="m")
+        self.add_input("wing_area", val=60.0, units="m**2")
+        self.add_input("tip_chord", val=1.5, units="m")
+        self.add_input("root_chord", val=3.0, units="m")
+        self.add_output("taper_ratio", val=0.5)
+        self.add_output("aspect_ratio", val=10.0)
+        self.add_output("payload", val=3000.0, units="kg")
+        self.add_output("burden", val=5000.0, units="kg")
+        self.add_output("structure_burden", val=1.0)
+        self.add_output("mzfw_mtow", val=0.8)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = database_geometry_load_values(
+            inputs["mtow"][0],
+            inputs["mzfw"][0],
+            inputs["fuel_weight"][0],
+            inputs["engine_dry_weight"][0],
+            inputs["cargo_weight"][0],
+            inputs["max_payload"][0],
+            inputs["max_passengers"][0],
+            inputs["wing_span"][0],
+            inputs["wing_area"][0],
+            inputs["tip_chord"][0],
+            inputs["root_chord"][0],
+            self.options["num_engines"],
+            self.options["payload_source"],
+        )
+
+        for name in database_geometry_load_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = database_geometry_load_values(
+            inputs["mtow"][0],
+            inputs["mzfw"][0],
+            inputs["fuel_weight"][0],
+            inputs["engine_dry_weight"][0],
+            inputs["cargo_weight"][0],
+            inputs["max_payload"][0],
+            inputs["max_passengers"][0],
+            inputs["wing_span"][0],
+            inputs["wing_area"][0],
+            inputs["tip_chord"][0],
+            inputs["root_chord"][0],
+            self.options["num_engines"],
+            self.options["payload_source"],
+        )
+
+        for output_name in database_geometry_load_output_names():
+            for input_name in database_geometry_load_input_names():
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
 def mac_lift_drag_values(aspect_ratio, reynolds):
     """Return FAST MAC L/D estimate and analytical derivatives."""
 
@@ -263,4 +361,126 @@ def database_weight_fraction_values(
     values["dfuel_fraction_dmtow"] = -fuel_weight / mtow ** 2
     values["dwing_loading_dmtow"] = 1.0 / wing_area
     values["dwing_loading_dwing_area"] = -mtow / wing_area ** 2
+    return values
+
+
+def database_geometry_load_input_names():
+    """Return database geometry/load component input names."""
+
+    return [
+        "mtow",
+        "mzfw",
+        "fuel_weight",
+        "engine_dry_weight",
+        "cargo_weight",
+        "max_payload",
+        "max_passengers",
+        "wing_span",
+        "wing_area",
+        "tip_chord",
+        "root_chord",
+    ]
+
+
+def database_geometry_load_output_names():
+    """Return database geometry/load component output names."""
+
+    return [
+        "taper_ratio",
+        "aspect_ratio",
+        "payload",
+        "burden",
+        "structure_burden",
+        "mzfw_mtow",
+    ]
+
+
+def database_geometry_load_values(
+    mtow,
+    mzfw,
+    fuel_weight,
+    engine_dry_weight,
+    cargo_weight,
+    max_payload,
+    max_passengers,
+    wing_span,
+    wing_area,
+    tip_chord,
+    root_chord,
+    num_engines,
+    payload_source,
+):
+    """Return FAST database geometry/load values and derivatives."""
+
+    mtow = float(mtow)
+    mzfw = float(mzfw)
+    fuel_weight = float(fuel_weight)
+    engine_dry_weight = float(engine_dry_weight)
+    cargo_weight = float(cargo_weight)
+    max_payload = float(max_payload)
+    max_passengers = float(max_passengers)
+    wing_span = float(wing_span)
+    wing_area = float(wing_area)
+    tip_chord = float(tip_chord)
+    root_chord = float(root_chord)
+    num_engines = float(num_engines)
+
+    if payload_source == "pax_cargo":
+        payload = cargo_weight + max_passengers * 95.0
+        dpayload_dcargo_weight = 1.0
+        dpayload_dmax_payload = 0.0
+        dpayload_dmax_passengers = 95.0
+    elif payload_source == "max_payload":
+        payload = max_payload
+        dpayload_dcargo_weight = 0.0
+        dpayload_dmax_payload = 1.0
+        dpayload_dmax_passengers = 0.0
+    else:
+        raise ValueError("payload_source must be 'pax_cargo' or 'max_payload'")
+
+    installed_engine_weight = engine_dry_weight * num_engines
+    burden = payload + fuel_weight + installed_engine_weight
+    structure_burden = (mtow - burden) / burden
+    values = {
+        "taper_ratio": tip_chord / root_chord,
+        "aspect_ratio": wing_span ** 2 / wing_area,
+        "payload": payload,
+        "burden": burden,
+        "structure_burden": structure_burden,
+        "mzfw_mtow": mzfw / mtow,
+    }
+
+    for output_name in database_geometry_load_output_names():
+        for input_name in database_geometry_load_input_names():
+            values[f"d{output_name}_d{input_name}"] = 0.0
+
+    values["dtaper_ratio_dtip_chord"] = 1.0 / root_chord
+    values["dtaper_ratio_droot_chord"] = -tip_chord / root_chord ** 2
+    values["daspect_ratio_dwing_span"] = 2.0 * wing_span / wing_area
+    values["daspect_ratio_dwing_area"] = -wing_span ** 2 / wing_area ** 2
+    values["dpayload_dcargo_weight"] = dpayload_dcargo_weight
+    values["dpayload_dmax_payload"] = dpayload_dmax_payload
+    values["dpayload_dmax_passengers"] = dpayload_dmax_passengers
+    values["dburden_dfuel_weight"] = 1.0
+    values["dburden_dengine_dry_weight"] = num_engines
+    values["dburden_dcargo_weight"] = dpayload_dcargo_weight
+    values["dburden_dmax_payload"] = dpayload_dmax_payload
+    values["dburden_dmax_passengers"] = dpayload_dmax_passengers
+    values["dstructure_burden_dmtow"] = 1.0 / burden
+    dstructure_dburden = -mtow / burden ** 2
+    values["dstructure_burden_dfuel_weight"] = dstructure_dburden
+    values["dstructure_burden_dengine_dry_weight"] = (
+        dstructure_dburden * num_engines
+    )
+    values["dstructure_burden_dcargo_weight"] = (
+        dstructure_dburden * dpayload_dcargo_weight
+    )
+    values["dstructure_burden_dmax_payload"] = (
+        dstructure_dburden * dpayload_dmax_payload
+    )
+    values["dstructure_burden_dmax_passengers"] = (
+        dstructure_dburden * dpayload_dmax_passengers
+    )
+    values["dmzfw_mtow_dmzfw"] = 1.0 / mtow
+    values["dmzfw_mtow_dmtow"] = -mzfw / mtow ** 2
     return values
