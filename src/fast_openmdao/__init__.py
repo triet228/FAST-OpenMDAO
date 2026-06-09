@@ -162,6 +162,7 @@ from fast_openmdao.regression import (
     RegressionVector,
     SquaredExponentialKernel,
 )
+from fast_openmdao.safety import FailureModel
 from fast_openmdao.propulsion import (
     BatteryEnergyCutoff,
     BatteryEnergyHistory,
@@ -267,6 +268,7 @@ __all__ = [
     "FAR25EngineGradient",
     "FAR25ClimbConstraint",
     "FastPythonComponent",
+    "FailureModel",
     "FanFlowSplit",
     "FlightConditions",
     "FlowArea",

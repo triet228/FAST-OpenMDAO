@@ -138,6 +138,7 @@ derivative-native FAST equation components:
   posterior prediction, fixed-shape target/vector/2D normalization, and
   numeric-scalar, numeric-column, sample-variance, and prior-mean helpers with
   analytical partial derivatives.
+- Safety failure-probability helper with analytical partial derivatives.
 - OEW turboprop linear fit, one-step turboprop and turbofan fixed-point
   balances, turbofan airframe GPR weight, and numeric-sum helpers with
   analytical partial derivatives.
@@ -232,6 +233,7 @@ The public `fast_openmdao` package currently exports:
   `RegressionNumericColumn`, `RegressionNumericScalar`, `RegressionPriorMean`,
   `RegressionTargetMatrix`, `RegressionTwoDimensionalArray`, `RegressionVector`,
   `SquaredExponentialKernel`
+- Safety: `FailureModel`
 - Units: `UnitArrayConversion`, `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
   `make_fast_optimization_problem`

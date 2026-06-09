@@ -45,7 +45,7 @@ closed-form derivatives are practical.
 | `reference.py` | support | Reference case store and archive access. |
 | `regression.py` | candidate | Squared-exponential kernel, fixed-preprocessing GP posterior prediction, fixed-shape vector/2D/target normalization, numeric-scalar/column preprocessing, sample-variance, and prior-mean helpers converted; database search, data-build preprocessing, and variable input classification remain support/orchestration. |
 | `retrofit.py` | support | Retrofit option factory placeholder. |
-| `safety.py` | support | Discrete fault-tree logic; not a continuous derivative component. |
+| `safety.py` | support | Continuous failure-probability helper converted; discrete fault-tree logic remains support rather than differentiable OpenMDAO components. |
 | `specs.py` | support | Aircraft and engine spec factories. |
 | `units.py` | converted | `fast_openmdao.units.UnitConversion` for scalar OpenMDAO variables and `UnitArrayConversion` for fixed-shape unit arrays. |
 
