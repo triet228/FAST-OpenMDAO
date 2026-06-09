@@ -54,6 +54,8 @@ derivative-native FAST equation components:
   derivatives for finite active constraints.
 - Optimization operational split bound residual helper with analytical partial
   derivatives.
+- Optimization objective selector helpers for operational and power-management
+  objective values with analytical partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
   design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
@@ -85,7 +87,8 @@ The public `fast_openmdao` package currently exports:
   `CruiseTimeTargetDistance`, `FlightConditions`
 - OEW: `NumericSum`, `TurbopropAirframeWeight`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,
-  `OperationalSplitConstraints`, `PowerLimitConstraints`
+  `OperationalObjective`, `OperationalSplitConstraints`,
+  `PowerManagementObjective`, `PowerLimitConstraints`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `EngineLapse`, `SafeComponentWeight`, `ThrustSinkEfficiency`,
@@ -288,8 +291,10 @@ FAST-Python residual functions.
    derivatives. Done.
 26. Convert optimization operational split bound helper with analytical
    partial derivatives. Done.
-27. Add complex-step derivative checks where supported by FAST-Python internals.
-28. Build reusable groups for mission, propulsion, weights, and objective
+27. Convert optimization objective selector helpers with analytical partial
+   derivatives. Done.
+28. Add complex-step derivative checks where supported by FAST-Python internals.
+29. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

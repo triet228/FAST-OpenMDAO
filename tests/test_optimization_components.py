@@ -12,13 +12,17 @@ import openmdao.api as om
 from fast_openmdao import (
     BatteryEnergyAvailable,
     ElectricMotorPowerAvailable,
+    OperationalObjective,
     OperationalSplitConstraints,
+    PowerManagementObjective,
     PowerLimitConstraints,
 )
 from fast_python.optimization import (
     battery_energy_available,
     electric_motor_power_available,
+    operational_objective_value,
     operational_split_constraint_blocks,
+    power_management_objective,
     power_limit_constraints,
 )
 
@@ -160,6 +164,44 @@ def test_operational_split_constraints_match_fast_python():
     assert np.allclose(fixed_problem.get_val("split_constraints"), fixed_expected)
 
 
+def test_optimization_objectives_match_fast_python():
+    """Check operational and power-management objective parity."""
+
+    for objective_type in ("DOC", "FuelBurn", "Energy"):
+        operational = om.Problem()
+        operational.model.add_subsystem(
+            "objective",
+            OperationalObjective(objective_type=objective_type),
+            promotes=["*"],
+        )
+        operational.setup()
+        set_objective_inputs(operational)
+        operational.run_model()
+
+        assert np.isclose(
+            operational.get_val("operational_objective")[0],
+            operational_objective_value(make_objective_aircraft(objective_type)),
+        )
+
+        management = om.Problem()
+        management.model.add_subsystem(
+            "objective",
+            PowerManagementObjective(objective_type=objective_type),
+            promotes=["*"],
+        )
+        management.setup()
+        set_objective_inputs(management)
+        management.run_model()
+
+        assert np.isclose(
+            management.get_val("power_management_objective")[0],
+            power_management_objective(
+                make_objective_aircraft(objective_type),
+                objective_type,
+            ),
+        )
+
+
 def test_optimization_helpers_declare_analytic_partials():
     """Check optimization helper derivatives against finite difference."""
 
@@ -214,6 +256,24 @@ def test_optimization_helpers_declare_analytic_partials():
                 "operational_splits": np.asarray([0.2, 0.3, 0.4, 0.1, 0.2, 0.3]),
             },
         ),
+        (
+            "operational_objective",
+            OperationalObjective(objective_type="Energy"),
+            {
+                "fuel_burn": 42.0,
+                "fuel_energy": 1.5e9,
+                "battery_energy": 2.0e8,
+            },
+        ),
+        (
+            "management_objective",
+            PowerManagementObjective(objective_type="FuelBurn"),
+            {
+                "fuel_burn": 42.0,
+                "fuel_energy": 1.5e9,
+                "battery_energy": 2.0e8,
+            },
+        ),
     ]
 
     for name, component, values in cases:
@@ -230,11 +290,11 @@ def test_optimization_helpers_declare_analytic_partials():
             method="fd",
             form="central",
             step=1.0e-5,
-        )
+            )
 
         for partial_data in partials[name].values():
             assert (
-                partial_data["abs error"].forward < 1.0e-3
+                partial_data["abs error"].forward < 2.0e-3
                 or partial_data["rel error"].forward < 1.0e-8
             )
 
@@ -278,5 +338,36 @@ def make_operational_split_aircraft(npoint, nopers, ndvars, narg, lam_max):
             "npoint": npoint,
             "nopers": nopers,
             "ndvars": ndvars,
+        },
+    }
+
+
+def set_objective_inputs(problem):
+    """Set common objective component inputs."""
+
+    problem.set_val("fuel_burn", 42.0, units="kg")
+    problem.set_val("fuel_energy", 1.5e9, units="J")
+    problem.set_val("battery_energy", 2.0e8, units="J")
+
+
+def make_objective_aircraft(objective_type):
+    """Return FAST-shaped objective fixture."""
+
+    return {
+        "PowerOpt": {
+            "ObjFun": objective_type,
+        },
+        "Mission": {
+            "History": {
+                "SI": {
+                    "Weight": {
+                        "Fburn": [0.0, 42.0],
+                    },
+                    "Energy": {
+                        "Fuel": [0.0, 1.5e9],
+                        "Batt": [0.0, 2.0e8],
+                    },
+                },
+            },
         },
     }

@@ -196,10 +196,164 @@ class OperationalSplitConstraints(om.ExplicitComponent):
             ]
 
 
+class OperationalObjective(om.ExplicitComponent):
+    """Compute FAST OpsOptimize's unscaled objective selector.
+
+    Inputs:
+        fuel_burn: Final mission fuel burn.
+        fuel_energy: Final fuel energy.
+        battery_energy: Final battery energy.
+
+    Outputs:
+        operational_objective: Objective value selected by ``objective_type``.
+
+    Assumptions:
+        ``objective_type`` is a fixed discrete option matching FAST-Python:
+        DOC, FuelBurn, or Energy.
+    """
+
+    def initialize(self):
+        self.options.declare("objective_type", default="FuelBurn")
+
+    def setup(self):
+        self.add_input("fuel_burn", val=1.0, units="kg")
+        self.add_input("fuel_energy", val=1.0, units="J")
+        self.add_input("battery_energy", val=1.0, units="J")
+        self.add_output("operational_objective", val=1.0)
+        self.declare_partials(of="operational_objective", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = operational_objective_values(
+            self.options["objective_type"],
+            inputs["fuel_burn"][0],
+            inputs["fuel_energy"][0],
+            inputs["battery_energy"][0],
+        )
+        outputs["operational_objective"] = values["objective"]
+
+    def compute_partials(self, inputs, partials):
+        values = operational_objective_values(
+            self.options["objective_type"],
+            inputs["fuel_burn"][0],
+            inputs["fuel_energy"][0],
+            inputs["battery_energy"][0],
+        )
+        partials["operational_objective", "fuel_burn"] = values[
+            "dobjective_dfuel_burn"
+        ]
+        partials["operational_objective", "fuel_energy"] = values[
+            "dobjective_dfuel_energy"
+        ]
+        partials["operational_objective", "battery_energy"] = values[
+            "dobjective_dbattery_energy"
+        ]
+
+
+class PowerManagementObjective(om.ExplicitComponent):
+    """Compute FAST ObjPowerManagement's scaled objective selector."""
+
+    def initialize(self):
+        self.options.declare("objective_type", default="FuelBurn")
+
+    def setup(self):
+        self.add_input("fuel_burn", val=1.0, units="kg")
+        self.add_input("fuel_energy", val=1.0, units="J")
+        self.add_input("battery_energy", val=1.0, units="J")
+        self.add_output("power_management_objective", val=1.0)
+        self.declare_partials(of="power_management_objective", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = power_management_objective_values(
+            self.options["objective_type"],
+            inputs["fuel_burn"][0],
+            inputs["fuel_energy"][0],
+            inputs["battery_energy"][0],
+        )
+        outputs["power_management_objective"] = values["objective"]
+
+    def compute_partials(self, inputs, partials):
+        values = power_management_objective_values(
+            self.options["objective_type"],
+            inputs["fuel_burn"][0],
+            inputs["fuel_energy"][0],
+            inputs["battery_energy"][0],
+        )
+        partials["power_management_objective", "fuel_burn"] = values[
+            "dobjective_dfuel_burn"
+        ]
+        partials["power_management_objective", "fuel_energy"] = values[
+            "dobjective_dfuel_energy"
+        ]
+        partials["power_management_objective", "battery_energy"] = values[
+            "dobjective_dbattery_energy"
+        ]
+
+
 def available_product_value(specific_capacity, installed_weight):
     """Return FAST available power or energy product."""
 
     return specific_capacity * installed_weight
+
+
+def operational_objective_values(objective_type, fuel_burn, fuel_energy, battery_energy):
+    """Return OpsOptimize objective value and derivatives."""
+
+    name = objective_type.lower()
+
+    if name == "doc":
+        return objective_value_pack(0.0, 0.0, 0.0, 0.0)
+
+    if name == "fuelburn":
+        return objective_value_pack(fuel_burn, 1.0, 0.0, 0.0)
+
+    if name == "energy":
+        return objective_value_pack(
+            fuel_energy + battery_energy,
+            0.0,
+            1.0,
+            1.0,
+        )
+
+    raise ValueError("objective_type must be DOC, FuelBurn, or Energy.")
+
+
+def power_management_objective_values(
+    objective_type,
+    fuel_burn,
+    fuel_energy,
+    battery_energy,
+):
+    """Return ObjPowerManagement objective value and derivatives."""
+
+    name = objective_type.lower()
+
+    if name == "doc":
+        return objective_value_pack(0.0, 0.0, 0.0, 0.0)
+
+    if name == "fuelburn":
+        return objective_value_pack(fuel_burn / 17207.0, 1.0 / 17207.0, 0.0, 0.0)
+
+    if name == "energy":
+        scale = 1.0 / 7.4335e11
+        return objective_value_pack(
+            (fuel_energy + battery_energy) * scale,
+            0.0,
+            scale,
+            scale,
+        )
+
+    raise ValueError("objective_type must be DOC, FuelBurn, or Energy.")
+
+
+def objective_value_pack(value, dfuel_burn, dfuel_energy, dbattery_energy):
+    """Return objective value and derivative mapping."""
+
+    return {
+        "objective": value,
+        "dobjective_dfuel_burn": dfuel_burn,
+        "dobjective_dfuel_energy": dfuel_energy,
+        "dobjective_dbattery_energy": dbattery_energy,
+    }
 
 
 def get_design_split_values(inputs, nsplit):
