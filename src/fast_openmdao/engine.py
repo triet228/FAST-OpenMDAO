@@ -545,6 +545,67 @@ class CompressorStageFlow(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class FanFlowSplit(om.ExplicitComponent):
+    """Split FAST fan-exit flow into core and bypass annuli.
+
+    Inputs:
+        mass_flow_2: Total fan-exit mass flow in kg/s.
+        area_2: Total fan-exit annulus area in m**2.
+        bypass_ratio: FAST turbofan bypass ratio.
+
+    Outputs:
+        core_mass_flow: Station 21 core mass flow in kg/s.
+        core_area: Station 21 annulus area in m**2.
+        core_outer_radius: Station 21 outer radius in m.
+        bypass_mass_flow: Station 13 bypass mass flow in kg/s.
+        bypass_area: Station 13 annulus area in m**2.
+        bypass_inner_radius: Station 13 inner radius in m.
+        bypass_outer_radius: Station 13 outer radius in m.
+
+    Assumptions:
+        This converts the smooth, fixed-branch split inside
+        ``fast_python.engine.fan_system`` after the fan compressor stage has
+        already been evaluated. Boosted/geared LPC orchestration remains a
+        higher-level group concern.
+    """
+
+    def setup(self):
+        self.add_input("mass_flow_2", val=100.0, units="kg/s")
+        self.add_input("area_2", val=1.0, units="m**2")
+        self.add_input("bypass_ratio", val=5.0)
+        self.add_output("core_mass_flow", val=16.7, units="kg/s")
+        self.add_output("core_area", val=0.167, units="m**2")
+        self.add_output("core_outer_radius", val=0.23, units="m")
+        self.add_output("bypass_mass_flow", val=83.3, units="kg/s")
+        self.add_output("bypass_area", val=0.833, units="m**2")
+        self.add_output("bypass_inner_radius", val=0.23, units="m")
+        self.add_output("bypass_outer_radius", val=0.56, units="m")
+
+        for output, variables in fan_flow_split_dependencies().items():
+            self.declare_partials(of=output, wrt=variables)
+
+    def compute(self, inputs, outputs):
+        values = fan_flow_split_values(
+            inputs["mass_flow_2"][0],
+            inputs["area_2"][0],
+            inputs["bypass_ratio"][0],
+        )
+
+        for output in fan_flow_split_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = fan_flow_split_values(
+            inputs["mass_flow_2"][0],
+            inputs["area_2"][0],
+            inputs["bypass_ratio"][0],
+        )
+
+        for output, variables in fan_flow_split_dependencies().items():
+            for variable in variables:
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class TurbineStageFlow(om.ExplicitComponent):
     """Compute one FAST on-design turbine stage."""
 
@@ -2082,6 +2143,102 @@ def turbine_stage_flow_values(
             )
 
     return result
+
+
+def fan_flow_split_input_names():
+    """Return scalar inputs for FanFlowSplit."""
+
+    return [
+        "mass_flow_2",
+        "area_2",
+        "bypass_ratio",
+    ]
+
+
+def fan_flow_split_output_names():
+    """Return scalar outputs for FanFlowSplit."""
+
+    return [
+        "core_mass_flow",
+        "core_area",
+        "core_outer_radius",
+        "bypass_mass_flow",
+        "bypass_area",
+        "bypass_inner_radius",
+        "bypass_outer_radius",
+    ]
+
+
+def fan_flow_split_dependencies():
+    """Return nonzero derivative dependencies for FanFlowSplit."""
+
+    return {
+        "core_mass_flow": ["mass_flow_2", "bypass_ratio"],
+        "core_area": ["area_2", "bypass_ratio"],
+        "core_outer_radius": ["area_2", "bypass_ratio"],
+        "bypass_mass_flow": ["mass_flow_2", "bypass_ratio"],
+        "bypass_area": ["area_2", "bypass_ratio"],
+        "bypass_inner_radius": ["area_2", "bypass_ratio"],
+        "bypass_outer_radius": ["area_2"],
+    }
+
+
+def fan_flow_split_values(mass_flow_2, area_2, bypass_ratio):
+    """Return FAST fan-system core/bypass split values and derivatives."""
+
+    mass_flow_2 = float(mass_flow_2)
+    area_2 = float(area_2)
+    bypass_ratio = float(bypass_ratio)
+    denominator = 1.0 + bypass_ratio
+    core_mass_flow = mass_flow_2 / denominator
+    core_area = area_2 / denominator
+    core_outer_radius = math.sqrt(core_area / math.pi)
+    bypass_mass_flow = core_mass_flow * bypass_ratio
+    bypass_area = core_area * bypass_ratio
+    bypass_inner_radius = core_outer_radius
+    bypass_outer_radius = math.sqrt(
+        bypass_area / math.pi + bypass_inner_radius ** 2,
+    )
+    values = {
+        "core_mass_flow": core_mass_flow,
+        "core_area": core_area,
+        "core_outer_radius": core_outer_radius,
+        "bypass_mass_flow": bypass_mass_flow,
+        "bypass_area": bypass_area,
+        "bypass_inner_radius": bypass_inner_radius,
+        "bypass_outer_radius": bypass_outer_radius,
+    }
+
+    for output in fan_flow_split_output_names():
+        for variable in fan_flow_split_input_names():
+            values["d%s_d%s" % (output, variable)] = 0.0
+
+    dcore_mass_dmass = 1.0 / denominator
+    dcore_mass_dbypass = -mass_flow_2 / denominator ** 2
+    dcore_area_darea = 1.0 / denominator
+    dcore_area_dbypass = -area_2 / denominator ** 2
+    dcore_radius_darea = 0.5 / math.pi / core_outer_radius * dcore_area_darea
+    dcore_radius_dbypass = 0.5 / math.pi / core_outer_radius * dcore_area_dbypass
+    dbypass_mass_dmass = bypass_ratio / denominator
+    dbypass_mass_dbypass = mass_flow_2 / denominator ** 2
+    dbypass_area_darea = bypass_ratio / denominator
+    dbypass_area_dbypass = area_2 / denominator ** 2
+    dbypass_outer_darea = 0.5 / math.pi / bypass_outer_radius
+
+    values["dcore_mass_flow_dmass_flow_2"] = dcore_mass_dmass
+    values["dcore_mass_flow_dbypass_ratio"] = dcore_mass_dbypass
+    values["dcore_area_darea_2"] = dcore_area_darea
+    values["dcore_area_dbypass_ratio"] = dcore_area_dbypass
+    values["dcore_outer_radius_darea_2"] = dcore_radius_darea
+    values["dcore_outer_radius_dbypass_ratio"] = dcore_radius_dbypass
+    values["dbypass_mass_flow_dmass_flow_2"] = dbypass_mass_dmass
+    values["dbypass_mass_flow_dbypass_ratio"] = dbypass_mass_dbypass
+    values["dbypass_area_darea_2"] = dbypass_area_darea
+    values["dbypass_area_dbypass_ratio"] = dbypass_area_dbypass
+    values["dbypass_inner_radius_darea_2"] = dcore_radius_darea
+    values["dbypass_inner_radius_dbypass_ratio"] = dcore_radius_dbypass
+    values["dbypass_outer_radius_darea_2"] = dbypass_outer_darea
+    return values
 
 
 def perfect_expansion_nozzle_flow_input_names():

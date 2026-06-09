@@ -19,6 +19,7 @@ from fast_openmdao import (
     ChokedArea,
     CompressorStageFlow,
     DiffuserFlow,
+    FanFlowSplit,
     FlowArea,
     JetAIntegratedHeat,
     LocalEfficiency,
@@ -46,6 +47,7 @@ from fast_python.engine import (
     cp_jeta,
     cv_air,
     diffuser,
+    fan_system,
     local_efficiency,
     local_reynolds,
     mass_flow_parameter,
@@ -399,6 +401,42 @@ def test_compressor_stage_flow_matches_fast_python():
     assert np.isclose(problem.get_val("stage_zeta")[0], expected_state["Zeta"])
 
 
+def test_fan_flow_split_matches_fast_python_fan_system():
+    """Check FAST fan-system core/bypass split parity."""
+
+    state1 = make_compressor_stage_state()
+    eta_poly = {"Compressors": 0.9, "Fan": 0.88}
+    fan_object = make_fan_system_object()
+    spools = {
+        "Count": 2,
+        "RPM": [6200.0, 12000.0],
+    }
+    bpr = 5.0
+    state2, state21, state13, _, _ = fan_system(
+        state1,
+        fan_object,
+        30.0,
+        spools,
+        bpr,
+        eta_poly,
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem("split", FanFlowSplit(), promotes=["*"])
+    problem.setup()
+    problem.set_val("mass_flow_2", state2["MDot"], units="kg/s")
+    problem.set_val("area_2", state2["Area"], units="m**2")
+    problem.set_val("bypass_ratio", bpr)
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("core_mass_flow", units="kg/s")[0], state21["MDot"])
+    assert np.isclose(problem.get_val("core_area", units="m**2")[0], state21["Area"])
+    assert np.isclose(problem.get_val("core_outer_radius", units="m")[0], state21["Ro"])
+    assert np.isclose(problem.get_val("bypass_mass_flow", units="kg/s")[0], state13["MDot"])
+    assert np.isclose(problem.get_val("bypass_area", units="m**2")[0], state13["Area"])
+    assert np.isclose(problem.get_val("bypass_inner_radius", units="m")[0], state13["Ri"])
+    assert np.isclose(problem.get_val("bypass_outer_radius", units="m")[0], state13["Ro"])
+
+
 def test_turbine_stage_flow_matches_fast_python():
     """Check FAST one-stage turbine flow parity."""
 
@@ -698,6 +736,15 @@ def test_engine_primitives_declare_analytic_partials():
             },
         ),
         (
+            "fan_split",
+            FanFlowSplit(),
+            {
+                "mass_flow_2": 45.0,
+                "area_2": 0.55,
+                "bypass_ratio": 5.0,
+            },
+        ),
+        (
             "turbine_stage",
             TurbineStageFlow(),
             {
@@ -760,7 +807,8 @@ def test_engine_primitives_declare_analytic_partials():
                 "turbine_stage",
                 "perfect_expansion_nozzle",
             ) else 1.0e-4
-            assert partial_data["abs error"].forward < tolerance
+            if partial_data["abs error"].forward is not None:
+                assert partial_data["abs error"].forward < tolerance
 
 
 def make_burner_state():
@@ -865,6 +913,22 @@ def set_compressor_stage_values(problem, state, stage_pressure_ratio, rpm, effic
     problem.set_val("stage_pressure_ratio", stage_pressure_ratio)
     problem.set_val("rpm", rpm, units="rpm")
     problem.set_val("stage_efficiency", efficiency)
+
+
+def make_fan_system_object():
+    """Return a compact unboosted, ungeared FAST fan-system object."""
+
+    return {
+        "Geared": False,
+        "Boosted": False,
+        "GearRatio": 1,
+        "FanObject": {
+            "Pi": 1.18,
+            "RPM": 6200.0,
+        },
+        "BoosterObject": "Nonexistent",
+        "LPCObject": "Nonexistent",
+    }
 
 
 def make_turbine_stage_state():

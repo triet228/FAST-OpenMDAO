@@ -53,6 +53,8 @@ derivative-native FAST equation components:
   exit-state component with analytical partial derivatives.
 - Engine one-stage compressor/fan flow component with corrected map scalars
   and analytical partial derivatives.
+- Engine fan-exit core/bypass flow split and annulus geometry component with
+  analytical partial derivatives.
 - Engine one-stage turbine flow component with analytical partial derivatives.
 - Engine BADA-style simple off-design turbofan fuel-flow component with
   analytical partial derivatives.
@@ -139,7 +141,8 @@ The public `fast_openmdao` package currently exports:
   `TurbofanMacLiftDragEstimate`, `TurbopropCruiseLiftDragEstimate`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
-  `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FlowArea`,
+  `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FanFlowSplit`,
+  `FlowArea`,
   `JetAIntegratedHeat`, `LocalEfficiency`, `LocalReynolds`, `MassFlowParameter`,
   `OffDesignNozzleMach`, `PerfectExpansionNozzleFlow`,
   `SimpleOffDesignTurbofan`, `StaticDensity`, `StaticPressure`,
@@ -417,8 +420,10 @@ residual functions.
    derivatives. Done.
 51. Convert one-step turbofan OEW fixed-point balance with analytical partial
    derivatives. Done.
-52. Add complex-step derivative checks where supported by FAST-Python internals.
-53. Build reusable groups for mission, propulsion, weights, and objective
+52. Convert fan-exit core/bypass flow split with analytical partial
+   derivatives. Done.
+53. Add complex-step derivative checks where supported by FAST-Python internals.
+54. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.
