@@ -231,7 +231,8 @@ The public `fast_openmdao` package currently exports:
   `SplitValuesVector`, `ThrustSinkEfficiency`, `TransmitterFanEfficiency`,
   `TurboelectricArchitecture`, `TurbofanEngineWeightForSizing`,
   `TurbopropEngineWeightForSizing`
-- Regression: `GaussianProcessPrediction`, `RegressionSampleVariance`,
+- Regression: `GaussianProcessPrediction`, `RegressionInverseTerm`,
+  `RegressionSampleVariance`,
   `RegressionNumericColumn`, `RegressionNumericScalar`, `RegressionPriorMean`,
   `RegressionTargetMatrix`, `RegressionTwoDimensionalArray`, `RegressionVector`,
   `RegressionWeightedHyperparameters`, `SquaredExponentialKernel`

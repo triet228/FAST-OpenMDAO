@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     GaussianProcessPrediction,
+    RegressionInverseTerm,
     RegressionNumericColumn,
     RegressionNumericScalar,
     RegressionPriorMean,
@@ -29,6 +30,7 @@ from fast_python.regression import (
     numeric_column,
     numeric_scalar,
     prior_calculation,
+    reg_processing,
     sample_variance,
     square_exp_kernel,
     target_matrix,
@@ -94,6 +96,33 @@ def test_gaussian_process_prediction_matches_fast_python():
         problem.get_val("posterior_variance")[0],
         expected_variance[0],
     )
+
+
+def test_regression_inverse_term_matches_fast_python():
+    """Check regression inverse covariance preprocessing against FAST-Python."""
+
+    database = make_weighted_hyperparameter_database()
+    io_space = make_weighted_hyperparameter_io_space()
+    weights = np.asarray([1.0, 2.0])
+    prior = np.asarray([140.0, 160.0])
+    data_matrix, hyperparams, expected_inverse = reg_processing(
+        database,
+        io_space,
+        prior,
+        weights,
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "inverse",
+        RegressionInverseTerm(data_matrix=data_matrix, prior_size=prior.size),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("hyperparams", hyperparams)
+    problem.set_val("prior", prior)
+    problem.run_model()
+
+    assert np.allclose(problem.get_val("inverse_term"), expected_inverse)
 
 
 def test_regression_shape_and_variance_helpers_match_fast_python():
@@ -287,6 +316,38 @@ def test_gaussian_process_prediction_declares_analytic_partials():
     )
 
     for partial_data in partials["prediction"].values():
+        assert partial_data["abs error"].forward < 1.0e-6
+
+
+def test_regression_inverse_term_declares_analytic_partials():
+    """Check inverse covariance preprocessing derivatives."""
+
+    data_matrix = np.asarray(
+        [
+            [1.0, 10.0, 100.0],
+            [2.0, 20.0, 120.0],
+            [4.0, 40.0, 160.0],
+        ]
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "inverse",
+        RegressionInverseTerm(data_matrix=data_matrix, prior_size=2),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("hyperparams", [3.5, 350.0, 1200.0])
+    problem.set_val("prior", [140.0, 160.0])
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["inverse"].values():
         assert partial_data["abs error"].forward < 1.0e-6
 
 

@@ -142,6 +142,55 @@ class GaussianProcessPrediction(om.ExplicitComponent):
         ]
 
 
+class RegressionInverseTerm(om.ExplicitComponent):
+    """Build FAST regression's noise-augmented inverse covariance matrix."""
+
+    def initialize(self):
+        self.options.declare("data_matrix")
+        self.options.declare("prior_size", default=1)
+
+    def setup(self):
+        data_matrix = np.asarray(self.options["data_matrix"], dtype=float)
+        prior_size = self.options["prior_size"]
+        row_count = data_matrix.shape[0]
+        hyper_size = data_matrix.shape[1]
+        output_size = row_count * row_count
+        self._data_matrix = data_matrix
+        self.add_input("hyperparams", val=np.ones(hyper_size))
+        self.add_input("prior", val=np.ones(prior_size))
+        self.add_output("inverse_term", val=np.zeros((row_count, row_count)))
+        self.declare_partials(
+            of="inverse_term",
+            wrt="hyperparams",
+            rows=np.repeat(np.arange(output_size), hyper_size),
+            cols=np.tile(np.arange(hyper_size), output_size),
+        )
+        self.declare_partials(
+            of="inverse_term",
+            wrt="prior",
+            rows=np.repeat(np.arange(output_size), prior_size),
+            cols=np.tile(np.arange(prior_size), output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["inverse_term"] = regression_inverse_term_values(
+            self._data_matrix,
+            inputs["hyperparams"],
+            inputs["prior"],
+        )["inverse_term"]
+
+    def compute_partials(self, inputs, partials):
+        values = regression_inverse_term_values(
+            self._data_matrix,
+            inputs["hyperparams"],
+            inputs["prior"],
+        )
+        partials["inverse_term", "hyperparams"] = values[
+            "dinverse_term_dhyperparams"
+        ]
+        partials["inverse_term", "prior"] = values["dinverse_term_dprior"]
+
+
 class RegressionVector(om.ExplicitComponent):
     """Normalize FAST regression values to a one-dimensional vector."""
 
@@ -456,6 +505,51 @@ def gaussian_process_prediction_values(
         "dposterior_mean_dtarget": dmean_dtarget,
         "dposterior_mean_dprior": dmean_dprior,
         "dposterior_variance_dtarget": dvariance_dtarget,
+    }
+
+
+def regression_inverse_term_values(data_matrix, hyperparams, prior):
+    """Return FAST reg_processing inverse covariance and derivatives."""
+
+    data_matrix = np.asarray(data_matrix, dtype=float)
+    hyperparams = np.asarray(hyperparams, dtype=float).reshape(-1)
+    prior = np.asarray(prior, dtype=float).reshape(-1)
+    inputs = data_matrix[:, :-1]
+    length_scales = hyperparams[:-1]
+    signal_variance = hyperparams[-1]
+    row_count = data_matrix.shape[0]
+    hyper_size = hyperparams.size
+    kernel = np.zeros((row_count, row_count))
+    dkernel_dhyperparams = np.zeros((hyper_size, row_count, row_count))
+
+    for irow in range(row_count):
+        for jrow in range(row_count):
+            delta = inputs[irow, :] - inputs[jrow, :]
+            exponent = -0.3 * np.sum(delta ** 2 / length_scales)
+            kernel_value = signal_variance * np.exp(exponent)
+            kernel[irow, jrow] = kernel_value
+            dkernel_dhyperparams[:-1, irow, jrow] = (
+                kernel_value * 0.3 * delta ** 2 / length_scales ** 2
+            )
+            dkernel_dhyperparams[-1, irow, jrow] = kernel_value / signal_variance
+
+    prior_mean = np.mean(prior)
+    noise_variance = (prior_mean * 5.0e-2) ** 2
+    covariance = kernel + noise_variance * np.eye(row_count)
+    inverse_term = np.linalg.inv(covariance)
+    dinverse_dhyperparams = np.zeros((row_count * row_count, hyper_size))
+
+    for index in range(hyper_size):
+        derivative = -inverse_term @ dkernel_dhyperparams[index] @ inverse_term
+        dinverse_dhyperparams[:, index] = derivative.reshape(-1)
+
+    dnoise_dprior = 2.0 * 5.0e-2 ** 2 * prior_mean / prior.size
+    prior_derivative_matrix = -dnoise_dprior * inverse_term @ inverse_term
+    dinverse_dprior = np.tile(prior_derivative_matrix.reshape(-1, 1), prior.size)
+    return {
+        "inverse_term": inverse_term,
+        "dinverse_term_dhyperparams": dinverse_dhyperparams.reshape(-1),
+        "dinverse_term_dprior": dinverse_dprior.reshape(-1),
     }
 
 
