@@ -1,7 +1,8 @@
 # src/fast_openmdao/units.py
 
-"""OpenMDAO components for scalar FAST unit conversions."""
+"""OpenMDAO components for FAST unit conversions."""
 
+import numpy as np
 import openmdao.api as om
 
 from fast_python.units import (
@@ -72,6 +73,59 @@ class UnitConversion(om.ExplicitComponent):
         )
 
 
+class UnitArrayConversion(om.ExplicitComponent):
+    """Convert a fixed-shape FAST value array between fixed units.
+
+    Inputs:
+        values: Scalar, vector, or matrix values in the source unit.
+
+    Outputs:
+        converted_values: Converted values with the same fixed OpenMDAO shape.
+
+    Assumptions:
+        Unit labels and input shape are fixed during setup. FAST-Python also
+        preserves nested list/tuple shape; in OpenMDAO that shape is represented
+        by the component's fixed array shape.
+    """
+
+    def initialize(self):
+        self.options.declare("quantity", default="length")
+        self.options.declare("oldunit", default="m")
+        self.options.declare("newunit", default="ft")
+        self.options.declare("input_shape", default=(1,))
+        self.options.declare("input_name", default="values")
+        self.options.declare("output_name", default="converted_values")
+
+    def setup(self):
+        input_shape = unit_shape_tuple(self.options["input_shape"])
+        size = int(np.prod(input_shape))
+        self.add_input(self.options["input_name"], val=np.ones(input_shape))
+        self.add_output(self.options["output_name"], val=np.ones(input_shape))
+        rows = np.arange(size)
+        self.declare_partials(
+            of=self.options["output_name"],
+            wrt=self.options["input_name"],
+            rows=rows,
+            cols=rows,
+            val=np.ones(size)
+            * conversion_derivative(
+                self.options["quantity"],
+                self.options["oldunit"],
+                self.options["newunit"],
+            ),
+        )
+
+    def compute(self, inputs, outputs):
+        input_name = self.options["input_name"]
+        output_name = self.options["output_name"]
+        outputs[output_name] = convert_array(
+            inputs[input_name],
+            self.options["quantity"],
+            self.options["oldunit"],
+            self.options["newunit"],
+        )
+
+
 def convert_scalar(value, quantity, oldunit, newunit):
     """Return one scalar converted with FAST unit rules."""
 
@@ -80,6 +134,19 @@ def convert_scalar(value, quantity, oldunit, newunit):
 
     factors = UNIT_TABLES[quantity]
     return value * factors[oldunit][newunit]
+
+
+def convert_array(values, quantity, oldunit, newunit):
+    """Return fixed-shape values converted with FAST unit rules."""
+
+    values = np.asarray(values, dtype=float)
+    slope = conversion_derivative(quantity, oldunit, newunit)
+
+    if quantity == "temperature":
+        offset = convert_scalar(0.0, quantity, oldunit, newunit)
+        return values * slope + offset
+
+    return values * slope
 
 
 def conversion_derivative(quantity, oldunit, newunit):
@@ -122,3 +189,17 @@ def from_kelvin_slope(unit):
 
     convert_temperature(0.0, "K", unit)
     return 0.0
+
+
+def unit_shape_tuple(shape):
+    """Return an OpenMDAO option shape as a tuple of integers."""
+
+    if isinstance(shape, tuple) and len(shape) == 0:
+        return ()
+
+    array = np.asarray(shape).reshape(-1)
+
+    if array.size == 0:
+        return (1,)
+
+    return tuple(int(value) for value in array)

@@ -18,9 +18,10 @@ derivative-native FAST equation components:
   run.
 - `Gravity` and `StandardAtmosphere`: native OpenMDAO components matching
   `fast_python.atmosphere` with analytical partial derivatives.
-- `KPPProjection`, `BatteryReplacementCost`, and `UnitConversion`: native
-  OpenMDAO utility components for projection, cost, and scalar conversion
-  equations with analytical partial derivatives.
+- `KPPProjection`, `BatteryReplacementCost`, `UnitConversion`, and
+  `UnitArrayConversion`: native OpenMDAO utility components for projection,
+  cost, and scalar/fixed-shape conversion equations with analytical partial
+  derivatives.
 - `FlightConditions`: native mission primitive matching
   `fast_python.mission.compute_flight_conditions` with analytical partial
   derivatives.
@@ -206,7 +207,7 @@ The public `fast_openmdao` package currently exports:
   `RegressionNumericColumn`, `RegressionNumericScalar`,
   `RegressionTargetMatrix`, `RegressionTwoDimensionalArray`, `RegressionVector`,
   `SquaredExponentialKernel`
-- Units: `UnitConversion`
+- Units: `UnitArrayConversion`, `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
   `make_fast_optimization_problem`
 

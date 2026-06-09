@@ -47,7 +47,7 @@ closed-form derivatives are practical.
 | `retrofit.py` | support | Retrofit option factory placeholder. |
 | `safety.py` | support | Discrete fault-tree logic; not a continuous derivative component. |
 | `specs.py` | support | Aircraft and engine spec factories. |
-| `units.py` | converted | `fast_openmdao.units.UnitConversion` for scalar OpenMDAO variables. |
+| `units.py` | converted | `fast_openmdao.units.UnitConversion` for scalar OpenMDAO variables and `UnitArrayConversion` for fixed-shape unit arrays. |
 
 ## Conversion Rules
 

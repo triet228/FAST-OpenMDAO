@@ -9,7 +9,7 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import UnitConversion
+from fast_openmdao import UnitArrayConversion, UnitConversion
 from fast_python.units import convert_length, convert_temperature, convert_tsfc
 
 
@@ -89,3 +89,94 @@ def test_unit_conversion_supports_custom_variable_names():
     problem.run_model()
 
     assert np.isclose(problem.get_val("tsfc_imp")[0], convert_tsfc(1.826, "SI", "Imp"))
+
+
+def test_unit_array_conversion_matches_fast_python_shape_preserving_values():
+    """Check fixed-shape array conversion parity with FAST-Python."""
+
+    values = np.asarray([[1.0, 2.0], [3.0, 4.0]])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "length",
+        UnitArrayConversion(
+            quantity="length",
+            oldunit="m",
+            newunit="ft",
+            input_shape=values.shape,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("values", values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("converted_values"),
+        np.asarray(convert_length(values.tolist(), "m", "ft")),
+    )
+
+
+def test_unit_array_conversion_matches_fast_python_temperature():
+    """Check fixed-shape affine temperature array conversion parity."""
+
+    values = np.asarray([0.0, 25.0, 100.0])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "temperature",
+        UnitArrayConversion(
+            quantity="temperature",
+            oldunit="C",
+            newunit="F",
+            input_shape=values.shape,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("values", values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("converted_values"),
+        np.asarray(convert_temperature(values.tolist(), "C", "F")),
+    )
+
+
+def test_unit_array_conversion_declares_analytic_partials():
+    """Check fixed-shape unit array conversion derivatives."""
+
+    cases = [
+        (
+            UnitArrayConversion(
+                quantity="length",
+                oldunit="m",
+                newunit="ft",
+                input_shape=(2, 2),
+            ),
+            np.asarray([[1.0, 2.0], [3.0, 4.0]]),
+        ),
+        (
+            UnitArrayConversion(
+                quantity="temperature",
+                oldunit="C",
+                newunit="F",
+                input_shape=(3,),
+            ),
+            np.asarray([0.0, 25.0, 100.0]),
+        ),
+    ]
+
+    for component, values in cases:
+        problem = om.Problem()
+        problem.model.add_subsystem("conversion", component, promotes=["*"])
+        problem.setup()
+        problem.set_val("values", values)
+        problem.run_model()
+        partials = problem.check_partials(
+            out_stream=None,
+            method="fd",
+            form="central",
+            step=1.0e-6,
+        )
+
+        for partial_data in partials["conversion"].values():
+            assert partial_data["abs error"].forward < 1.0e-8

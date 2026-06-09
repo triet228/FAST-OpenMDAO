@@ -171,7 +171,7 @@ from fast_openmdao.propulsion import (
     TurbofanEngineWeightForSizing,
     TurbopropEngineWeightForSizing,
 )
-from fast_openmdao.units import UnitConversion
+from fast_openmdao.units import UnitArrayConversion, UnitConversion
 
 __version__ = "0.1.0"
 
@@ -322,6 +322,7 @@ __all__ = [
     "TurbofanAirframeWeight",
     "TurbofanOEWIterationStep",
     "UnitConversion",
+    "UnitArrayConversion",
     "WeightSum",
     "WingAreaFromLoading",
     "__version__",
