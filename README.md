@@ -49,6 +49,8 @@ derivative-native FAST equation components:
 - Engine one-stage turbine flow component with analytical partial derivatives.
 - Engine BADA-style simple off-design turbofan fuel-flow component with
   analytical partial derivatives.
+- Engine low-fidelity turboprop linear sizing component with analytical
+  partial derivatives.
 - Propulsion primitives for cable sizing weight, engine lapse, engine thrust
   requirement, turboprop/piston engine sizing weight, power-flow propagation,
   safe component weight, efficiency selection, and supplemental transmitter
@@ -111,7 +113,7 @@ The public `fast_openmdao` package currently exports:
   `OffDesignNozzleMach`, `PerfectExpansionNozzleFlow`,
   `SimpleOffDesignTurbofan`, `StaticDensity`, `StaticPressure`,
   `StaticTemperature`, `ThermalPerfectGamma`, `TotalPressure`,
-  `TotalTemperature`, `TurbineStageFlow`
+  `TotalTemperature`, `TurbineStageFlow`, `TurbopropLinearSizing`
 - Mission: `CruiseBreguetEfficiencyTriplet`, `CruiseBreguetPowerSplit`,
   `CruiseBreguetPropulsiveEfficiency`, `CruiseBreguetSourceEnergy`,
   `CruiseTimeTargetDistance`, `FlightConditions`, `InitialEnergyRemaining`

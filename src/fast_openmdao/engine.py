@@ -946,6 +946,58 @@ class SimpleOffDesignTurbofan(om.ExplicitComponent):
                 ]
 
 
+class TurbopropLinearSizing(om.ExplicitComponent):
+    """Compute FAST low-fidelity turboprop linear sizing estimates."""
+
+    def setup(self):
+        self.add_input("mach", val=0.05)
+        self.add_input("altitude", val=0.0, units="m")
+        self.add_input("overall_pressure_ratio", val=15.0)
+        self.add_input("max_total_temperature_4", val=1200.0, units="K")
+        self.add_input("required_power", val=3.0e6, units="W")
+        self.add_input("compressor_efficiency", val=0.9)
+        self.add_input("combustor_efficiency", val=0.98)
+        self.add_input("turbine_efficiency", val=0.9)
+        self.add_output("mass_flow_0", val=12.0, units="kg/s")
+        self.add_output("bsfc", val=6.0e-8)
+        self.add_output("bsfc_g_kw_hr", val=220.0)
+        self.add_output("mass_flow_2", val=12.0, units="kg/s")
+        self.add_output("fuel_flow", val=0.2, units="kg/s")
+        self.add_output("total_temperature_7", val=900.0, units="K")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = turboprop_linear_sizing_values(
+            inputs["mach"][0],
+            inputs["altitude"][0],
+            inputs["overall_pressure_ratio"][0],
+            inputs["max_total_temperature_4"][0],
+            inputs["required_power"][0],
+            inputs["compressor_efficiency"][0],
+            inputs["combustor_efficiency"][0],
+            inputs["turbine_efficiency"][0],
+        )
+
+        for output in turboprop_linear_sizing_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = turboprop_linear_sizing_values(
+            inputs["mach"][0],
+            inputs["altitude"][0],
+            inputs["overall_pressure_ratio"][0],
+            inputs["max_total_temperature_4"][0],
+            inputs["required_power"][0],
+            inputs["compressor_efficiency"][0],
+            inputs["combustor_efficiency"][0],
+            inputs["turbine_efficiency"][0],
+        )
+
+        for output in turboprop_linear_sizing_output_names():
+            for variable in turboprop_linear_sizing_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 def simple_off_design_input_names():
     """Return scalar input names for SimpleOffDesignTurbofan derivatives."""
 
@@ -963,6 +1015,145 @@ def simple_off_design_input_names():
         "fuel_coeff_altitude",
         "he_coefficient",
     )
+
+
+def turboprop_linear_sizing_input_names():
+    """Return scalar inputs for TurbopropLinearSizing derivatives."""
+
+    return (
+        "mach",
+        "altitude",
+        "overall_pressure_ratio",
+        "max_total_temperature_4",
+        "required_power",
+        "compressor_efficiency",
+        "combustor_efficiency",
+        "turbine_efficiency",
+    )
+
+
+def turboprop_linear_sizing_output_names():
+    """Return scalar TurbopropLinearSizing outputs."""
+
+    return (
+        "mass_flow_0",
+        "bsfc",
+        "bsfc_g_kw_hr",
+        "mass_flow_2",
+        "fuel_flow",
+        "total_temperature_7",
+    )
+
+
+def turboprop_linear_sizing_values(
+    mach,
+    altitude,
+    overall_pressure_ratio,
+    max_total_temperature_4,
+    required_power,
+    compressor_efficiency,
+    combustor_efficiency,
+    turbine_efficiency,
+):
+    """Return FAST turboprop linear sizing outputs and derivatives."""
+
+    raw_inputs = {
+        "mach": mach,
+        "altitude": altitude,
+        "overall_pressure_ratio": overall_pressure_ratio,
+        "max_total_temperature_4": max_total_temperature_4,
+        "required_power": required_power,
+        "compressor_efficiency": compressor_efficiency,
+        "combustor_efficiency": combustor_efficiency,
+        "turbine_efficiency": turbine_efficiency,
+    }
+    values = {
+        name: _Ad.variable(raw_inputs[name], name)
+        for name in turboprop_linear_sizing_input_names()
+    }
+    gl = 7.0 / 5.0
+    gh = 4.0 / 3.0
+    cpl = gl * GAS_CONSTANT_AIR / (gl - 1.0)
+    cph = gh * GAS_CONSTANT_AIR / (gh - 1.0)
+    lower_heating_value = 43.17e6
+    mach_ad = values["mach"]
+    atmosphere = _ad_atmosphere_layer(values["altitude"])
+    opr = values["overall_pressure_ratio"]
+    tt4 = values["max_total_temperature_4"]
+    req_power = values["required_power"]
+    eta3 = values["compressor_efficiency"]
+    eta4 = values["combustor_efficiency"]
+    eta49 = values["turbine_efficiency"]
+    eta7 = values["turbine_efficiency"]
+    ts0 = atmosphere["temperature"]
+    ps0 = atmosphere["pressure"]
+    pt0 = ps0 * _ad_pressure_ratio(mach_ad, gl)
+    tt0 = ts0 * _ad_isentropic_q(mach_ad, gl)
+    tt2 = tt0
+    pt3 = opr * pt0
+    ideal_tt3 = tt2 * opr ** ((gl - 1.0) / gl)
+    tt3 = (ideal_tt3 - tt2) / eta3 + tt2
+    compressor_work = cpl * (tt3 - tt2)
+    mass_leak = 0.01
+    mass_bleed = 0.03
+    mass_cooling = 0.06
+    mass31 = 1.0 - mass_leak - mass_bleed - mass_cooling
+    tt31 = tt3
+    pt31 = pt3
+    pt4 = pt31 * 0.95
+    cp_air_combustion = _ad_integrated_heat_value(
+        tt31,
+        tt4,
+        233.0,
+        1.0 / 210.0,
+        875.0,
+        993.0,
+    )
+    cp_jeta_combustion = _ad_integrated_heat_value(
+        tt31,
+        tt4,
+        4600.0,
+        1.0 / 410.0,
+        500.0,
+        100.0,
+    )
+    fuel_flow_unit = mass31 * cp_air_combustion / (
+        eta4 * lower_heating_value - cp_jeta_combustion
+    )
+    mass4 = mass31 + fuel_flow_unit
+    tt49_ideal = tt4 - compressor_work / mass4 / cph
+    pt49 = pt4 * (
+        1.0 + (tt49_ideal - tt4) / tt4 / eta49
+    ) ** (gh / (gh - 1.0))
+    tt49 = tt4 - compressor_work / mass4 / cph / eta49
+    mass495 = mass4 + mass_cooling
+    tt495 = (mass4 * cph * tt49 + mass_cooling * cpl * tt31) / cph / mass495
+    pt495 = pt49 * (tt495 / tt49) ** (gh / (gh - 1.0))
+    pt7 = ps0
+    tt7 = tt495 * (pt7 / pt495) ** ((gh - 1.0) / gh)
+    specific_power = mass495 * cph * eta7 * (tt495 - tt7)
+    mass2 = req_power / specific_power
+    fuel_flow = fuel_flow_unit * mass2
+    bsfc = fuel_flow / req_power
+    ad_outputs = {
+        "mass_flow_0": mass2,
+        "bsfc": bsfc,
+        "bsfc_g_kw_hr": bsfc * 3.6e9,
+        "mass_flow_2": mass2,
+        "fuel_flow": fuel_flow,
+        "total_temperature_7": tt7,
+    }
+    result = {}
+
+    for output_name, ad_value in ad_outputs.items():
+        result[output_name] = ad_value.value
+
+        for input_name in turboprop_linear_sizing_input_names():
+            result["d%s_d%s" % (output_name, input_name)] = (
+                ad_value.derivatives.get(input_name, 0.0)
+            )
+
+    return result
 
 
 def diffuser_flow_input_names():
@@ -2567,6 +2758,122 @@ def _ad_thermal_perfect_gamma(total_temperature, mach, gamma):
         "cp_air": cp,
         "cv_air": cv,
         "updated_gamma": gamma_new,
+    }
+
+
+def _ad_atmosphere_layer(altitude):
+    """Return standard-atmosphere AD scalars for one altitude."""
+
+    altitude = _ad_value(altitude)
+
+    if altitude.value < 0.0 or altitude.value > 100000.0:
+        raise ValueError("Altitude must be between 0 and 100000 m.")
+
+    if altitude.value < 11000.0:
+        return _ad_gradient_atmosphere_layer(
+            altitude,
+            0.0,
+            288.15,
+            101300.0,
+            -0.0065,
+        )
+
+    if altitude.value < 20000.0:
+        return _ad_isothermal_atmosphere_layer(
+            altitude,
+            11000.0,
+            216.65,
+            2.2609e4,
+        )
+
+    if altitude.value < 32000.0:
+        return _ad_gradient_atmosphere_layer(
+            altitude,
+            20000.0,
+            216.65,
+            5.4731e3,
+            0.0010,
+        )
+
+    if altitude.value < 47000.0:
+        return _ad_gradient_atmosphere_layer(
+            altitude,
+            32000.0,
+            228.65,
+            866.8940,
+            0.0028,
+        )
+
+    if altitude.value < 51000.0:
+        return _ad_isothermal_atmosphere_layer(
+            altitude,
+            47000.0,
+            270.65,
+            110.6427,
+        )
+
+    if altitude.value < 71000.0:
+        return _ad_gradient_atmosphere_layer(
+            altitude,
+            51000.0,
+            270.65,
+            66.7260,
+            -0.0028,
+        )
+
+    if altitude.value < 85000.0:
+        return _ad_gradient_atmosphere_layer(
+            altitude,
+            71000.0,
+            214.65,
+            3.9401,
+            -0.0020,
+        )
+
+    return _ad_isothermal_atmosphere_layer(
+        altitude,
+        85000.0,
+        186.65,
+        0.3615,
+    )
+
+
+def _ad_gradient_atmosphere_layer(
+    altitude,
+    base_altitude,
+    base_temperature,
+    base_pressure,
+    lapse,
+):
+    """Return non-isothermal atmosphere values as AD scalars."""
+
+    temperature = base_temperature + lapse * (altitude - base_altitude)
+    exponent = -9.81 / (GAS_CONSTANT_AIR * lapse)
+    pressure = base_pressure * (temperature / base_temperature) ** exponent
+    density = pressure / (GAS_CONSTANT_AIR * temperature)
+    return {
+        "temperature": temperature,
+        "pressure": pressure,
+        "density": density,
+    }
+
+
+def _ad_isothermal_atmosphere_layer(
+    altitude,
+    base_altitude,
+    temperature,
+    base_pressure,
+):
+    """Return isothermal atmosphere values as AD scalars."""
+
+    pressure = base_pressure * _ad_exp(
+        -9.81 * (altitude - base_altitude) / (GAS_CONSTANT_AIR * temperature)
+    )
+    density = pressure / (GAS_CONSTANT_AIR * temperature)
+    return {
+        "temperature": _Ad(temperature),
+        "pressure": pressure,
+        "density": density,
     }
 
 

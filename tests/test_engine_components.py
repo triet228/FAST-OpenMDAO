@@ -34,6 +34,7 @@ from fast_openmdao import (
     TotalPressure,
     TotalTemperature,
     TurbineStageFlow,
+    TurbopropLinearSizing,
 )
 from fast_python.engine import (
     a_astar,
@@ -59,6 +60,7 @@ from fast_python.engine import (
     ts_tt,
     tt_ts,
     turb_stage,
+    turboprop_linear_sizing,
 )
 
 
@@ -495,6 +497,25 @@ def test_simple_off_design_turbofan_matches_fast_python():
     assert np.isclose(problem.get_val("he_coeff")[0], expected["C"])
 
 
+def test_turboprop_linear_sizing_matches_fast_python():
+    """Check FAST low-fidelity turboprop linear sizing parity."""
+
+    engine_spec = make_turboprop_linear_sizing_spec()
+    expected = turboprop_linear_sizing(engine_spec)
+    problem = om.Problem()
+    problem.model.add_subsystem("sizing", TurbopropLinearSizing(), promotes=["*"])
+    problem.setup()
+    set_turboprop_linear_sizing_values(problem, engine_spec)
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("mass_flow_0", units="kg/s")[0], expected["MDot0"])
+    assert np.isclose(problem.get_val("bsfc")[0], expected["BSFC"])
+    assert np.isclose(problem.get_val("bsfc_g_kw_hr")[0], expected["BSFC_g_kW_hr"])
+    assert np.isclose(problem.get_val("mass_flow_2", units="kg/s")[0], expected["m2"])
+    assert np.isclose(problem.get_val("fuel_flow", units="kg/s")[0], expected["mfuel"])
+    assert np.isclose(problem.get_val("total_temperature_7", units="K")[0], expected["Tt7"])
+
+
 def test_engine_primitives_declare_analytic_partials():
     """Check engine primitive derivatives against finite difference."""
 
@@ -564,6 +585,20 @@ def test_engine_primitives_declare_analytic_partials():
                 "inner_radius_1": 0.45,
                 "desired_mach": 0.25,
                 "diffuser_efficiency": 0.98,
+            },
+        ),
+        (
+            "turboprop_linear_sizing",
+            TurbopropLinearSizing(),
+            {
+                "mach": 0.08,
+                "altitude": 1000.0,
+                "overall_pressure_ratio": 15.0,
+                "max_total_temperature_4": 1200.0,
+                "required_power": 3.0e6,
+                "compressor_efficiency": 0.9,
+                "combustor_efficiency": 0.98,
+                "turbine_efficiency": 0.9,
             },
         ),
         (
@@ -656,6 +691,7 @@ def test_engine_primitives_declare_analytic_partials():
             tolerance = 1.0e-3 if name in (
                 "nozzle",
                 "diffuser",
+                "turboprop_linear_sizing",
                 "burner",
                 "stage",
                 "turbine_stage",
@@ -846,6 +882,43 @@ def set_nozzle_values(problem, state, ambient, nozzle_pressure_ratio, efficiency
     problem.set_val("ambient_gamma", ambient["Gam"])
     problem.set_val("nozzle_pressure_ratio", nozzle_pressure_ratio)
     problem.set_val("nozzle_efficiency", efficiency)
+
+
+def make_turboprop_linear_sizing_spec():
+    """Return compact FAST-Python turboprop sizing spec."""
+
+    return {
+        "Mach": 0.05,
+        "Alt": 0.0,
+        "OPR": 15.0,
+        "Tt4Max": 1200.0,
+        "ReqPower": 3.0e6,
+        "NPR": 1.3,
+        "NoSpools": 2,
+        "RPMs": [15000.0, 12000.0],
+        "EtaPoly": {
+            "Inlet": 0.99,
+            "Diffusers": 0.99,
+            "Compressors": 0.9,
+            "Combustor": 0.98,
+            "Turbines": 0.9,
+            "Nozzles": 0.985,
+        },
+    }
+
+
+def set_turboprop_linear_sizing_values(problem, engine_spec):
+    """Set OpenMDAO turboprop sizing inputs from FAST-Python spec fields."""
+
+    eta = engine_spec["EtaPoly"]
+    problem.set_val("mach", engine_spec["Mach"])
+    problem.set_val("altitude", engine_spec["Alt"], units="m")
+    problem.set_val("overall_pressure_ratio", engine_spec["OPR"])
+    problem.set_val("max_total_temperature_4", engine_spec["Tt4Max"], units="K")
+    problem.set_val("required_power", engine_spec["ReqPower"], units="W")
+    problem.set_val("compressor_efficiency", eta["Compressors"])
+    problem.set_val("combustor_efficiency", eta["Combustor"])
+    problem.set_val("turbine_efficiency", eta["Turbines"])
 
 
 def make_simple_off_design_aircraft():

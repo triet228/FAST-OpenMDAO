@@ -51,6 +51,7 @@ from fast_openmdao.engine import (
     TotalPressure,
     TotalTemperature,
     TurbineStageFlow,
+    TurbopropLinearSizing,
 )
 from fast_openmdao.mission import (
     CruiseBreguetEfficiencyTriplet,
@@ -164,6 +165,7 @@ __all__ = [
     "TotalPressure",
     "TotalTemperature",
     "TurbineStageFlow",
+    "TurbopropLinearSizing",
     "ThrustSinkEfficiency",
     "TransmitterFanEfficiency",
     "TurbopropEngineWeightForSizing",
