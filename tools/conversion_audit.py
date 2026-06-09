@@ -21,6 +21,11 @@ SUPPORT_STATUSES = {
     "support",
 }
 
+COVERAGE_ALIASES = {
+    "lm100j_hybrid_oper_dwn": {"LM100JHybridOperationMatrices"},
+    "lm100j_hybrid_oper_ups": {"LM100JHybridOperationMatrices"},
+}
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -154,7 +159,13 @@ def audit_functions(fast_python_root, openmdao_symbols, inventory):
             camel_name = snake_to_camel(node.name)
             coverage = "covered"
 
-            if node.name not in openmdao_symbols and camel_name not in openmdao_symbols:
+            aliases = COVERAGE_ALIASES.get(node.name, set())
+
+            if (
+                node.name not in openmdao_symbols
+                and camel_name not in openmdao_symbols
+                and not aliases.intersection(openmdao_symbols)
+            ):
                 coverage = "documented-remaining"
 
             rows.append(
