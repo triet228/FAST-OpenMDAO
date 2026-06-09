@@ -40,6 +40,7 @@ from fast_openmdao.mission import (
     CruiseBreguetSourceEnergy,
     CruiseTimeTargetDistance,
     FlightConditions,
+    InitialEnergyRemaining,
 )
 from fast_openmdao.oew import NumericSum, TurbopropAirframeWeight
 from fast_openmdao.optimization import (
@@ -97,6 +98,7 @@ __all__ = [
     "FlightConditions",
     "FlowArea",
     "Gravity",
+    "InitialEnergyRemaining",
     "JetApproachConstraint",
     "JetAIntegratedHeat",
     "JetCruiseConstraint",

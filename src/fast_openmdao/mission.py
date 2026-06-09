@@ -291,6 +291,76 @@ class CruiseBreguetSourceEnergy(om.ExplicitComponent):
                 ]
 
 
+class InitialEnergyRemaining(om.ExplicitComponent):
+    """Initialize FAST mission source-energy remaining history.
+
+    Inputs:
+        fuel_specific_energy: Fuel specific energy in J/kg.
+        battery_specific_energy: Battery specific energy in J/kg.
+        fuel_weight: Fuel source weight in kg.
+        battery_weight: Battery source weights in kg.
+
+    Outputs:
+        source_energy_left: Initial remaining source energy matrix in J.
+
+    Assumptions:
+        Source types are fixed architecture data where 1 marks fuel and 0
+        marks battery. The initialized value is repeated for every mission
+        point, matching FAST-Python's first-segment history setup.
+    """
+
+    def initialize(self):
+        self.options.declare("src_type", default=(1.0, 0.0))
+        self.options.declare("npoint", default=1)
+
+    def setup(self):
+        src_type = np.asarray(self.options["src_type"], dtype=float).reshape(-1)
+        npoint = self.options["npoint"]
+        nsrc = src_type.size
+        nfuel = max(1, np.count_nonzero(src_type == 1))
+        nbattery = max(1, np.count_nonzero(src_type == 0))
+        self.add_input("fuel_specific_energy", val=43200000.0, units="J/kg")
+        self.add_input("battery_specific_energy", val=1000.0, units="J/kg")
+        self.add_input("fuel_weight", val=np.ones(nfuel), units="kg")
+        self.add_input("battery_weight", val=np.ones(nbattery), units="kg")
+        self.add_output(
+            "source_energy_left",
+            val=np.zeros((npoint, nsrc)),
+            units="J",
+        )
+        self.declare_partials(of="source_energy_left", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = initial_energy_remaining_values(
+            self.options["src_type"],
+            self.options["npoint"],
+            inputs["fuel_specific_energy"][0],
+            inputs["battery_specific_energy"][0],
+            inputs["fuel_weight"],
+            inputs["battery_weight"],
+        )
+        outputs["source_energy_left"] = values["source_energy_left"]
+
+    def compute_partials(self, inputs, partials):
+        values = initial_energy_remaining_values(
+            self.options["src_type"],
+            self.options["npoint"],
+            inputs["fuel_specific_energy"][0],
+            inputs["battery_specific_energy"][0],
+            inputs["fuel_weight"],
+            inputs["battery_weight"],
+        )
+        for input_name in (
+            "fuel_specific_energy",
+            "battery_specific_energy",
+            "fuel_weight",
+            "battery_weight",
+        ):
+            partials["source_energy_left", input_name] = values[
+                f"dsource_energy_left_d{input_name}"
+            ]
+
+
 def flight_condition_values(altitude, disa, velocity_type, velocity):
     """Return FAST flight-condition values and analytical derivatives."""
 
@@ -342,6 +412,58 @@ def flight_condition_values(altitude, disa, velocity_type, velocity):
         dsound_speed_ddisa,
     )
     return values
+
+
+def initial_energy_remaining_values(
+    src_type,
+    npoint,
+    fuel_specific_energy,
+    battery_specific_energy,
+    fuel_weight,
+    battery_weight,
+):
+    """Return initial source-energy-left matrix and derivative blocks."""
+
+    src_type = np.asarray(src_type, dtype=float).reshape(-1)
+    fuel_weight = np.asarray(fuel_weight, dtype=float).reshape(-1)
+    battery_weight = np.asarray(battery_weight, dtype=float).reshape(-1)
+    nsrc = src_type.size
+    output_size = npoint * nsrc
+    source_energy_left = np.zeros((npoint, nsrc))
+    dfuel_specific = np.zeros((output_size, 1))
+    dbattery_specific = np.zeros((output_size, 1))
+    dfuel_weight = np.zeros((output_size, fuel_weight.size))
+    dbattery_weight = np.zeros((output_size, battery_weight.size))
+    fuel_columns = np.where(src_type == 1)[0]
+    battery_columns = np.where(src_type == 0)[0]
+
+    for local_index, column in enumerate(fuel_columns):
+        weight_index = min(local_index, fuel_weight.size - 1)
+        value = fuel_specific_energy * fuel_weight[weight_index]
+        source_energy_left[:, column] = value
+
+        for point in range(npoint):
+            output_index = point * nsrc + column
+            dfuel_specific[output_index, 0] = fuel_weight[weight_index]
+            dfuel_weight[output_index, weight_index] = fuel_specific_energy
+
+    for local_index, column in enumerate(battery_columns):
+        weight_index = min(local_index, battery_weight.size - 1)
+        value = battery_specific_energy * battery_weight[weight_index]
+        source_energy_left[:, column] = value
+
+        for point in range(npoint):
+            output_index = point * nsrc + column
+            dbattery_specific[output_index, 0] = battery_weight[weight_index]
+            dbattery_weight[output_index, weight_index] = battery_specific_energy
+
+    return {
+        "source_energy_left": source_energy_left,
+        "dsource_energy_left_dfuel_specific_energy": dfuel_specific,
+        "dsource_energy_left_dbattery_specific_energy": dbattery_specific,
+        "dsource_energy_left_dfuel_weight": dfuel_weight,
+        "dsource_energy_left_dbattery_weight": dbattery_weight,
+    }
 
 
 def cruise_breguet_source_energy_values(

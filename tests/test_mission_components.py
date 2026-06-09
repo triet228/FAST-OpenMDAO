@@ -14,12 +14,14 @@ from fast_openmdao import (
     CruiseBreguetSourceEnergy,
     CruiseTimeTargetDistance,
     FlightConditions,
+    InitialEnergyRemaining,
 )
 from fast_python.mission import (
     compute_flight_conditions,
     cruise_breguet_efficiency_triplet,
     cruise_breguet_source_energy,
     cruise_time_target_to_distance,
+    initial_energy_remaining,
 )
 
 
@@ -259,6 +261,78 @@ def test_cruise_breguet_source_energy_declares_analytic_partials():
         assert partial_data["abs error"].forward < 1.0e-5
 
 
+def test_initial_energy_remaining_matches_fast_python():
+    """Check first-segment source energy initialization parity."""
+
+    values = make_initial_energy_remaining_values()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "initial_energy",
+        InitialEnergyRemaining(
+            src_type=values["src_type"],
+            npoint=values["npoint"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val(
+        "fuel_specific_energy",
+        values["fuel_specific_energy"],
+        units="J/kg",
+    )
+    problem.set_val(
+        "battery_specific_energy",
+        values["battery_specific_energy"],
+        units="J/kg",
+    )
+    problem.set_val("fuel_weight", values["fuel_weight"], units="kg")
+    problem.set_val("battery_weight", values["battery_weight"], units="kg")
+    problem.run_model()
+
+    expected = initial_energy_remaining(values["specs"], values["npoint"])
+
+    assert np.allclose(problem.get_val("source_energy_left", units="J"), expected)
+
+
+def test_initial_energy_remaining_declares_analytic_partials():
+    """Check source energy initialization derivatives."""
+
+    values = make_initial_energy_remaining_values()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "initial_energy",
+        InitialEnergyRemaining(
+            src_type=values["src_type"],
+            npoint=values["npoint"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val(
+        "fuel_specific_energy",
+        values["fuel_specific_energy"],
+        units="J/kg",
+    )
+    problem.set_val(
+        "battery_specific_energy",
+        values["battery_specific_energy"],
+        units="J/kg",
+    )
+    problem.set_val("fuel_weight", values["fuel_weight"], units="kg")
+    problem.set_val("battery_weight", values["battery_weight"], units="kg")
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-5,
+    )
+
+    for partial_data in partials["initial_energy"].values():
+        assert partial_data["abs error"].forward < 1.0e-5
+
+
 def output_names():
     """Return output names in FAST-Python flight-condition order."""
 
@@ -328,6 +402,41 @@ def make_breguet_source_energy_values():
                     [0.0, 0.0, 0.0],
                     initial_energy_left,
                 ],
+            },
+        },
+    }
+
+
+def make_initial_energy_remaining_values():
+    """Return FAST-shaped source energy initialization values."""
+
+    src_type = np.asarray([1.0, 0.0, 0.0])
+    fuel_specific_energy = 1200.0
+    battery_specific_energy = 900.0
+    fuel_weight = np.asarray([12.0])
+    battery_weight = np.asarray([10.0, 15.0])
+    return {
+        "src_type": src_type,
+        "npoint": 4,
+        "fuel_specific_energy": fuel_specific_energy,
+        "battery_specific_energy": battery_specific_energy,
+        "fuel_weight": fuel_weight,
+        "battery_weight": battery_weight,
+        "specs": {
+            "Propulsion": {
+                "PropArch": {
+                    "SrcType": src_type,
+                },
+            },
+            "Power": {
+                "SpecEnergy": {
+                    "Fuel": fuel_specific_energy,
+                    "Batt": battery_specific_energy,
+                },
+            },
+            "Weight": {
+                "Fuel": fuel_weight,
+                "Batt": battery_weight,
             },
         },
     }
