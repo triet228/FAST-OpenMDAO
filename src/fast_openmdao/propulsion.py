@@ -303,6 +303,112 @@ class PowerFlow(om.ExplicitComponent):
         ]
 
 
+class PowerAvailable(om.ExplicitComponent):
+    """Compute FAST available propulsion power for fixed architecture data."""
+
+    def initialize(self):
+        self.options.declare("num_points", default=1)
+        self.options.declare("architecture")
+        self.options.declare("efficiency")
+        self.options.declare("transmitter_type")
+        self.options.declare("num_sources")
+        self.options.declare("aircraft_class", default="Turbofan")
+
+    def setup(self):
+        num_points = self.options["num_points"]
+        architecture = np.asarray(self.options["architecture"], dtype=float)
+        transmitter_type = np.asarray(self.options["transmitter_type"]).reshape(-1)
+        num_components = architecture.shape[0]
+        num_transmitters = len(transmitter_type)
+
+        self.add_input("true_airspeed", val=np.ones(num_points), units="m/s")
+        self.add_input("density", val=np.ones(num_points), units="kg/m**3")
+        self.add_input(
+            "sea_level_static_thrust",
+            val=np.ones(num_transmitters),
+            units="N",
+        )
+        self.add_input(
+            "sea_level_static_power",
+            val=np.ones(num_transmitters),
+            units="W",
+        )
+        self.add_input(
+            "split",
+            val=np.zeros((num_points, num_components, num_components)),
+        )
+        self.add_output(
+            "available_power",
+            val=np.zeros((num_points, num_components)),
+            units="W",
+        )
+        self.add_output(
+            "available_thrust",
+            val=np.zeros((num_points, num_components)),
+            units="N",
+        )
+        self.add_output("thrust_velocity", val=np.zeros(num_points), units="W")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = power_available_values(
+            inputs["true_airspeed"],
+            inputs["density"],
+            inputs["sea_level_static_thrust"],
+            inputs["sea_level_static_power"],
+            inputs["split"],
+            self.options["architecture"],
+            self.options["efficiency"],
+            self.options["transmitter_type"],
+            self.options["num_sources"],
+            self.options["aircraft_class"],
+        )
+        outputs["available_power"] = values["available_power"]
+        outputs["available_thrust"] = values["available_thrust"]
+        outputs["thrust_velocity"] = values["thrust_velocity"]
+
+    def compute_partials(self, inputs, partials):
+        values = power_available_values(
+            inputs["true_airspeed"],
+            inputs["density"],
+            inputs["sea_level_static_thrust"],
+            inputs["sea_level_static_power"],
+            inputs["split"],
+            self.options["architecture"],
+            self.options["efficiency"],
+            self.options["transmitter_type"],
+            self.options["num_sources"],
+            self.options["aircraft_class"],
+        )
+        partials["available_power", "true_airspeed"] = values["dpav_dtas"]
+        partials["available_power", "density"] = values["dpav_drho"]
+        partials["available_power", "sea_level_static_thrust"] = values[
+            "dpav_dsls_thrust"
+        ]
+        partials["available_power", "sea_level_static_power"] = values[
+            "dpav_dsls_power"
+        ]
+        partials["available_power", "split"] = values["dpav_dsplit"]
+        partials["available_thrust", "true_airspeed"] = values["dtav_dtas"]
+        partials["available_thrust", "density"] = values["dtav_drho"]
+        partials["available_thrust", "sea_level_static_thrust"] = values[
+            "dtav_dsls_thrust"
+        ]
+        partials["available_thrust", "sea_level_static_power"] = values[
+            "dtav_dsls_power"
+        ]
+        partials["available_thrust", "split"] = values["dtav_dsplit"]
+        partials["thrust_velocity", "true_airspeed"] = values["dtv_dtas"]
+        partials["thrust_velocity", "density"] = values["dtv_drho"]
+        partials["thrust_velocity", "sea_level_static_thrust"] = values[
+            "dtv_dsls_thrust"
+        ]
+        partials["thrust_velocity", "sea_level_static_power"] = values[
+            "dtv_dsls_power"
+        ]
+        partials["thrust_velocity", "split"] = values["dtv_dsplit"]
+
+
 class EngineThrustRequirement(om.ExplicitComponent):
     """Select thrust handled by the sink connected to a fixed engine component.
 
@@ -505,6 +611,205 @@ def safe_component_weight_value(power, power_to_weight):
         return 0.0
 
     return power / power_to_weight
+
+
+def power_available_values(
+    true_airspeed,
+    density,
+    sea_level_static_thrust,
+    sea_level_static_power,
+    split,
+    architecture,
+    efficiency,
+    transmitter_type,
+    num_sources,
+    aircraft_class,
+):
+    """Return FAST PowerAvailable core outputs and dense derivatives."""
+
+    tas = np.asarray(true_airspeed, dtype=float).reshape(-1)
+    rho = np.asarray(density, dtype=float).reshape(-1)
+    sls_thrust = np.asarray(sea_level_static_thrust, dtype=float).reshape(-1)
+    sls_power = np.asarray(sea_level_static_power, dtype=float).reshape(-1)
+    split = np.asarray(split, dtype=float)
+    architecture = np.asarray(architecture, dtype=float)
+    efficiency = np.asarray(efficiency, dtype=float)
+    transmitter_type = np.asarray(transmitter_type).reshape(-1)
+    aircraft_class = aircraft_class.lower()
+    num_points = len(tas)
+    num_components = architecture.shape[0]
+    num_transmitters = len(transmitter_type)
+    nout = num_points * num_components
+    nsplits = split.size
+    transmitter_start = num_sources
+    transmitter_stop = num_sources + num_transmitters
+    transmitter_indices = np.arange(transmitter_start, transmitter_stop)
+    sink_indices = np.arange(transmitter_stop, num_components)
+    flow_indices = np.arange(num_sources, num_components)
+    nflow = len(flow_indices)
+
+    pav = np.zeros((num_points, num_components))
+    dpav_dtas = np.zeros((nout, num_points))
+    dpav_drho = np.zeros((nout, num_points))
+    dpav_dsls_thrust = np.zeros((nout, num_transmitters))
+    dpav_dsls_power = np.zeros((nout, num_transmitters))
+    dpav_dsplit = np.zeros((nout, nsplits))
+
+    for point in range(num_points):
+        transmitter_power = sls_power.copy()
+        dtrn_dtas = np.zeros((num_transmitters, num_points))
+        dtrn_drho = np.zeros((num_transmitters, num_points))
+        dtrn_dsls_thrust = np.zeros((num_transmitters, num_transmitters))
+        dtrn_dsls_power = np.zeros((num_transmitters, num_transmitters))
+
+        for transmitter in range(num_transmitters):
+            if transmitter_type[transmitter] == 1:
+                if aircraft_class == "turbofan":
+                    transmitter_power[transmitter] = (
+                        sls_thrust[transmitter]
+                        * rho[point]
+                        / RHO_SL_STD
+                        * tas[point]
+                    )
+                    dtrn_dtas[transmitter, point] = (
+                        sls_thrust[transmitter] * rho[point] / RHO_SL_STD
+                    )
+                    dtrn_drho[transmitter, point] = (
+                        sls_thrust[transmitter] * tas[point] / RHO_SL_STD
+                    )
+                    dtrn_dsls_thrust[transmitter, transmitter] = (
+                        rho[point] / RHO_SL_STD * tas[point]
+                    )
+                elif aircraft_class in ("turboprop", "piston"):
+                    dtrn_dsls_power[transmitter, transmitter] = 1.0
+                else:
+                    raise ValueError(f"Invalid aircraft class: {aircraft_class}")
+            elif transmitter_type[transmitter] in (0, 2, 3, 4):
+                dtrn_dsls_power[transmitter, transmitter] = 1.0
+            else:
+                raise ValueError(
+                    "Invalid transmitter type at position %s." % (transmitter + 1)
+                )
+
+        current_split = split[point, :, :]
+        sub_split = current_split[np.ix_(transmitter_indices, transmitter_indices)]
+        up_transmitters = np.where(
+            (np.sum(sub_split, axis=0) > 0.0) | (transmitter_type == 2)
+        )[0]
+        transmitter_power[up_transmitters] = 0.0
+        dtrn_dtas[up_transmitters, :] = 0.0
+        dtrn_drho[up_transmitters, :] = 0.0
+        dtrn_dsls_thrust[up_transmitters, :] = 0.0
+        dtrn_dsls_power[up_transmitters, :] = 0.0
+
+        initial = np.concatenate(
+            [transmitter_power, np.zeros(num_components - transmitter_stop)]
+        )
+        flow = power_flow_values(
+            initial,
+            architecture[np.ix_(flow_indices, flow_indices)],
+            current_split[np.ix_(flow_indices, flow_indices)],
+            efficiency[np.ix_(flow_indices, flow_indices)],
+            1,
+            1.0e-6,
+        )
+        pav[point, flow_indices] = flow["propagated_power"]
+        dflow_dinitial = flow["dpropagated_dinitial_power"]
+
+        for local_output, component in enumerate(flow_indices):
+            output_row = point * num_components + component
+            dpav_dtas[output_row, :] = (
+                dflow_dinitial[local_output, :num_transmitters] @ dtrn_dtas
+            )
+            dpav_drho[output_row, :] = (
+                dflow_dinitial[local_output, :num_transmitters] @ dtrn_drho
+            )
+            dpav_dsls_thrust[output_row, :] = (
+                dflow_dinitial[local_output, :num_transmitters]
+                @ dtrn_dsls_thrust
+            )
+            dpav_dsls_power[output_row, :] = (
+                dflow_dinitial[local_output, :num_transmitters] @ dtrn_dsls_power
+            )
+
+            for local_source, source in enumerate(flow_indices):
+                for local_target, target in enumerate(flow_indices):
+                    full_index = (
+                        point * num_components * num_components
+                        + source * num_components
+                        + target
+                    )
+                    sub_index = local_source * nflow + local_target
+                    dpav_dsplit[output_row, full_index] = flow[
+                        "dpropagated_dsplit"
+                    ][local_output, sub_index]
+
+        for transmitter in range(num_transmitters):
+            component = transmitter + num_sources
+
+            if pav[point, component] <= sls_power[transmitter]:
+                continue
+
+            output_row = point * num_components + component
+            pav[point, component] = sls_power[transmitter]
+            dpav_dtas[output_row, :] = 0.0
+            dpav_drho[output_row, :] = 0.0
+            dpav_dsls_thrust[output_row, :] = 0.0
+            dpav_dsls_power[output_row, :] = 0.0
+            dpav_dsls_power[output_row, transmitter] = 1.0
+            dpav_dsplit[output_row, :] = 0.0
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tav = pav / tas[:, None]
+    tv = np.sum(pav[:, sink_indices], axis=1)
+    dtav_dtas = np.zeros_like(dpav_dtas)
+    dtav_drho = np.zeros_like(dpav_drho)
+    dtav_dsls_thrust = np.zeros_like(dpav_dsls_thrust)
+    dtav_dsls_power = np.zeros_like(dpav_dsls_power)
+    dtav_dsplit = np.zeros_like(dpav_dsplit)
+    dtv_dtas = np.zeros((num_points, num_points))
+    dtv_drho = np.zeros((num_points, num_points))
+    dtv_dsls_thrust = np.zeros((num_points, num_transmitters))
+    dtv_dsls_power = np.zeros((num_points, num_transmitters))
+    dtv_dsplit = np.zeros((num_points, nsplits))
+
+    for point in range(num_points):
+        for component in range(num_components):
+            row = point * num_components + component
+            dtav_dtas[row, :] = dpav_dtas[row, :] / tas[point]
+            dtav_dtas[row, point] -= pav[point, component] / tas[point] ** 2
+            dtav_drho[row, :] = dpav_drho[row, :] / tas[point]
+            dtav_dsls_thrust[row, :] = dpav_dsls_thrust[row, :] / tas[point]
+            dtav_dsls_power[row, :] = dpav_dsls_power[row, :] / tas[point]
+            dtav_dsplit[row, :] = dpav_dsplit[row, :] / tas[point]
+
+        sink_rows = point * num_components + sink_indices
+        dtv_dtas[point, :] = np.sum(dpav_dtas[sink_rows, :], axis=0)
+        dtv_drho[point, :] = np.sum(dpav_drho[sink_rows, :], axis=0)
+        dtv_dsls_thrust[point, :] = np.sum(dpav_dsls_thrust[sink_rows, :], axis=0)
+        dtv_dsls_power[point, :] = np.sum(dpav_dsls_power[sink_rows, :], axis=0)
+        dtv_dsplit[point, :] = np.sum(dpav_dsplit[sink_rows, :], axis=0)
+
+    return {
+        "available_power": pav,
+        "available_thrust": tav,
+        "thrust_velocity": tv,
+        "dpav_dtas": dpav_dtas,
+        "dpav_drho": dpav_drho,
+        "dpav_dsls_thrust": dpav_dsls_thrust,
+        "dpav_dsls_power": dpav_dsls_power,
+        "dpav_dsplit": dpav_dsplit,
+        "dtav_dtas": dtav_dtas,
+        "dtav_drho": dtav_drho,
+        "dtav_dsls_thrust": dtav_dsls_thrust,
+        "dtav_dsls_power": dtav_dsls_power,
+        "dtav_dsplit": dtav_dsplit,
+        "dtv_dtas": dtv_dtas,
+        "dtv_drho": dtv_drho,
+        "dtv_dsls_thrust": dtv_dsls_thrust,
+        "dtv_dsls_power": dtv_dsls_power,
+        "dtv_dsplit": dtv_dsplit,
+    }
 
 
 def power_flow_values(power, architecture, split, efficiency, direction, tolerance):

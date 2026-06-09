@@ -55,8 +55,8 @@ derivative-native FAST equation components:
   derivatives.
 - Propulsion primitives for cable sizing weight, engine lapse, engine thrust
   requirement, turboprop/piston engine sizing weight, power-flow propagation,
-  safe component weight, efficiency selection, and supplemental transmitter
-  power with analytical partial derivatives.
+  power-available propagation, safe component weight, efficiency selection, and
+  supplemental transmitter power with analytical partial derivatives.
 - Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
   engine-gradient selection, and cruise dynamic pressure with analytical
   partial derivatives.
@@ -128,7 +128,7 @@ The public `fast_openmdao` package currently exports:
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `CableWeightForSizing`, `EngineLapse`,
-  `EngineThrustRequirement`, `PowerFlow`, `PowerSupplementCheck`,
+  `EngineThrustRequirement`, `PowerAvailable`, `PowerFlow`, `PowerSupplementCheck`,
   `SafeComponentWeight`, `ThrustSinkEfficiency`, `TransmitterFanEfficiency`,
   `TurbopropEngineWeightForSizing`
 - Regression: `GaussianProcessPrediction`, `SquaredExponentialKernel`
@@ -371,8 +371,10 @@ residual functions.
    Done.
 47. Convert empirical battery cycling-aging SOH helper with analytical partial
    derivatives. Done.
-48. Add complex-step derivative checks where supported by FAST-Python internals.
-49. Build reusable groups for mission, propulsion, weights, and objective
+48. Convert propulsion power-available propagation helper with analytical
+   partial derivatives. Done.
+49. Add complex-step derivative checks where supported by FAST-Python internals.
+50. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

@@ -13,6 +13,7 @@ from fast_openmdao import (
     CableWeightForSizing,
     EngineLapse,
     EngineThrustRequirement,
+    PowerAvailable,
     PowerFlow,
     PowerSupplementCheck,
     SafeComponentWeight,
@@ -26,6 +27,7 @@ from fast_python.propulsion import (
     engine_thrust_requirement,
     engine_weights_for_sizing,
     get_thrust_sink_efficiency,
+    power_available,
     power_flow,
     power_supplement_check,
     safe_component_weight,
@@ -170,6 +172,48 @@ def test_power_flow_matches_fast_python_upstream_and_downstream():
         assert np.allclose(problem.get_val("propagated_power", units="W"), expected)
 
 
+def test_power_available_matches_fast_python_core_outputs():
+    """Check available power propagation parity with FAST-Python."""
+
+    aircraft = make_power_available_aircraft()
+    prop_arch = aircraft["Specs"]["Propulsion"]["PropArch"]
+    history = aircraft["Mission"]["History"]["SI"]
+    split = np.asarray([prop_arch["OperUps"]() for _ in range(2)])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "available",
+        PowerAvailable(
+            num_points=2,
+            architecture=prop_arch["Arch"],
+            efficiency=prop_arch["EtaUps"],
+            transmitter_type=prop_arch["TrnType"],
+            num_sources=len(prop_arch["SrcType"]),
+            aircraft_class=aircraft["Specs"]["TLAR"]["Class"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("true_airspeed", history["Performance"]["TAS"], units="m/s")
+    problem.set_val("density", history["Performance"]["Rho"], units="kg/m**3")
+    problem.set_val(
+        "sea_level_static_thrust",
+        aircraft["Specs"]["Propulsion"]["SLSThrust"],
+        units="N",
+    )
+    problem.set_val(
+        "sea_level_static_power",
+        aircraft["Specs"]["Propulsion"]["SLSPower"],
+        units="W",
+    )
+    problem.set_val("split", split)
+    problem.run_model()
+
+    expected = power_available(aircraft)["Mission"]["History"]["SI"]["Power"]
+    assert np.allclose(problem.get_val("available_power", units="W"), expected["Pav"])
+    assert np.allclose(problem.get_val("available_thrust", units="N"), expected["Tav"])
+    assert np.allclose(problem.get_val("thrust_velocity", units="W"), expected["TV"])
+
+
 def test_engine_thrust_requirement_matches_fast_python():
     """Check connected thrust sink selector parity with FAST-Python."""
 
@@ -278,6 +322,12 @@ def test_propulsion_primitives_declare_analytic_partials():
     cable_aircraft, cables, downstream_power = make_cable_weight_case()
     _, engines, engine_downstream_power = make_turboprop_engine_weight_case()
     cable_architecture = cable_aircraft["Specs"]["Propulsion"]["PropArch"]
+    available_aircraft = make_power_available_aircraft()
+    available_arch = available_aircraft["Specs"]["Propulsion"]["PropArch"]
+    available_history = available_aircraft["Mission"]["History"]["SI"]
+    available_split = np.asarray([available_arch["OperUps"]() for _ in range(2)])
+    available_split_check = available_split.copy()
+    available_split_check[available_split_check == 0.0] = -1.0e-3
     cases = [
         (
             "engine_weight",
@@ -338,6 +388,30 @@ def test_propulsion_primitives_declare_analytic_partials():
             },
         ),
         (
+            "available",
+            PowerAvailable(
+                num_points=2,
+                architecture=available_arch["Arch"],
+                efficiency=available_arch["EtaUps"],
+                transmitter_type=available_arch["TrnType"],
+                num_sources=len(available_arch["SrcType"]),
+                aircraft_class=available_aircraft["Specs"]["TLAR"]["Class"],
+            ),
+            {
+                "true_airspeed": np.asarray(
+                    available_history["Performance"]["TAS"],
+                ),
+                "density": np.asarray(available_history["Performance"]["Rho"]),
+                "sea_level_static_thrust": np.asarray(
+                    available_aircraft["Specs"]["Propulsion"]["SLSThrust"],
+                ),
+                "sea_level_static_power": np.asarray(
+                    available_aircraft["Specs"]["Propulsion"]["SLSPower"],
+                ),
+                "split": available_split_check,
+            },
+        ),
+        (
             "lapse",
             EngineLapse(aircraft_class="Turbofan"),
             {"sea_level_static": 100000.0, "density": 0.9},
@@ -390,7 +464,8 @@ def test_propulsion_primitives_declare_analytic_partials():
         )
 
         for partial_data in partials[name].values():
-            assert partial_data["abs error"].forward < 1.0e-6
+            tolerance = 1.0e-3 if name == "available" else 1.0e-6
+            assert partial_data["abs error"].forward < tolerance
 
 
 def make_efficiency_specs():
@@ -581,3 +656,65 @@ def make_cable_weight_case():
     cables = np.asarray([False, True, False, True])
     downstream_power = np.asarray([0.0, 400000.0, 0.0, 250000.0, 0.0])
     return aircraft, cables, downstream_power
+
+
+def make_power_available_aircraft():
+    """Return a fixed conventional turbofan power-available aircraft."""
+
+    return {
+        "Specs": {
+            "TLAR": {
+                "Class": "Turbofan",
+            },
+            "Propulsion": {
+                "SLSThrust": [120000.0, 110000.0, 0.0, 0.0],
+                "SLSPower": [1.0e8, 1.0e8, 0.0, 0.0],
+                "PropArch": {
+                    "Arch": [
+                        [0.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    ],
+                    "EtaUps": [
+                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+                        [1.0, 1.0, 1.0, 0.9, 1.0, 1.0],
+                        [1.0, 1.0, 1.0, 1.0, 0.88, 1.0],
+                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+                        [1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+                    ],
+                    "OperUps": lambda: [
+                        [0.0, 0.5, 0.5, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    ],
+                    "SrcType": [1.0],
+                    "TrnType": [1.0, 1.0, 2.0, 2.0],
+                },
+            },
+        },
+        "Mission": {
+            "Profile": {
+                "SegsID": 1,
+                "SegBeg": [1],
+                "SegEnd": [2],
+            },
+            "History": {
+                "SI": {
+                    "Performance": {
+                        "TAS": [210.0, 230.0],
+                        "Rho": [1.1, 0.95],
+                    },
+                    "Power": {
+                        "LamUps": [[0.0], [0.0]],
+                    },
+                },
+            },
+        },
+    }
