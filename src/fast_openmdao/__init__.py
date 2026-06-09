@@ -113,6 +113,7 @@ from fast_openmdao.optimization import (
     OperationalSplitConstraints,
     PowerManagementObjective,
     PowerLimitConstraints,
+    SplitScheduleFill,
 )
 from fast_openmdao.problem import make_fast_optimization_problem, make_fast_problem
 from fast_openmdao.projection import (
@@ -233,6 +234,7 @@ __all__ = [
     "OperationalSplitConstraints",
     "PowerManagementObjective",
     "PowerLimitConstraints",
+    "SplitScheduleFill",
     "PowerAvailable",
     "PowerFlow",
     "PowerSupplementCheck",

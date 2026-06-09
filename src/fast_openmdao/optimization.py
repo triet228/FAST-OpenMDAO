@@ -226,6 +226,70 @@ class OneBasedHistoryValues(om.ExplicitComponent):
         ]
 
 
+class SplitScheduleFill(om.ExplicitComponent):
+    """Fill a FAST split schedule from a flattened optimized split vector.
+
+    Inputs:
+        target_splits: Existing split schedule block.
+        optimized_splits: Flattened FAST ``PowerOpt.Splits`` vector.
+
+    Outputs:
+        filled_splits: Schedule with selected segment rows replaced by the
+            configured optimized split entries.
+
+    Assumptions:
+        Segment points, lambda indices, number of mission points, split count,
+        and flattened split offset are fixed options from optimization setup.
+        The operation is linear for fixed indexing.
+    """
+
+    def initialize(self):
+        self.options.declare("num_rows", default=1)
+        self.options.declare("num_splits", default=1)
+        self.options.declare("num_points", default=1)
+        self.options.declare("optimized_size", default=1)
+        self.options.declare("lam_index", default=(1,))
+        self.options.declare("segment_points", default=(0,))
+        self.options.declare("offset", default=0)
+
+    def setup(self):
+        shape = (self.options["num_rows"], self.options["num_splits"])
+        optimized_size = self.options["optimized_size"]
+        self.add_input("target_splits", val=np.zeros(shape))
+        self.add_input("optimized_splits", val=np.zeros(optimized_size))
+        self.add_output("filled_splits", val=np.zeros(shape))
+        self.declare_partials(of="filled_splits", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = split_schedule_fill_values(
+            inputs["target_splits"],
+            inputs["optimized_splits"],
+            self.options["lam_index"],
+            self.options["segment_points"],
+            self.options["num_points"],
+            self.options["num_splits"],
+            self.options["offset"],
+        )
+        outputs["filled_splits"] = values["filled_splits"]
+
+    def compute_partials(self, inputs, partials):
+        values = split_schedule_fill_values(
+            inputs["target_splits"],
+            inputs["optimized_splits"],
+            self.options["lam_index"],
+            self.options["segment_points"],
+            self.options["num_points"],
+            self.options["num_splits"],
+            self.options["offset"],
+        )
+        partials["filled_splits", "target_splits"] = values[
+            "dfilled_splits_dtarget_splits"
+        ]
+        partials["filled_splits", "optimized_splits"] = values[
+            "dfilled_splits_doptimized_splits"
+        ]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -869,6 +933,44 @@ def one_based_history_values_component_values(history_values, indices):
     return {
         "selected_values": selected,
         "dselected_values_dhistory_values": derivative,
+    }
+
+
+def split_schedule_fill_values(
+    target_splits,
+    optimized_splits,
+    lam_index,
+    segment_points,
+    num_points,
+    num_splits,
+    offset,
+):
+    """Return FAST split-schedule fill values and constant Jacobians."""
+
+    target = np.asarray(target_splits, dtype=float)
+    optimized = np.asarray(optimized_splits, dtype=float).reshape(-1)
+    lam_index = np.asarray(lam_index, dtype=int).reshape(-1)
+    segment_points = np.asarray(segment_points, dtype=int).reshape(-1)
+    num_points = int(num_points)
+    num_splits = int(num_splits)
+    offset = int(offset)
+    result = np.array(target, dtype=float, copy=True)
+    dtarget = np.eye(target.size)
+    doptimized = np.zeros((target.size, optimized.size))
+
+    for isplit in range(num_splits):
+        for row, segment_point in enumerate(segment_points):
+            split_index = (offset + isplit) * num_points
+            split_index += lam_index[segment_point] - 1
+            result[row, isplit] = optimized[split_index]
+            output_index = row * num_splits + isplit
+            dtarget[output_index, :] = 0.0
+            doptimized[output_index, split_index] = 1.0
+
+    return {
+        "filled_splits": result,
+        "dfilled_splits_dtarget_splits": dtarget,
+        "dfilled_splits_doptimized_splits": doptimized,
     }
 
 

@@ -98,6 +98,8 @@ derivative-native FAST equation components:
   derivatives.
 - Optimization fixed-index mission-history selector with analytical partial
   derivatives.
+- Optimization fixed-index split-schedule filling helper with analytical
+  partial derivatives.
 - Optimization objective selector helpers for operational and power-management
   objective values with analytical partial derivatives.
 - Regression squared-exponential kernel and fixed-preprocessing Gaussian
@@ -166,7 +168,7 @@ The public `fast_openmdao` package currently exports:
   `GaussianEliminationPivot`, `HessianUpdate`, `MeritFunction`,
   `OneBasedHistoryValues`, `OperationalObjective`,
   `OperationalSplitConstraints`, `PowerManagementObjective`,
-  `PowerLimitConstraints`
+  `PowerLimitConstraints`, `SplitScheduleFill`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `BatteryEnergyCutoff`, `BatteryEnergyHistory`,

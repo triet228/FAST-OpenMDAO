@@ -23,12 +23,14 @@ from fast_openmdao import (
     OperationalSplitConstraints,
     PowerManagementObjective,
     PowerLimitConstraints,
+    SplitScheduleFill,
 )
 from fast_python.optimization import (
     battery_energy_available,
     con_size_opt,
     electric_motor_power_available,
     feas_step,
+    fill_split_values,
     gauss_elim,
     hess_upd,
     merit_function,
@@ -196,6 +198,42 @@ def test_one_based_history_values_match_fast_python():
         problem.get_val("selected_values"),
         one_based_history_values(history_values, indices),
     )
+
+
+def test_split_schedule_fill_matches_fast_python():
+    """Check optimized split schedule filling parity with FAST-Python."""
+
+    case = make_split_schedule_fill_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "fill",
+        SplitScheduleFill(
+            num_rows=case["target"].shape[0],
+            num_splits=case["target"].shape[1],
+            num_points=case["num_points"],
+            optimized_size=case["optimized_splits"].size,
+            lam_index=case["lam_index"],
+            segment_points=case["segment_points"],
+            offset=case["offset"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("target_splits", case["target"])
+    problem.set_val("optimized_splits", case["optimized_splits"])
+    problem.run_model()
+
+    expected = fill_split_values(
+        case["target"],
+        case["optimized_splits"],
+        case["lam_index"],
+        case["segment_points"],
+        case["num_points"],
+        case["target"].shape[1],
+        case["offset"],
+    )
+
+    assert np.allclose(problem.get_val("filled_splits"), expected)
 
 
 def test_merit_function_matches_fast_python():
@@ -476,6 +514,26 @@ def test_optimization_helpers_declare_analytic_partials():
             },
         ),
         (
+            "split_fill",
+            SplitScheduleFill(
+                num_rows=make_split_schedule_fill_case()["target"].shape[0],
+                num_splits=make_split_schedule_fill_case()["target"].shape[1],
+                num_points=make_split_schedule_fill_case()["num_points"],
+                optimized_size=make_split_schedule_fill_case()[
+                    "optimized_splits"
+                ].size,
+                lam_index=make_split_schedule_fill_case()["lam_index"],
+                segment_points=make_split_schedule_fill_case()["segment_points"],
+                offset=make_split_schedule_fill_case()["offset"],
+            ),
+            {
+                "target_splits": make_split_schedule_fill_case()["target"],
+                "optimized_splits": make_split_schedule_fill_case()[
+                    "optimized_splits"
+                ],
+            },
+        ),
+        (
             "merit",
             MeritFunction(num_inequality=2, num_equality=1, use_slack=True),
             {
@@ -654,6 +712,41 @@ def make_hessian_update_case():
         np.asarray([0.3, -0.2, 0.4]),
         np.asarray([0.7, -0.1, 0.5]),
     )
+
+
+def make_split_schedule_fill_case():
+    """Return deterministic values for FAST split schedule filling."""
+
+    return {
+        "target": np.asarray(
+            [
+                [0.11, 0.12],
+                [0.21, 0.22],
+                [0.31, 0.32],
+                [0.41, 0.42],
+            ]
+        ),
+        "optimized_splits": np.asarray(
+            [
+                0.01,
+                0.02,
+                0.03,
+                0.04,
+                0.05,
+                0.06,
+                0.07,
+                0.08,
+                0.09,
+                0.10,
+                0.11,
+                0.12,
+            ]
+        ),
+        "lam_index": np.asarray([1, 2, 3, 4]),
+        "segment_points": np.asarray([0, 2, 3]),
+        "num_points": 4,
+        "offset": 1,
+    }
 
 
 def make_design_split_bound_aircraft(num_design_splits):
