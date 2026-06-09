@@ -81,6 +81,7 @@ from fast_openmdao.propulsion import (
     SafeComponentWeight,
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
+    TurbopropEngineWeightForSizing,
 )
 from fast_openmdao.units import UnitConversion
 
@@ -155,6 +156,7 @@ __all__ = [
     "TotalTemperature",
     "ThrustSinkEfficiency",
     "TransmitterFanEfficiency",
+    "TurbopropEngineWeightForSizing",
     "TurbopropAirframeWeight",
     "TurbofanAirframeWeight",
     "UnitConversion",

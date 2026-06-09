@@ -18,11 +18,13 @@ from fast_openmdao import (
     SafeComponentWeight,
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
+    TurbopropEngineWeightForSizing,
 )
 from fast_python.propulsion import (
     cable_weight_for_sizing,
     engine_lapse,
     engine_thrust_requirement,
+    engine_weights_for_sizing,
     get_thrust_sink_efficiency,
     power_flow,
     power_supplement_check,
@@ -205,6 +207,39 @@ def test_engine_thrust_requirement_matches_fast_python():
     assert np.allclose(problem.get_val("required_thrust", units="N"), expected)
 
 
+def test_turboprop_engine_weight_for_sizing_matches_fast_python():
+    """Check turboprop/piston engine sizing weight parity."""
+
+    aircraft, engines, downstream_power = make_turboprop_engine_weight_case()
+    power_sls = [100.0, 200.0, 300.0]
+    dry_weight = [10.0, 20.0, 30.0]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "engine_weight",
+        TurbopropEngineWeightForSizing(
+            engines=engines,
+            power_sls=power_sls,
+            dry_weight=dry_weight,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("downstream_power", downstream_power, units="W")
+    problem.run_model()
+
+    expected = engine_weights_for_sizing(
+        aircraft,
+        "Turboprop",
+        engines,
+        downstream_power,
+        np.zeros_like(downstream_power),
+        np.zeros_like(downstream_power),
+        np.zeros_like(downstream_power),
+    )
+
+    assert np.allclose(problem.get_val("engine_weight", units="kg"), expected)
+
+
 def test_cable_weight_for_sizing_matches_fast_python():
     """Check cable sizing weight parity with FAST-Python."""
 
@@ -241,8 +276,18 @@ def test_propulsion_primitives_declare_analytic_partials():
     flow_up, flow_down = make_power_flow_cases()
     thrust_architecture, thrust_type, thrust_output = make_engine_thrust_case()
     cable_aircraft, cables, downstream_power = make_cable_weight_case()
+    _, engines, engine_downstream_power = make_turboprop_engine_weight_case()
     cable_architecture = cable_aircraft["Specs"]["Propulsion"]["PropArch"]
     cases = [
+        (
+            "engine_weight",
+            TurbopropEngineWeightForSizing(
+                engines=engines,
+                power_sls=[100.0, 200.0, 300.0],
+                dry_weight=[10.0, 20.0, 30.0],
+            ),
+            {"downstream_power": engine_downstream_power},
+        ),
         (
             "cables",
             CableWeightForSizing(
@@ -478,6 +523,35 @@ def make_engine_thrust_case():
         ]
     )
     return architecture, transmitter_type, thrust_output
+
+
+def make_turboprop_engine_weight_case():
+    """Return FAST-Python aircraft data for turboprop engine-weight sizing."""
+
+    aircraft = {
+        "Specs": {
+            "Propulsion": {},
+        },
+        "HistData": {
+            "Eng": {
+                "E1": {
+                    "Power_SLS": 100.0,
+                    "DryWeight": 10.0,
+                },
+                "E2": {
+                    "Power_SLS": 200.0,
+                    "DryWeight": 20.0,
+                },
+                "E3": {
+                    "Power_SLS": 300.0,
+                    "DryWeight": 30.0,
+                },
+            }
+        },
+    }
+    engines = np.asarray([True, True, False])
+    downstream_power = np.asarray([100000.0, 200000.0, 0.0, 0.0])
+    return aircraft, engines, downstream_power
 
 
 def make_cable_weight_case():

@@ -364,6 +364,47 @@ class EngineThrustRequirement(om.ExplicitComponent):
         ]
 
 
+class TurbopropEngineWeightForSizing(om.ExplicitComponent):
+    """Compute FAST turboprop/piston engine weights from sizing power."""
+
+    def initialize(self):
+        self.options.declare("engines")
+        self.options.declare("power_sls")
+        self.options.declare("dry_weight")
+
+    def setup(self):
+        engines = np.asarray(self.options["engines"], dtype=bool).reshape(-1)
+        num_components = len(engines) + 1
+        num_engines = max(1, np.count_nonzero(engines))
+
+        self.add_input(
+            "downstream_power",
+            val=np.zeros(num_components),
+            units="W",
+        )
+        self.add_output("engine_weight", val=np.zeros(num_engines), units="kg")
+        self.declare_partials(of="engine_weight", wrt="downstream_power")
+
+    def compute(self, inputs, outputs):
+        outputs["engine_weight"] = turboprop_engine_weight_for_sizing_values(
+            inputs["downstream_power"],
+            self.options["engines"],
+            self.options["power_sls"],
+            self.options["dry_weight"],
+        )["engine_weight"]
+
+    def compute_partials(self, inputs, partials):
+        values = turboprop_engine_weight_for_sizing_values(
+            inputs["downstream_power"],
+            self.options["engines"],
+            self.options["power_sls"],
+            self.options["dry_weight"],
+        )
+        partials["engine_weight", "downstream_power"] = values[
+            "dengine_weight_ddownstream_power"
+        ]
+
+
 class CableWeightForSizing(om.ExplicitComponent):
     """Compute FAST cable weight for fixed cable transmitter geometry.
 
@@ -603,6 +644,45 @@ def engine_thrust_requirement_values(
     return {
         "required_thrust": required,
         "drequired_dthrust_output": derivatives,
+    }
+
+
+def turboprop_engine_weight_for_sizing_values(
+    downstream_power,
+    engines,
+    power_sls,
+    dry_weight,
+):
+    """Return FAST turboprop/piston sizing engine weights and derivatives."""
+
+    downstream_power = np.asarray(downstream_power, dtype=float).reshape(-1)
+    engines = np.asarray(engines, dtype=bool).reshape(-1)
+    power_sls = np.asarray(power_sls, dtype=float).reshape(-1)
+    dry_weight = np.asarray(dry_weight, dtype=float).reshape(-1)
+    valid = (~np.isnan(power_sls)) & (~np.isnan(dry_weight))
+
+    if np.count_nonzero(valid) < 2:
+        raise ValueError("At least two valid engine database rows are required.")
+
+    fit = np.polyfit(power_sls[valid], dry_weight[valid], 1)
+    derivatives = np.zeros((max(1, np.count_nonzero(engines)), downstream_power.size))
+    active_columns = np.flatnonzero(engines)
+
+    if len(active_columns) == 0:
+        return {
+            "engine_weight": np.zeros(1),
+            "dengine_weight_ddownstream_power": derivatives,
+        }
+
+    active_power = downstream_power[:-1][engines] / 1000.0
+    engine_weight = np.polyval(fit, active_power)
+
+    for row, column in enumerate(active_columns):
+        derivatives[row, column] = fit[0] / 1000.0
+
+    return {
+        "engine_weight": engine_weight,
+        "dengine_weight_ddownstream_power": derivatives,
     }
 
 
