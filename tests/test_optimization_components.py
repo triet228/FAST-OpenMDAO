@@ -12,6 +12,7 @@ import openmdao.api as om
 from fast_openmdao import (
     BatteryEnergyAvailable,
     ElectricMotorPowerAvailable,
+    FeasibleStep,
     OperationalObjective,
     OperationalSplitConstraints,
     PowerManagementObjective,
@@ -20,6 +21,7 @@ from fast_openmdao import (
 from fast_python.optimization import (
     battery_energy_available,
     electric_motor_power_available,
+    feas_step,
     operational_objective_value,
     operational_split_constraint_blocks,
     power_management_objective,
@@ -92,6 +94,28 @@ def test_power_limit_constraints_match_fast_python():
 
     assert np.allclose(problem.get_val("lower_limit"), expected_lower)
     assert np.allclose(problem.get_val("upper_limit"), expected_upper)
+
+
+def test_feasible_step_matches_fast_python():
+    """Check interior-point feasible step parity with FAST-Python."""
+
+    slack = np.asarray([0.5, 0.8, 0.3])
+    slack_direction = np.asarray([-1.0, -3.0, 0.4])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "feasible",
+        FeasibleStep(num_constraints=slack.size),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("slack", slack)
+    problem.set_val("slack_direction", slack_direction)
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("feasible_step")[0],
+        feas_step(slack.size, slack, slack_direction),
+    )
 
 
 def test_operational_split_constraints_match_fast_python():
@@ -231,6 +255,14 @@ def test_optimization_helpers_declare_analytic_partials():
             },
         ),
         (
+            "feasible",
+            FeasibleStep(num_constraints=3),
+            {
+                "slack": np.asarray([0.5, 0.8, 0.3]),
+                "slack_direction": np.asarray([-1.0, -3.0, 0.4]),
+            },
+        ),
+        (
             "splits",
             OperationalSplitConstraints(
                 npoint=3,
@@ -290,7 +322,7 @@ def test_optimization_helpers_declare_analytic_partials():
             method="fd",
             form="central",
             step=1.0e-5,
-            )
+        )
 
         for partial_data in partials[name].values():
             assert (

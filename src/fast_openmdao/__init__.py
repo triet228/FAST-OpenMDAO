@@ -70,6 +70,7 @@ from fast_openmdao.oew import NumericSum, TurbofanAirframeWeight, TurbopropAirfr
 from fast_openmdao.optimization import (
     BatteryEnergyAvailable,
     ElectricMotorPowerAvailable,
+    FeasibleStep,
     OperationalObjective,
     OperationalSplitConstraints,
     PowerManagementObjective,
@@ -128,6 +129,7 @@ __all__ = [
     "CruiseTimeTargetDistance",
     "ElectricMotorSpecificPowerProjection",
     "ElectricMotorPowerAvailable",
+    "FeasibleStep",
     "EngineLapse",
     "EngineThrustRequirement",
     "FAR25EngineGradient",

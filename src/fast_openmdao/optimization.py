@@ -56,6 +56,38 @@ class BatteryEnergyAvailable(om.ExplicitComponent):
         ][0]
 
 
+class FeasibleStep(om.ExplicitComponent):
+    """Compute FAST interior-point feasible slack step for a fixed vector size."""
+
+    def initialize(self):
+        self.options.declare("num_constraints", default=1)
+
+    def setup(self):
+        num_constraints = self.options["num_constraints"]
+        self.add_input("slack", val=np.ones(num_constraints))
+        self.add_input("slack_direction", val=-np.ones(num_constraints))
+        self.add_output("feasible_step", val=1.0)
+        self.declare_partials(of="feasible_step", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["feasible_step"] = feasible_step_values(
+            inputs["slack"],
+            inputs["slack_direction"],
+            self.options["num_constraints"],
+        )["feasible_step"]
+
+    def compute_partials(self, inputs, partials):
+        values = feasible_step_values(
+            inputs["slack"],
+            inputs["slack_direction"],
+            self.options["num_constraints"],
+        )
+        partials["feasible_step", "slack"] = values["dfeasible_step_dslack"]
+        partials["feasible_step", "slack_direction"] = values[
+            "dfeasible_step_dslack_direction"
+        ]
+
+
 class PowerLimitConstraints(om.ExplicitComponent):
     """Compute FAST paired lower and upper power/energy limit constraints.
 
@@ -293,6 +325,40 @@ def available_product_value(specific_capacity, installed_weight):
     """Return FAST available power or energy product."""
 
     return specific_capacity * installed_weight
+
+
+def feasible_step_values(slack, slack_direction, num_constraints):
+    """Return FAST feasible step and active-branch analytical derivatives."""
+
+    tau = 0.005
+    slack = np.asarray(slack, dtype=float).reshape(-1)
+    direction = np.asarray(slack_direction, dtype=float).reshape(-1)
+    limit_count = int(num_constraints)
+    step = 1.0
+    active = -1
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        max_step = (tau - 1.0) * slack / direction
+
+    for index in range(limit_count):
+        if max_step[index] > 0.0 and max_step[index] < step:
+            step = max_step[index]
+            active = index
+
+    dslack = np.zeros(slack.size)
+    ddirection = np.zeros(direction.size)
+
+    if active >= 0:
+        dslack[active] = (tau - 1.0) / direction[active]
+        ddirection[active] = (
+            -(tau - 1.0) * slack[active] / direction[active] ** 2
+        )
+
+    return {
+        "feasible_step": step,
+        "dfeasible_step_dslack": dslack,
+        "dfeasible_step_dslack_direction": ddirection,
+    }
 
 
 def operational_objective_values(objective_type, fuel_burn, fuel_energy, battery_energy):
