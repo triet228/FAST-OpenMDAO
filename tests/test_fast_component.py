@@ -17,6 +17,9 @@ from fast_openmdao import (
 from fast_openmdao.examples.compact_electric import make_compact_aircraft
 from fast_openmdao.examples.compact_electric import run_demo
 from fast_openmdao.examples.compact_electric import validate_demo_against_fast_python_samples
+from fast_openmdao.examples.compact_electric import (
+    validate_lift_to_drag_demo_against_fast_python_samples,
+)
 
 
 def test_component_maps_openmdao_inputs_to_fast_paths():
@@ -199,6 +202,21 @@ def test_compact_openmdao_optimum_matches_fast_python_sample_sweep():
 
     assert validation["agrees_with_samples"]
     assert validation["range_error"] < 1.0e-4
+    assert validation["energy_error"] < 1.0e-4
+
+
+def test_compact_lift_to_drag_optimum_matches_fast_python_sample_sweep():
+    """Check independent L/D optimization agrees with FAST-Python samples."""
+
+    validation = validate_lift_to_drag_demo_against_fast_python_samples(
+        lift_to_drag_initial=10.0,
+        lift_to_drag_lower=5.0,
+        lift_to_drag_upper=25.0,
+        sample_count=9,
+    )
+
+    assert validation["agrees_with_samples"]
+    assert validation["lift_to_drag_error"] < 1.0e-4
     assert validation["energy_error"] < 1.0e-4
 
 

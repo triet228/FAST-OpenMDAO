@@ -90,6 +90,84 @@ def make_compact_energy_problem(
     )
 
 
+def make_compact_lift_to_drag_problem(
+    lift_to_drag_initial=10.0,
+    lift_to_drag_lower=5.0,
+    lift_to_drag_upper=25.0,
+):
+    """Return a FAST-Python optimization problem for cruise L/D.
+
+    Inputs:
+        lift_to_drag_initial: Initial cruise lift-to-drag ratio.
+        lift_to_drag_lower: Lower cruise lift-to-drag bound.
+        lift_to_drag_upper: Upper cruise lift-to-drag bound.
+
+    Outputs:
+        Unsetup OpenMDAO problem that minimizes stored-source mission energy
+        over cruise lift-to-drag ratio for the compact all-electric aircraft.
+
+    Assumptions:
+        This validates a second system-level design variable through the full
+        FAST-Python backend. It is still a compact smoke model, not a real
+        aircraft design recommendation.
+    """
+
+    aircraft = make_compact_aircraft()
+    mission = aircraft.pop("Mission")["Profile"]
+    return make_fast_optimization_problem(
+        aircraft=aircraft,
+        mission=mission,
+        input_specs=[
+            {
+                "name": "cruise_lift_to_drag",
+                "target": "aircraft",
+                "path": ("Specs", "Aero", "L_D", "Crs"),
+                "val": lift_to_drag_initial,
+                "desc": "Cruise lift-to-drag ratio.",
+            },
+        ],
+        output_specs=[
+            {
+                "name": "mtow",
+                "path": ("mtow",),
+                "units": "kg",
+                "desc": "Maximum takeoff weight.",
+            },
+            {
+                "name": "energy_used",
+                "path": (
+                    "aircraft",
+                    "Mission",
+                    "History",
+                    "SI",
+                    "Energy",
+                    "E_ES",
+                    -1,
+                    0,
+                ),
+                "units": "J",
+                "desc": "Final stored-source mission energy.",
+            },
+        ],
+        design_vars=[
+            {
+                "name": "cruise_lift_to_drag",
+                "lower": lift_to_drag_lower,
+                "upper": lift_to_drag_upper,
+                "scaler": 0.1,
+            },
+        ],
+        objective={
+            "name": "energy_used",
+            "scaler": 1.0e-7,
+        },
+        driver_options={
+            "maxiter": 20,
+            "tol": 1.0e-9,
+        },
+    )
+
+
 def run_demo(range_initial=20000.0, range_lower=10000.0, range_upper=40000.0):
     """Run the compact electric optimization demo.
 
@@ -118,6 +196,39 @@ def run_demo(range_initial=20000.0, range_lower=10000.0, range_upper=40000.0):
     return {
         "success": bool(result.success),
         "mission_range": float(problem.get_val("mission_range", units="m")[0]),
+        "mtow": float(problem.get_val("mtow", units="kg")[0]),
+        "energy_used": float(problem.get_val("energy_used", units="J")[0]),
+    }
+
+
+def run_lift_to_drag_demo(
+    lift_to_drag_initial=10.0,
+    lift_to_drag_lower=5.0,
+    lift_to_drag_upper=25.0,
+):
+    """Run the compact electric cruise-L/D optimization demo.
+
+    Inputs:
+        lift_to_drag_initial: Initial cruise lift-to-drag ratio.
+        lift_to_drag_lower: Lower cruise lift-to-drag bound.
+        lift_to_drag_upper: Upper cruise lift-to-drag bound.
+
+    Outputs:
+        Summary dictionary with driver success, optimized cruise L/D, MTOW, and
+        final stored-source energy.
+    """
+
+    problem = make_compact_lift_to_drag_problem(
+        lift_to_drag_initial=lift_to_drag_initial,
+        lift_to_drag_lower=lift_to_drag_lower,
+        lift_to_drag_upper=lift_to_drag_upper,
+    )
+    problem.setup()
+    result = problem.run_driver()
+
+    return {
+        "success": bool(result.success),
+        "cruise_lift_to_drag": float(problem.get_val("cruise_lift_to_drag")[0]),
         "mtow": float(problem.get_val("mtow", units="kg")[0]),
         "energy_used": float(problem.get_val("energy_used", units="J")[0]),
     }
@@ -152,6 +263,31 @@ def evaluate_fast_python_point(mission_range):
     }
 
 
+def evaluate_fast_python_lift_to_drag_point(lift_to_drag):
+    """Evaluate the compact FAST-Python case at one cruise L/D value.
+
+    Inputs:
+        lift_to_drag: Cruise lift-to-drag ratio.
+
+    Outputs:
+        Summary dictionary with cruise L/D, MTOW, and stored-source energy.
+    """
+
+    from fast_python import run
+
+    aircraft = make_compact_aircraft()
+    aircraft["Specs"]["Aero"]["L_D"]["Crs"] = lift_to_drag
+    mission = deepcopy(aircraft.pop("Mission")["Profile"])
+    result = run(aircraft, mission)
+    history = result["aircraft"]["Mission"]["History"]["SI"]
+
+    return {
+        "cruise_lift_to_drag": float(lift_to_drag),
+        "mtow": float(result["mtow"]),
+        "energy_used": float(history["Energy"]["E_ES"][-1][0]),
+    }
+
+
 def sample_fast_python_range_sweep(
     range_lower=10000.0,
     range_upper=40000.0,
@@ -174,6 +310,34 @@ def sample_fast_python_range_sweep(
     step = (range_upper - range_lower) / (sample_count - 1)
     return [
         evaluate_fast_python_point(range_lower + index * step)
+        for index in range(sample_count)
+    ]
+
+
+def sample_fast_python_lift_to_drag_sweep(
+    lift_to_drag_lower=5.0,
+    lift_to_drag_upper=25.0,
+    sample_count=9,
+):
+    """Evaluate FAST-Python repeatedly across the cruise-L/D design space.
+
+    Inputs:
+        lift_to_drag_lower: Lower cruise lift-to-drag bound.
+        lift_to_drag_upper: Upper cruise lift-to-drag bound.
+        sample_count: Number of evenly spaced FAST-Python evaluations.
+
+    Outputs:
+        List of point-evaluation summaries sorted by increasing cruise L/D.
+    """
+
+    if sample_count < 2:
+        raise ValueError("sample_count must be at least 2.")
+
+    step = (lift_to_drag_upper - lift_to_drag_lower) / (sample_count - 1)
+    return [
+        evaluate_fast_python_lift_to_drag_point(
+            lift_to_drag_lower + index * step
+        )
         for index in range(sample_count)
     ]
 
@@ -232,6 +396,61 @@ def validate_demo_against_fast_python_samples(
         "best_fast_python_sample": best_sample,
         "fast_python_samples": samples,
         "range_error": range_error,
+        "energy_error": energy_error,
+    }
+
+
+def validate_lift_to_drag_demo_against_fast_python_samples(
+    lift_to_drag_initial=10.0,
+    lift_to_drag_lower=5.0,
+    lift_to_drag_upper=25.0,
+    sample_count=9,
+    lift_to_drag_tolerance=1.0e-4,
+    energy_tolerance=1.0e-4,
+):
+    """Compare cruise-L/D OpenMDAO optimization against FAST-Python samples.
+
+    Inputs:
+        lift_to_drag_initial: Initial OpenMDAO cruise lift-to-drag ratio.
+        lift_to_drag_lower: Lower cruise lift-to-drag bound.
+        lift_to_drag_upper: Upper cruise lift-to-drag bound.
+        sample_count: Number of FAST-Python point evaluations.
+        lift_to_drag_tolerance: Allowed optimized-L/D mismatch.
+        energy_tolerance: Allowed objective mismatch in joules.
+
+    Outputs:
+        Dictionary containing the OpenMDAO optimum, sampled FAST-Python points,
+        best sampled point, and boolean agreement flags.
+    """
+
+    openmdao_summary = run_lift_to_drag_demo(
+        lift_to_drag_initial=lift_to_drag_initial,
+        lift_to_drag_lower=lift_to_drag_lower,
+        lift_to_drag_upper=lift_to_drag_upper,
+    )
+    samples = sample_fast_python_lift_to_drag_sweep(
+        lift_to_drag_lower=lift_to_drag_lower,
+        lift_to_drag_upper=lift_to_drag_upper,
+        sample_count=sample_count,
+    )
+    best_sample = best_sampled_point(samples)
+    lift_to_drag_error = abs(
+        openmdao_summary["cruise_lift_to_drag"]
+        - best_sample["cruise_lift_to_drag"]
+    )
+    energy_error = abs(openmdao_summary["energy_used"] - best_sample["energy_used"])
+
+    return {
+        "success": openmdao_summary["success"],
+        "agrees_with_samples": (
+            openmdao_summary["success"]
+            and lift_to_drag_error <= lift_to_drag_tolerance
+            and energy_error <= energy_tolerance
+        ),
+        "openmdao": openmdao_summary,
+        "best_fast_python_sample": best_sample,
+        "fast_python_samples": samples,
+        "lift_to_drag_error": lift_to_drag_error,
         "energy_error": energy_error,
     }
 

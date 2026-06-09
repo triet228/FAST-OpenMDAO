@@ -212,9 +212,10 @@ Validate the OpenMDAO optimum against repeated FAST-Python point evaluations:
 fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40000 --validate-samples 7
 ```
 
-The test suite also includes constraint-residual optimization checks that solve
-OpenMDAO zero-residual points and verify the optimized values against
-FAST-Python residual functions.
+The test suite also includes an independent compact cruise-L/D system-level
+optimization checked against a FAST-Python L/D sweep, plus constraint-residual
+optimization checks that solve OpenMDAO zero-residual points and verify the
+optimized values against FAST-Python residual functions.
 
 ## Development Roadmap
 
