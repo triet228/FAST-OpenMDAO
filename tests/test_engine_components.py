@@ -15,6 +15,7 @@ from fast_openmdao import (
     AirSpecificHeatVolume,
     AirTemperatureFromHeatAdded,
     AirTemperatureFromHeatRemoved,
+    BurnerFlow,
     ChokedArea,
     FlowArea,
     JetAIntegratedHeat,
@@ -33,6 +34,7 @@ from fast_openmdao import (
 from fast_python.engine import (
     a_astar,
     astar_a,
+    burner,
     cp_air,
     cp_jeta,
     cv_air,
@@ -287,6 +289,38 @@ def test_engine_local_efficiency_and_reynolds_match_fast_python():
     )
 
 
+def test_burner_flow_matches_fast_python():
+    """Check FAST on-design burner parity for scalar flow-state outputs."""
+
+    state31 = make_burner_state()
+    eta_poly = {"Combustor": 0.99}
+    expected_state, expected_fuel, expected_ratio = burner(
+        state31,
+        1400.0,
+        43.0e6,
+        eta_poly,
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem("burner", BurnerFlow(), promotes=["*"])
+    problem.setup()
+    set_burner_values(problem, state31, 1400.0, 43.0e6, eta_poly["Combustor"])
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("diffuser_mach_32")[0], expected_state["Mach"])
+    assert np.isclose(problem.get_val("diffuser_area_32", units="m**2")[0], expected_state["Area"])
+    assert np.isclose(problem.get_val("fuel_flow", units="kg/s")[0], expected_fuel)
+    assert np.isclose(problem.get_val("fuel_air_ratio")[0], expected_ratio)
+    assert np.isclose(problem.get_val("mass_flow_39", units="kg/s")[0], expected_state["MDot"])
+    assert np.isclose(problem.get_val("total_pressure_39", units="Pa")[0], expected_state["Pt"])
+    assert np.isclose(problem.get_val("total_temperature_39", units="K")[0], expected_state["Tt"])
+    assert np.isclose(problem.get_val("static_temperature_39", units="K")[0], expected_state["Ts"])
+    assert np.isclose(problem.get_val("cp_air_39")[0], expected_state["Cp"])
+    assert np.isclose(problem.get_val("cv_air_39")[0], expected_state["Cv"])
+    assert np.isclose(problem.get_val("gamma_39")[0], expected_state["Gam"])
+    assert np.isclose(problem.get_val("static_pressure_39", units="Pa")[0], expected_state["Ps"])
+    assert np.isclose(problem.get_val("inner_radius_39", units="m")[0], expected_state["Ri"])
+
+
 def test_simple_off_design_turbofan_matches_fast_python():
     """Check BADA-style simple off-design turbofan parity."""
 
@@ -378,6 +412,22 @@ def test_engine_primitives_declare_analytic_partials():
                 "he_coefficient": 1.0,
             },
         ),
+        (
+            "burner",
+            BurnerFlow(),
+            {
+                "mass_flow_31": 50.0,
+                "area_31": 0.45,
+                "total_pressure_31": 800000.0,
+                "total_temperature_31": 750.0,
+                "mach_31": 0.25,
+                "gamma_31": 1.35,
+                "outer_radius_31": 0.8,
+                "total_temperature_4": 1400.0,
+                "fuel_lhv": 43.0e6,
+                "combustor_efficiency": 0.99,
+            },
+        ),
     ]
 
     for name, component, values in cases:
@@ -397,8 +447,42 @@ def test_engine_primitives_declare_analytic_partials():
         )
 
         for partial_data in partials[name].values():
-            tolerance = 1.0e-3 if name == "nozzle" else 1.0e-4
+            tolerance = 1.0e-3 if name in ("nozzle", "burner") else 1.0e-4
             assert partial_data["abs error"].forward < tolerance
+
+
+def make_burner_state():
+    """Return a compact FAST-Python flow state for burner tests."""
+
+    return {
+        "MDot": 50.0,
+        "Area": 0.45,
+        "Pt": 800000.0,
+        "Tt": 750.0,
+        "Mach": 0.25,
+        "Gam": 1.35,
+        "Ro": 0.8,
+        "Ri": 0.48,
+        "Ts": ts_tt(750.0, 0.25, 1.35),
+        "Cp": cp_air(ts_tt(750.0, 0.25, 1.35)),
+        "Cv": cv_air(ts_tt(750.0, 0.25, 1.35)),
+        "Ps": ps_pt(800000.0, 0.25, 1.35),
+    }
+
+
+def set_burner_values(problem, state, total_temperature_4, fuel_lhv, combustor_efficiency):
+    """Set OpenMDAO burner inputs from a FAST-Python flow-state dictionary."""
+
+    problem.set_val("mass_flow_31", state["MDot"], units="kg/s")
+    problem.set_val("area_31", state["Area"], units="m**2")
+    problem.set_val("total_pressure_31", state["Pt"], units="Pa")
+    problem.set_val("total_temperature_31", state["Tt"], units="K")
+    problem.set_val("mach_31", state["Mach"])
+    problem.set_val("gamma_31", state["Gam"])
+    problem.set_val("outer_radius_31", state["Ro"], units="m")
+    problem.set_val("total_temperature_4", total_temperature_4, units="K")
+    problem.set_val("fuel_lhv", fuel_lhv)
+    problem.set_val("combustor_efficiency", combustor_efficiency)
 
 
 def make_simple_off_design_aircraft():

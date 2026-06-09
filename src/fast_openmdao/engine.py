@@ -331,6 +331,72 @@ class ThermalPerfectGamma(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class BurnerFlow(om.ExplicitComponent):
+    """Compute FAST on-design burner flow, fuel addition, and exit state."""
+
+    def setup(self):
+        self.add_input("mass_flow_31", val=50.0, units="kg/s")
+        self.add_input("area_31", val=0.5, units="m**2")
+        self.add_input("total_pressure_31", val=800000.0, units="Pa")
+        self.add_input("total_temperature_31", val=750.0, units="K")
+        self.add_input("mach_31", val=0.25)
+        self.add_input("gamma_31", val=1.35)
+        self.add_input("outer_radius_31", val=0.5, units="m")
+        self.add_input("total_temperature_4", val=1400.0, units="K")
+        self.add_input("fuel_lhv", val=43.0e6)
+        self.add_input("combustor_efficiency", val=0.99)
+        self.add_output("diffuser_mach_32", val=0.08)
+        self.add_output("diffuser_area_32", val=0.6, units="m**2")
+        self.add_output("diffuser_pressure_ratio", val=0.98)
+        self.add_output("fuel_flow", val=1.0, units="kg/s")
+        self.add_output("fuel_air_ratio", val=0.02)
+        self.add_output("mass_flow_39", val=51.0, units="kg/s")
+        self.add_output("total_pressure_39", val=740000.0, units="Pa")
+        self.add_output("total_temperature_39", val=1400.0, units="K")
+        self.add_output("static_temperature_39", val=1300.0, units="K")
+        self.add_output("cp_air_39", val=1200.0)
+        self.add_output("cv_air_39", val=913.0)
+        self.add_output("gamma_39", val=1.31)
+        self.add_output("static_pressure_39", val=730000.0, units="Pa")
+        self.add_output("inner_radius_39", val=0.4, units="m")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = burner_flow_values(
+            inputs["mass_flow_31"][0],
+            inputs["area_31"][0],
+            inputs["total_pressure_31"][0],
+            inputs["total_temperature_31"][0],
+            inputs["mach_31"][0],
+            inputs["gamma_31"][0],
+            inputs["outer_radius_31"][0],
+            inputs["total_temperature_4"][0],
+            inputs["fuel_lhv"][0],
+            inputs["combustor_efficiency"][0],
+        )
+
+        for output in burner_flow_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = burner_flow_values(
+            inputs["mass_flow_31"][0],
+            inputs["area_31"][0],
+            inputs["total_pressure_31"][0],
+            inputs["total_temperature_31"][0],
+            inputs["mach_31"][0],
+            inputs["gamma_31"][0],
+            inputs["outer_radius_31"][0],
+            inputs["total_temperature_4"][0],
+            inputs["fuel_lhv"][0],
+            inputs["combustor_efficiency"][0],
+        )
+
+        for output in burner_flow_output_names():
+            for variable in burner_flow_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class AirIntegratedHeat(om.ExplicitComponent):
     """Compute FAST integrated air specific heat between two temperatures."""
 
@@ -612,6 +678,171 @@ def simple_off_design_input_names():
         "fuel_coeff_altitude",
         "he_coefficient",
     )
+
+
+def burner_flow_input_names():
+    """Return scalar inputs for BurnerFlow derivative bookkeeping."""
+
+    return (
+        "mass_flow_31",
+        "area_31",
+        "total_pressure_31",
+        "total_temperature_31",
+        "mach_31",
+        "gamma_31",
+        "outer_radius_31",
+        "total_temperature_4",
+        "fuel_lhv",
+        "combustor_efficiency",
+    )
+
+
+def burner_flow_output_names():
+    """Return scalar BurnerFlow outputs."""
+
+    return (
+        "diffuser_mach_32",
+        "diffuser_area_32",
+        "diffuser_pressure_ratio",
+        "fuel_flow",
+        "fuel_air_ratio",
+        "mass_flow_39",
+        "total_pressure_39",
+        "total_temperature_39",
+        "static_temperature_39",
+        "cp_air_39",
+        "cv_air_39",
+        "gamma_39",
+        "static_pressure_39",
+        "inner_radius_39",
+    )
+
+
+def burner_flow_values(
+    mass_flow_31,
+    area_31,
+    total_pressure_31,
+    total_temperature_31,
+    mach_31,
+    gamma_31,
+    outer_radius_31,
+    total_temperature_4,
+    fuel_lhv,
+    combustor_efficiency,
+):
+    """Return FAST burner outputs with forward chain-rule derivatives."""
+
+    raw_inputs = {
+        "mass_flow_31": mass_flow_31,
+        "area_31": area_31,
+        "total_pressure_31": total_pressure_31,
+        "total_temperature_31": total_temperature_31,
+        "mach_31": mach_31,
+        "gamma_31": gamma_31,
+        "outer_radius_31": outer_radius_31,
+        "total_temperature_4": total_temperature_4,
+        "fuel_lhv": fuel_lhv,
+        "combustor_efficiency": combustor_efficiency,
+    }
+    values = {
+        name: _Ad.variable(raw_inputs[name], name)
+        for name in burner_flow_input_names()
+    }
+
+    mass31 = values["mass_flow_31"]
+    area31 = values["area_31"]
+    pt31 = values["total_pressure_31"]
+    tt31 = values["total_temperature_31"]
+    mach31 = values["mach_31"]
+    gamma31 = values["gamma_31"]
+    outer_radius = values["outer_radius_31"]
+    tt4 = values["total_temperature_4"]
+    lhv = values["fuel_lhv"]
+    eta_combustor = values["combustor_efficiency"]
+
+    diffuser_speed = 40.0
+    blockage = 0.05
+    gamma_loop = gamma31
+    ts31 = tt31 / _ad_isentropic_q(mach31, gamma_loop)
+
+    for _ in range(10):
+        mach32 = diffuser_speed / _ad_sqrt(gamma_loop * GAS_CONSTANT_AIR * ts31)
+        ts31 = tt31 / _ad_isentropic_q(mach32, gamma_loop)
+        cp32 = _ad_sigmoid_heat_value(ts31, 233.0, 1.0 / 210.0, 875.0, 993.0)
+        cv32 = _ad_sigmoid_heat_value(
+            ts31,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0 - GAS_CONSTANT_AIR,
+        )
+        gamma32 = cp32 / cv32
+        gamma_loop = gamma32
+
+    area_star = area31 / _ad_area_ratio(mach31, gamma_loop)
+    area32 = area_star * _ad_area_ratio(mach32, gamma32)
+    area_ratio = area32 / area31
+    eta_dm = 0.965 - 2.72 * blockage
+    eta_dopt = (
+        1.0 - 2.0 * eta_dm + (eta_dm * area_ratio) ** 2.0
+    ) / (eta_dm * area_ratio ** 2.0 - eta_dm)
+    pi_d = 1.0 - (1.0 - 1.0 / area_ratio ** 2.0) * (1.0 - eta_dopt) / (
+        1.0 + 2.0 / gamma_loop * mach31 ** 2.0
+    )
+    cp_air_combustion = _ad_integrated_heat_value(
+        tt31,
+        tt4,
+        233.0,
+        1.0 / 210.0,
+        875.0,
+        993.0,
+    )
+    cp_jeta_combustion = _ad_integrated_heat_value(
+        tt31,
+        tt4,
+        4600.0,
+        1.0 / 410.0,
+        500.0,
+        100.0,
+    )
+    fuel_flow = mass31 * cp_air_combustion / (
+        eta_combustor * lhv - cp_jeta_combustion
+    )
+    mass39 = mass31 + fuel_flow
+    fuel_air_ratio = fuel_flow / mass31
+    pt39 = pt31 * pi_d * 0.95
+    thermals = _ad_thermal_perfect_gamma(tt4, mach32, gamma32)
+    ps39 = pt39 / _ad_pressure_ratio(mach32, thermals["updated_gamma"])
+    inner_radius = _ad_sqrt(outer_radius ** 2.0 - area32 / math.pi)
+
+    ad_outputs = {
+        "diffuser_mach_32": mach32,
+        "diffuser_area_32": area32,
+        "diffuser_pressure_ratio": pi_d,
+        "fuel_flow": fuel_flow,
+        "fuel_air_ratio": fuel_air_ratio,
+        "mass_flow_39": mass39,
+        "total_pressure_39": pt39,
+        "total_temperature_39": tt4,
+        "static_temperature_39": thermals["static_temperature"],
+        "cp_air_39": thermals["cp_air"],
+        "cv_air_39": thermals["cv_air"],
+        "gamma_39": thermals["updated_gamma"],
+        "static_pressure_39": ps39,
+        "inner_radius_39": inner_radius,
+    }
+    result = {}
+
+    for output_name, ad_value in ad_outputs.items():
+        result[output_name] = ad_value.value
+
+        for input_name in burner_flow_input_names():
+            result["d%s_d%s" % (output_name, input_name)] = ad_value.derivatives.get(
+                input_name,
+                0.0,
+            )
+
+    return result
 
 
 def simple_off_design_turbofan_values(
@@ -1228,6 +1459,226 @@ def heat_antiderivative(temperature, length, rate, midpoint, offset):
     return temperature * (offset + length) + length * math.log1p(
         math.exp(rate * (midpoint - temperature))
     ) / rate
+
+
+class _Ad:
+    """Small scalar forward derivative value used for compact engine chains."""
+
+    def __init__(self, value, derivatives=None):
+        self.value = float(value)
+        self.derivatives = dict(derivatives or {})
+
+    @classmethod
+    def variable(cls, value, name):
+        return cls(value, {name: 1.0})
+
+    def __add__(self, other):
+        other = _ad_value(other)
+        derivatives = self.derivatives.copy()
+
+        for name, derivative in other.derivatives.items():
+            derivatives[name] = derivatives.get(name, 0.0) + derivative
+
+        return _Ad(self.value + other.value, derivatives)
+
+    __radd__ = __add__
+
+    def __sub__(self, other):
+        other = _ad_value(other)
+        derivatives = self.derivatives.copy()
+
+        for name, derivative in other.derivatives.items():
+            derivatives[name] = derivatives.get(name, 0.0) - derivative
+
+        return _Ad(self.value - other.value, derivatives)
+
+    def __rsub__(self, other):
+        return _ad_value(other).__sub__(self)
+
+    def __mul__(self, other):
+        other = _ad_value(other)
+        derivatives = {}
+
+        for name in set(self.derivatives) | set(other.derivatives):
+            derivatives[name] = (
+                self.derivatives.get(name, 0.0) * other.value
+                + other.derivatives.get(name, 0.0) * self.value
+            )
+
+        return _Ad(self.value * other.value, derivatives)
+
+    __rmul__ = __mul__
+
+    def __truediv__(self, other):
+        other = _ad_value(other)
+        derivatives = {}
+
+        for name in set(self.derivatives) | set(other.derivatives):
+            derivatives[name] = (
+                self.derivatives.get(name, 0.0) * other.value
+                - self.value * other.derivatives.get(name, 0.0)
+            ) / other.value ** 2
+
+        return _Ad(self.value / other.value, derivatives)
+
+    def __rtruediv__(self, other):
+        return _ad_value(other).__truediv__(self)
+
+    def __pow__(self, other):
+        other = _ad_value(other)
+        value = self.value ** other.value
+        derivatives = {}
+
+        for name in set(self.derivatives) | set(other.derivatives):
+            derivatives[name] = value * (
+                other.derivatives.get(name, 0.0) * math.log(self.value)
+                + other.value * self.derivatives.get(name, 0.0) / self.value
+            )
+
+        return _Ad(value, derivatives)
+
+    def __rpow__(self, other):
+        return _ad_value(other).__pow__(self)
+
+    def __neg__(self):
+        return _Ad(
+            -self.value,
+            {name: -derivative for name, derivative in self.derivatives.items()},
+        )
+
+
+def _ad_value(value):
+    """Return ``value`` as an automatic derivative scalar."""
+
+    if isinstance(value, _Ad):
+        return value
+
+    return _Ad(value)
+
+
+def _ad_exp(value):
+    """Return exponential and derivatives."""
+
+    value = _ad_value(value)
+    exponential = math.exp(value.value)
+    return _Ad(
+        exponential,
+        {
+            name: exponential * derivative
+            for name, derivative in value.derivatives.items()
+        },
+    )
+
+
+def _ad_log(value):
+    """Return natural log and derivatives."""
+
+    value = _ad_value(value)
+    return _Ad(
+        math.log(value.value),
+        {
+            name: derivative / value.value
+            for name, derivative in value.derivatives.items()
+        },
+    )
+
+
+def _ad_sqrt(value):
+    """Return square root and derivatives."""
+
+    return _ad_value(value) ** 0.5
+
+
+def _ad_isentropic_q(mach, gamma):
+    """Return FAST isentropic temperature-ratio term with derivatives."""
+
+    return 1.0 + 0.5 * (gamma - 1.0) * mach ** 2.0
+
+
+def _ad_pressure_ratio(mach, gamma):
+    """Return FAST isentropic total-to-static pressure ratio with derivatives."""
+
+    q = _ad_isentropic_q(mach, gamma)
+    return q ** (gamma / (gamma - 1.0))
+
+
+def _ad_area_ratio(mach, gamma):
+    """Return FAST area-to-choked-area ratio with derivatives."""
+
+    q = _ad_isentropic_q(mach, gamma)
+    base = 0.5 * (gamma + 1.0)
+    exponent = 0.5 * (gamma + 1.0) / (gamma - 1.0)
+    return base ** (-exponent) * q ** exponent / mach
+
+
+def _ad_sigmoid_heat_value(temperature, length, rate, midpoint, offset):
+    """Return FAST fitted heat capacity and derivatives."""
+
+    return length / (1.0 + _ad_exp(-rate * (temperature - midpoint))) + offset
+
+
+def _ad_heat_antiderivative(temperature, length, rate, midpoint, offset):
+    """Return fitted heat-capacity antiderivative and derivatives."""
+
+    exponential = _ad_exp(rate * (midpoint - temperature))
+    return temperature * (offset + length) + length * _ad_log(1.0 + exponential) / rate
+
+
+def _ad_integrated_heat_value(t_low, t_high, length, rate, midpoint, offset):
+    """Return integrated heat and derivatives."""
+
+    return _ad_heat_antiderivative(
+        t_high,
+        length,
+        rate,
+        midpoint,
+        offset,
+    ) - _ad_heat_antiderivative(
+        t_low,
+        length,
+        rate,
+        midpoint,
+        offset,
+    )
+
+
+def _ad_thermal_perfect_gamma(total_temperature, mach, gamma):
+    """Return FAST thermally perfect gamma loop with derivative scalars."""
+
+    gamma_new = gamma
+    delta_gamma = 1.0
+    iteration = 0
+    static_temperature = total_temperature / _ad_isentropic_q(mach, gamma_new)
+    cp = None
+    cv = None
+
+    while delta_gamma > 1.0e-3 and iteration < 10:
+        static_temperature = total_temperature / _ad_isentropic_q(mach, gamma_new)
+        cp = _ad_sigmoid_heat_value(
+            static_temperature,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+        cv = _ad_sigmoid_heat_value(
+            static_temperature,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0 - GAS_CONSTANT_AIR,
+        )
+        gamma_next = cp / cv
+        delta_gamma = abs(gamma_next.value - gamma_new.value) / gamma_new.value
+        gamma_new = gamma_next
+        iteration += 1
+
+    return {
+        "static_temperature": static_temperature,
+        "cp_air": cp,
+        "cv_air": cv,
+        "updated_gamma": gamma_new,
+    }
 
 
 def local_efficiency_value(reynolds):
