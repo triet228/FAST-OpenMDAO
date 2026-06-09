@@ -99,6 +99,21 @@ class WingAreaFromLoading(om.ExplicitComponent):
         ]
 
 
+class DetailedBatteryFlag(om.ExplicitComponent):
+    """Return FAST analysis detailed-battery flag from prescribed cell counts."""
+
+    def setup(self):
+        self.add_input("series_cells", val=100.0)
+        self.add_input("parallel_cells", val=10.0)
+        self.add_output("detailed_battery_enabled", val=1.0)
+
+    def compute(self, inputs, outputs):
+        outputs["detailed_battery_enabled"] = detailed_battery_flag_values(
+            inputs["series_cells"][0],
+            inputs["parallel_cells"][0],
+        )["detailed_battery_enabled"]
+
+
 class SourceWeightVector(om.ExplicitComponent):
     """Expand FAST source-weight input into a fixed OpenMDAO vector.
 
@@ -375,3 +390,14 @@ def wing_area_from_loading_values(mtow, wing_loading):
         "dwing_area_dmtow": 1.0 / wing_loading,
         "dwing_area_dwing_loading": -mtow / wing_loading ** 2,
     }
+
+
+def detailed_battery_flag_values(series_cells, parallel_cells):
+    """Return FAST detailed-battery flag for fixed scalar inputs."""
+
+    if np.isnan(series_cells) or np.isnan(parallel_cells):
+        value = 0.0
+    else:
+        value = 1.0
+
+    return {"detailed_battery_enabled": value}

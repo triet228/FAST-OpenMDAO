@@ -5,6 +5,7 @@
 from fast_openmdao.analysis import (
     AnalysisWeightUpdate,
     ConvergenceError,
+    DetailedBatteryFlag,
     SourceWeightVector,
     WeightSum,
     WingAreaFromLoading,
@@ -195,6 +196,7 @@ __all__ = [
     "BatteryCurrent",
     "BatteryNonzeroMean",
     "DetailedBatterySizing",
+    "DetailedBatteryFlag",
     "BatteryPowerHistory",
     "BatteryPowerStep",
     "BatteryPowerTimeBroadcast",

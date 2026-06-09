@@ -13,11 +13,17 @@ import fast_python.analysis as fast_analysis
 from fast_openmdao import (
     AnalysisWeightUpdate,
     ConvergenceError,
+    DetailedBatteryFlag,
     SourceWeightVector,
     WeightSum,
     WingAreaFromLoading,
 )
-from fast_python.analysis import convergence_error, initial_source_weight, sum_weight
+from fast_python.analysis import (
+    convergence_error,
+    detailed_battery_enabled,
+    initial_source_weight,
+    sum_weight,
+)
 
 
 def test_convergence_error_matches_fast_python():
@@ -134,6 +140,52 @@ def test_wing_area_from_loading_declares_analytic_partials():
     )
 
     for partial_data in partials["wing"].values():
+        assert partial_data["abs error"].forward < 1.0e-8
+
+
+def test_detailed_battery_flag_matches_fast_python():
+    """Check detailed-battery flag parity with FAST-Python."""
+
+    for series_cells, parallel_cells in [(100.0, 12.0), (np.nan, 12.0)]:
+        problem = om.Problem()
+        problem.model.add_subsystem("flag", DetailedBatteryFlag(), promotes=["*"])
+        problem.setup()
+        problem.set_val("series_cells", series_cells)
+        problem.set_val("parallel_cells", parallel_cells)
+        problem.run_model()
+
+        expected = detailed_battery_enabled(
+            {
+                "Power": {
+                    "Battery": {
+                        "SerCells": series_cells,
+                        "ParCells": parallel_cells,
+                    },
+                },
+            }
+        )
+
+        assert np.isclose(problem.get_val("detailed_battery_enabled")[0], expected)
+
+
+def test_detailed_battery_flag_declares_analytic_partials():
+    """Check detailed-battery flag derivatives for a fixed finite branch."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem("flag", DetailedBatteryFlag(), promotes=["*"])
+    problem.setup()
+    problem.set_val("series_cells", 100.0)
+    problem.set_val("parallel_cells", 12.0)
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["flag"].values():
         assert partial_data["abs error"].forward < 1.0e-8
 
 
