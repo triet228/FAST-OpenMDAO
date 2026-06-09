@@ -1004,6 +1004,123 @@ class BatteryEnergyHistory(om.ExplicitComponent):
                 ]
 
 
+class BatteryEnergyCutoff(om.ExplicitComponent):
+    """Apply FAST non-detailed battery depletion cutoff for a fixed stop row.
+
+    Inputs:
+        component_power: Full component output-power history in W, including
+            source columns followed by transmitter columns.
+        time_step: Segment time steps in s.
+        initial_source_energy: Source energy used at the segment start in J.
+        initial_source_energy_left: Source energy left at the segment start in J.
+        lam_down: Downstream split history.
+        soc: Source SOC history before cutoff handling.
+
+    Outputs:
+        adjusted_component_power: Power history after battery cutoff and engine
+            redistribution.
+        source_energy: Recomputed source energy used in J.
+        source_energy_left: Recomputed remaining source energy in J.
+        adjusted_lam_down: Downstream split history with rows after cutoff zeroed.
+        adjusted_soc: SOC history with rows after cutoff held constant.
+
+    Assumptions:
+        This represents the active, non-detailed, negative-analysis branch of
+        ``fast_python.propulsion.update_battery_energy`` after the cutoff row
+        has been identified. The stop row, battery source, and engine
+        transmitter columns are fixed options so the component is differentiable
+        within that branch.
+    """
+
+    def initialize(self):
+        self.options.declare("num_points", default=2)
+        self.options.declare("num_components", default=2)
+        self.options.declare("num_sources", default=1)
+        self.options.declare("num_lam_down", default=1)
+        self.options.declare("battery_source", default=0)
+        self.options.declare("engine_components", default=())
+        self.options.declare("cutoff_index", default=0)
+
+    def setup(self):
+        num_points = self.options["num_points"]
+        num_components = self.options["num_components"]
+        num_sources = self.options["num_sources"]
+        num_lam_down = self.options["num_lam_down"]
+        self.add_input(
+            "component_power",
+            val=np.zeros((num_points, num_components)),
+            units="W",
+        )
+        self.add_input("time_step", val=np.ones(num_points - 1), units="s")
+        self.add_input("initial_source_energy", val=np.zeros(num_sources), units="J")
+        self.add_input(
+            "initial_source_energy_left",
+            val=np.zeros(num_sources),
+            units="J",
+        )
+        self.add_input("lam_down", val=np.ones((num_points, num_lam_down)))
+        self.add_input("soc", val=np.ones((num_points, num_sources)) * 100.0)
+        self.add_output(
+            "adjusted_component_power",
+            val=np.zeros((num_points, num_components)),
+            units="W",
+        )
+        self.add_output(
+            "source_energy",
+            val=np.zeros((num_points, num_sources)),
+            units="J",
+        )
+        self.add_output(
+            "source_energy_left",
+            val=np.zeros((num_points, num_sources)),
+            units="J",
+        )
+        self.add_output(
+            "adjusted_lam_down",
+            val=np.ones((num_points, num_lam_down)),
+        )
+        self.add_output(
+            "adjusted_soc",
+            val=np.ones((num_points, num_sources)) * 100.0,
+        )
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = battery_energy_cutoff_values(
+            inputs["component_power"],
+            inputs["time_step"],
+            inputs["initial_source_energy"],
+            inputs["initial_source_energy_left"],
+            inputs["lam_down"],
+            inputs["soc"],
+            self.options["battery_source"],
+            self.options["engine_components"],
+            self.options["cutoff_index"],
+        )
+
+        for output_name in battery_energy_cutoff_output_names():
+            outputs[output_name] = values[output_name]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_energy_cutoff_values(
+            inputs["component_power"],
+            inputs["time_step"],
+            inputs["initial_source_energy"],
+            inputs["initial_source_energy_left"],
+            inputs["lam_down"],
+            inputs["soc"],
+            self.options["battery_source"],
+            self.options["engine_components"],
+            self.options["cutoff_index"],
+        )
+
+        for output_name in battery_energy_cutoff_output_names():
+            for input_name in battery_energy_cutoff_input_names():
+                partials[output_name, input_name] = values[
+                    "d%s_d%s" % (output_name, input_name)
+                ]
+
+
 class FuelUseHistory(om.ExplicitComponent):
     """Accumulate FAST fuel-flow history into fuel burn, mass, and source energy."""
 
@@ -2535,6 +2652,236 @@ def battery_energy_history_values(
         "dsource_energy_left_dtime_step": dleft_dtime,
         "dsource_energy_left_dinitial_source_energy": dleft_dinitial,
         "dsource_energy_left_dinitial_source_energy_left": dleft_dinitial_left,
+    }
+
+
+def battery_energy_cutoff_input_names():
+    """Return BatteryEnergyCutoff input names."""
+
+    return (
+        "component_power",
+        "time_step",
+        "initial_source_energy",
+        "initial_source_energy_left",
+        "lam_down",
+        "soc",
+    )
+
+
+def battery_energy_cutoff_output_names():
+    """Return BatteryEnergyCutoff output names."""
+
+    return (
+        "adjusted_component_power",
+        "source_energy",
+        "source_energy_left",
+        "adjusted_lam_down",
+        "adjusted_soc",
+    )
+
+
+def battery_energy_cutoff_values(
+    component_power,
+    time_step,
+    initial_source_energy,
+    initial_source_energy_left,
+    lam_down,
+    soc,
+    battery_source,
+    engine_components,
+    cutoff_index,
+):
+    """Return FAST fixed-branch battery cutoff values and dense partials."""
+
+    component_power = np.asarray(component_power, dtype=float)
+    time_step = np.asarray(time_step, dtype=float).reshape(-1)
+    initial_source_energy = np.asarray(initial_source_energy, dtype=float).reshape(-1)
+    initial_source_energy_left = np.asarray(
+        initial_source_energy_left,
+        dtype=float,
+    ).reshape(-1)
+    lam_down = np.asarray(lam_down, dtype=float)
+    soc = np.asarray(soc, dtype=float)
+    battery_source = int(battery_source)
+    engine_components = np.asarray(engine_components, dtype=int).reshape(-1)
+    cutoff_index = int(cutoff_index)
+    num_points, num_components = component_power.shape
+    num_sources = initial_source_energy.size
+    cutoff_index = max(0, min(cutoff_index, num_points - 1))
+    adjusted_power = np.array(component_power, dtype=float, copy=True)
+    adjusted_lam = np.array(lam_down, dtype=float, copy=True)
+    adjusted_soc = np.array(soc, dtype=float, copy=True)
+    source_energy = np.tile(initial_source_energy, (num_points, 1))
+    source_energy_left = np.tile(initial_source_energy_left, (num_points, 1))
+    dpower_dpower = np.eye(component_power.size)
+    dlam_dlam = np.eye(lam_down.size)
+    dsoc_dsoc = np.eye(soc.size)
+
+    if len(engine_components) > 0:
+        for row in range(cutoff_index, num_points - 1):
+            battery_power = component_power[row, battery_source]
+
+            for engine in engine_components:
+                adjusted_power[row, engine] += battery_power / len(engine_components)
+                output_index = row * num_components + engine
+                input_index = row * num_components + battery_source
+                dpower_dpower[output_index, input_index] += 1.0 / len(
+                    engine_components,
+                )
+
+    for row in range(cutoff_index, num_points):
+        adjusted_power[row, battery_source] = 0.0
+        output_index = row * num_components + battery_source
+        dpower_dpower[output_index, :] = 0.0
+        adjusted_lam[row, :] = 0.0
+        lam_row_start = row * lam_down.shape[1]
+        lam_row_stop = lam_row_start + lam_down.shape[1]
+        dlam_dlam[lam_row_start:lam_row_stop, :] = 0.0
+
+        soc_hold_row = max(0, cutoff_index - 1)
+        adjusted_soc[row, battery_source] = soc[soc_hold_row, battery_source]
+        output_index = row * num_sources + battery_source
+        dsoc_dsoc[output_index, :] = 0.0
+        input_index = soc_hold_row * num_sources + battery_source
+        dsoc_dsoc[output_index, input_index] = 1.0
+
+    derivative_pack = battery_energy_cutoff_derivatives(
+        adjusted_power,
+        time_step,
+        initial_source_energy,
+        initial_source_energy_left,
+        battery_source,
+        dpower_dpower,
+        dlam_dlam,
+        dsoc_dsoc,
+        lam_down.size,
+        soc.size,
+    )
+    source_energy = derivative_pack["source_energy"]
+    source_energy_left = derivative_pack["source_energy_left"]
+    result = {
+        "adjusted_component_power": adjusted_power,
+        "source_energy": source_energy,
+        "source_energy_left": source_energy_left,
+        "adjusted_lam_down": adjusted_lam,
+        "adjusted_soc": adjusted_soc,
+    }
+    result.update(derivative_pack["partials"])
+    return result
+
+
+def battery_energy_cutoff_derivatives(
+    adjusted_power,
+    time_step,
+    initial_source_energy,
+    initial_source_energy_left,
+    battery_source,
+    dpower_dpower,
+    dlam_dlam,
+    dsoc_dsoc,
+    lam_input_size,
+    soc_input_size,
+):
+    """Return dense derivative pack for BatteryEnergyCutoff."""
+
+    num_points, num_components = adjusted_power.shape
+    num_sources = initial_source_energy.size
+    output_power_size = adjusted_power.size
+    energy_size = num_points * num_sources
+    source_energy = np.tile(initial_source_energy, (num_points, 1))
+    source_energy_left = np.tile(initial_source_energy_left, (num_points, 1))
+    denergy_dadjusted_power = np.zeros((energy_size, output_power_size))
+    dleft_dadjusted_power = np.zeros((energy_size, output_power_size))
+    denergy_dtime = np.zeros((energy_size, time_step.size))
+    dleft_dtime = np.zeros((energy_size, time_step.size))
+    denergy_dinitial = np.zeros((energy_size, num_sources))
+    dleft_dinitial = np.zeros((energy_size, num_sources))
+    denergy_dinitial_left = np.zeros((energy_size, num_sources))
+    dleft_dinitial_left = np.zeros((energy_size, num_sources))
+
+    for row in range(num_points):
+        for source in range(num_sources):
+            output_index = row * num_sources + source
+            denergy_dinitial[output_index, source] = 1.0
+            dleft_dinitial_left[output_index, source] = 1.0
+
+    used = np.cumsum(adjusted_power[:-1, battery_source] * time_step)
+    source_energy[1:, battery_source] = (
+        initial_source_energy[battery_source] + used
+    )
+    source_energy_left[1:, battery_source] = (
+        initial_source_energy_left[battery_source] - used
+    )
+
+    for row in range(1, num_points):
+        output_index = row * num_sources + battery_source
+
+        for step in range(row):
+            power_index = step * num_components + battery_source
+            denergy_dadjusted_power[output_index, power_index] = time_step[step]
+            dleft_dadjusted_power[output_index, power_index] = -time_step[step]
+            denergy_dtime[output_index, step] = adjusted_power[step, battery_source]
+            dleft_dtime[output_index, step] = -adjusted_power[step, battery_source]
+
+    denergy_dpower = denergy_dadjusted_power @ dpower_dpower
+    dleft_dpower = dleft_dadjusted_power @ dpower_dpower
+    zero_time = np.zeros((output_power_size, time_step.size))
+    zero_initial = np.zeros((output_power_size, num_sources))
+    zero_lam = np.zeros((output_power_size, lam_input_size))
+    zero_soc_power = np.zeros((soc_input_size, output_power_size))
+    zero_soc_time = np.zeros((soc_input_size, time_step.size))
+    zero_soc_initial = np.zeros((soc_input_size, num_sources))
+    partials = {}
+
+    for output_name in battery_energy_cutoff_output_names():
+        for input_name in battery_energy_cutoff_input_names():
+            partials["d%s_d%s" % (output_name, input_name)] = None
+
+    partials["dadjusted_component_power_dcomponent_power"] = dpower_dpower
+    partials["dadjusted_component_power_dtime_step"] = zero_time
+    partials["dadjusted_component_power_dinitial_source_energy"] = zero_initial
+    partials["dadjusted_component_power_dinitial_source_energy_left"] = zero_initial
+    partials["dadjusted_component_power_dlam_down"] = zero_lam
+    partials["dadjusted_component_power_dsoc"] = np.zeros(
+        (output_power_size, soc_input_size),
+    )
+    partials["dsource_energy_dcomponent_power"] = denergy_dpower
+    partials["dsource_energy_dtime_step"] = denergy_dtime
+    partials["dsource_energy_dinitial_source_energy"] = denergy_dinitial
+    partials["dsource_energy_dinitial_source_energy_left"] = denergy_dinitial_left
+    partials["dsource_energy_dlam_down"] = np.zeros((energy_size, lam_input_size))
+    partials["dsource_energy_dsoc"] = np.zeros((energy_size, soc_input_size))
+    partials["dsource_energy_left_dcomponent_power"] = dleft_dpower
+    partials["dsource_energy_left_dtime_step"] = dleft_dtime
+    partials["dsource_energy_left_dinitial_source_energy"] = dleft_dinitial
+    partials["dsource_energy_left_dinitial_source_energy_left"] = dleft_dinitial_left
+    partials["dsource_energy_left_dlam_down"] = np.zeros((energy_size, lam_input_size))
+    partials["dsource_energy_left_dsoc"] = np.zeros((energy_size, soc_input_size))
+    partials["dadjusted_lam_down_dcomponent_power"] = np.zeros(
+        (lam_input_size, output_power_size),
+    )
+    partials["dadjusted_lam_down_dtime_step"] = np.zeros(
+        (lam_input_size, time_step.size),
+    )
+    partials["dadjusted_lam_down_dinitial_source_energy"] = np.zeros(
+        (lam_input_size, num_sources),
+    )
+    partials["dadjusted_lam_down_dinitial_source_energy_left"] = np.zeros(
+        (lam_input_size, num_sources),
+    )
+    partials["dadjusted_lam_down_dlam_down"] = dlam_dlam
+    partials["dadjusted_lam_down_dsoc"] = np.zeros((lam_input_size, soc_input_size))
+    partials["dadjusted_soc_dcomponent_power"] = zero_soc_power
+    partials["dadjusted_soc_dtime_step"] = zero_soc_time
+    partials["dadjusted_soc_dinitial_source_energy"] = zero_soc_initial
+    partials["dadjusted_soc_dinitial_source_energy_left"] = zero_soc_initial
+    partials["dadjusted_soc_dlam_down"] = np.zeros((soc_input_size, lam_input_size))
+    partials["dadjusted_soc_dsoc"] = dsoc_dsoc
+
+    return {
+        "source_energy": source_energy,
+        "source_energy_left": source_energy_left,
+        "partials": partials,
     }
 
 

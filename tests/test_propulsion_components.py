@@ -10,6 +10,7 @@ import numpy as np
 import openmdao.api as om
 
 from fast_openmdao import (
+    BatteryEnergyCutoff,
     BatteryEnergyHistory,
     CableWeightForSizing,
     EngineLapse,
@@ -591,6 +592,51 @@ def test_battery_energy_history_matches_fast_python_update():
     )
 
 
+def test_battery_energy_cutoff_matches_fast_python_update():
+    """Check fixed-branch battery cutoff parity with FAST-Python."""
+
+    case = make_battery_energy_cutoff_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "cutoff",
+        BatteryEnergyCutoff(
+            num_points=case["component_power"].shape[0],
+            num_components=case["component_power"].shape[1],
+            num_sources=case["initial_source_energy"].size,
+            num_lam_down=case["lam_down"].shape[1],
+            battery_source=case["battery_source"],
+            engine_components=case["engine_components"],
+            cutoff_index=case["cutoff_index"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("component_power", case["component_power"], units="W")
+    problem.set_val("time_step", case["time_step"], units="s")
+    problem.set_val("initial_source_energy", case["initial_source_energy"], units="J")
+    problem.set_val(
+        "initial_source_energy_left",
+        case["initial_source_energy_left"],
+        units="J",
+    )
+    problem.set_val("lam_down", case["lam_down"])
+    problem.set_val("soc", case["soc"])
+    problem.run_model()
+
+    expected = evaluate_fast_python_battery_cutoff_case(case)
+    assert np.allclose(
+        problem.get_val("adjusted_component_power", units="W"),
+        expected["component_power"],
+    )
+    assert np.allclose(problem.get_val("source_energy", units="J"), expected["energy"])
+    assert np.allclose(
+        problem.get_val("source_energy_left", units="J"),
+        expected["energy_left"],
+    )
+    assert np.allclose(problem.get_val("adjusted_lam_down"), expected["lam_down"])
+    assert np.allclose(problem.get_val("adjusted_soc"), expected["soc"])
+
+
 def test_fuel_use_history_matches_fast_python_custom_model():
     """Check fuel-use accumulation parity with FAST-Python."""
 
@@ -689,6 +735,7 @@ def test_propulsion_primitives_declare_analytic_partials():
     battery_energy_derivative_case["initial_source_energy_left"] = np.asarray(
         [1000.0, 2000.0, 3000.0]
     )
+    battery_cutoff_case = make_battery_energy_cutoff_case()
     simple_conventional_values = make_simple_source_architecture_values("C")
     simple_electric_values = make_simple_source_architecture_values("E")
     architecture_values = make_parallel_hybrid_architecture_values()
@@ -835,6 +882,30 @@ def test_propulsion_primitives_declare_analytic_partials():
                 "initial_source_energy_left": battery_energy_derivative_case[
                     "initial_source_energy_left"
                 ],
+            },
+        ),
+        (
+            "battery_cutoff",
+            BatteryEnergyCutoff(
+                num_points=battery_cutoff_case["component_power"].shape[0],
+                num_components=battery_cutoff_case["component_power"].shape[1],
+                num_sources=battery_cutoff_case["initial_source_energy"].size,
+                num_lam_down=battery_cutoff_case["lam_down"].shape[1],
+                battery_source=battery_cutoff_case["battery_source"],
+                engine_components=battery_cutoff_case["engine_components"],
+                cutoff_index=battery_cutoff_case["cutoff_index"],
+            ),
+            {
+                "component_power": battery_cutoff_case["component_power"],
+                "time_step": battery_cutoff_case["time_step"],
+                "initial_source_energy": battery_cutoff_case[
+                    "initial_source_energy"
+                ],
+                "initial_source_energy_left": battery_cutoff_case[
+                    "initial_source_energy_left"
+                ],
+                "lam_down": battery_cutoff_case["lam_down"],
+                "soc": battery_cutoff_case["soc"],
             },
         ),
         (
@@ -1424,6 +1495,122 @@ def evaluate_fast_python_battery_energy_case(case):
     return {
         "energy": source_energy,
         "energy_left": source_energy_left,
+    }
+
+
+def make_battery_energy_cutoff_case():
+    """Return a non-detailed battery case that triggers FAST cutoff handling."""
+
+    return {
+        "battery_source": 0,
+        "battery_sources": np.asarray([True]),
+        "engine_transmitters": np.asarray([True, True]),
+        "engine_components": np.asarray([1, 2]),
+        "cutoff_index": 1,
+        "component_power": np.asarray(
+            [
+                [200.0, 20.0, 30.0],
+                [300.0, 25.0, 35.0],
+                [400.0, 30.0, 40.0],
+                [500.0, 35.0, 45.0],
+            ]
+        ),
+        "time_step": np.asarray([1.0, 1.0, 1.0]),
+        "initial_source_energy": np.asarray([0.0]),
+        "initial_source_energy_left": np.asarray([250.0]),
+        "lam_down": np.asarray(
+            [
+                [0.3, 0.7],
+                [0.4, 0.6],
+                [0.5, 0.5],
+                [0.6, 0.4],
+            ]
+        ),
+        "soc": np.asarray(
+            [
+                [80.0],
+                [75.0],
+                [70.0],
+                [65.0],
+            ]
+        ),
+    }
+
+
+def evaluate_fast_python_battery_cutoff_case(case):
+    """Run FAST-Python update_battery_energy on the cutoff active branch."""
+
+    component_power = np.array(case["component_power"], dtype=float, copy=True)
+    num_points, num_components = component_power.shape
+    num_sources = case["initial_source_energy"].size
+    source_energy = np.tile(case["initial_source_energy"], (num_points, 1))
+    source_energy_left = np.tile(
+        case["initial_source_energy_left"],
+        (num_points, 1),
+    )
+    soc = np.array(case["soc"], dtype=float, copy=True)
+    voltage = np.zeros((num_points, num_sources))
+    current = np.zeros((num_points, num_sources))
+    capacity = np.zeros((num_points, num_sources))
+    c_rate = np.zeros((num_points, num_sources))
+    lam_down = np.array(case["lam_down"], dtype=float, copy=True)
+    mass = np.ones(num_points) * 1000.0
+    aircraft = {
+        "Settings": {
+            "Analysis": {
+                "Type": -1,
+            },
+        },
+        "Specs": {
+            "Power": {
+                "Battery": {
+                    "SerCells": float("nan"),
+                    "ParCells": float("nan"),
+                },
+            },
+            "Propulsion": {
+                "PropArch": {
+                    "Type": "PHE",
+                },
+            },
+        },
+        "Mission": {
+            "Profile": {
+                "MissID": 1,
+            },
+            "History": {
+                "Flags": {
+                    "SOCOff": [0],
+                },
+            },
+        },
+    }
+
+    update_battery_energy(
+        aircraft,
+        component_power,
+        case["time_step"],
+        case["battery_sources"],
+        case["engine_transmitters"],
+        num_sources,
+        source_energy,
+        source_energy_left,
+        soc,
+        voltage,
+        current,
+        capacity,
+        c_rate,
+        lam_down,
+        mass,
+        0,
+    )
+
+    return {
+        "component_power": component_power,
+        "energy": source_energy,
+        "energy_left": source_energy_left,
+        "lam_down": lam_down,
+        "soc": soc,
     }
 
 
