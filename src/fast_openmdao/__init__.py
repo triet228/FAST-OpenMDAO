@@ -50,6 +50,7 @@ from fast_openmdao.cost import (
     BatteryReplacementCost,
 )
 from fast_openmdao.database import (
+    DatabaseDesignGroupPercent,
     DatabaseFanThrustNormalization,
     DatabaseGeometryLoads,
     DatabasePropPowerNormalization,
@@ -245,6 +246,7 @@ __all__ = [
     "CruiseSegmentKinematicsPower",
     "CruiseTimeTargetDistance",
     "DatabaseFanThrustNormalization",
+    "DatabaseDesignGroupPercent",
     "DatabaseGeometryLoads",
     "DatabasePropPowerNormalization",
     "DatabaseWeightFractions",

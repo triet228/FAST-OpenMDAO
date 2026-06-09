@@ -10,6 +10,7 @@ import numpy as np
 import openmdao.api as om
 
 from fast_openmdao import (
+    DatabaseDesignGroupPercent,
     DatabaseFanThrustNormalization,
     DatabaseGeometryLoads,
     DatabasePropPowerNormalization,
@@ -379,6 +380,61 @@ def test_database_geometry_loads_declares_analytic_partials():
             partial_data["abs error"].forward < 1.0e-6
             or partial_data["rel error"].forward < 1.0e-6
         )
+
+
+def test_database_design_group_percent_matches_fast_python_calc_vals():
+    """Check FAST database ADG percent preprocessing parity."""
+
+    cases = [
+        (make_fan_plane(), calc_fan_vals, "III"),
+        (make_prop_plane(), calc_prop_vals, "II"),
+    ]
+
+    for plane, calc_function, design_group in cases:
+        expected = calc_function(plane, "Vals")["Specs"]["TLAR"]
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "adg",
+            DatabaseDesignGroupPercent(
+                design_group=design_group,
+                limiting_dimension="wingspan",
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("wing_span", plane["Specs"]["Aero"]["Span"], units="m")
+        problem.set_val("tail_height", plane["Specs"]["Aero"]["Height"], units="m")
+        problem.run_model()
+
+        assert np.isclose(
+            problem.get_val("design_group_percent")[0],
+            expected["ADGPercent"],
+        )
+
+
+def test_database_design_group_percent_declares_analytic_partials():
+    """Check ADG percent fixed-branch derivatives."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "adg",
+        DatabaseDesignGroupPercent(design_group="III"),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("wing_span", 35.0, units="m")
+    problem.set_val("tail_height", 12.0, units="m")
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["adg"].values():
+        assert partial_data["abs error"].forward < 1.0e-6
 
 
 def test_database_fan_thrust_normalization_matches_fast_python_calc_fan_vals():

@@ -259,6 +259,85 @@ class DatabaseGeometryLoads(om.ExplicitComponent):
                 ]
 
 
+class DatabaseDesignGroupPercent(om.ExplicitComponent):
+    """Compute FAST fixed-branch airplane design-group percent margins.
+
+    Inputs:
+        wing_span: Aircraft wingspan in m.
+        tail_height: Aircraft tail height in m.
+
+    Outputs:
+        span_percent: Wingspan divided by the selected design-group limit.
+        height_percent: Tail height divided by the selected design-group limit.
+        design_group_percent: FAST's limiting percent for the fixed branch.
+
+    Assumptions:
+        FAST selects the ADG category and limiting dimension with discrete
+        comparisons. This component keeps the category fixed through the
+        ``design_group`` option and the limiting dimension fixed through the
+        ``limiting_dimension`` option.
+    """
+
+    def initialize(self):
+        self.options.declare("design_group", default="III")
+        self.options.declare("limiting_dimension", default="wingspan")
+
+    def setup(self):
+        self.add_input("wing_span", val=35.0, units="m")
+        self.add_input("tail_height", val=12.0, units="m")
+        self.add_output("span_percent", val=0.9)
+        self.add_output("height_percent", val=0.9)
+        self.add_output("design_group_percent", val=0.9)
+        self.declare_partials(of="span_percent", wrt="wing_span")
+        self.declare_partials(of="height_percent", wrt="tail_height")
+
+        limiting_dimension = self.options["limiting_dimension"]
+
+        if limiting_dimension == "wingspan":
+            self.declare_partials(of="design_group_percent", wrt="wing_span")
+        elif limiting_dimension == "tail_height":
+            self.declare_partials(of="design_group_percent", wrt="tail_height")
+        else:
+            raise ValueError(
+                "DatabaseDesignGroupPercent limiting_dimension must be "
+                "wingspan or tail_height."
+            )
+
+    def compute(self, inputs, outputs):
+        values = database_design_group_percent_values(
+            inputs["wing_span"][0],
+            inputs["tail_height"][0],
+            self.options["design_group"],
+            self.options["limiting_dimension"],
+        )
+
+        for name in database_design_group_percent_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = database_design_group_percent_values(
+            inputs["wing_span"][0],
+            inputs["tail_height"][0],
+            self.options["design_group"],
+            self.options["limiting_dimension"],
+        )
+        partials["span_percent", "wing_span"] = values[
+            "dspan_percent_dwing_span"
+        ]
+        partials["height_percent", "tail_height"] = values[
+            "dheight_percent_dtail_height"
+        ]
+
+        if self.options["limiting_dimension"] == "wingspan":
+            partials["design_group_percent", "wing_span"] = values[
+                "ddesign_group_percent_dwing_span"
+            ]
+        else:
+            partials["design_group_percent", "tail_height"] = values[
+                "ddesign_group_percent_dtail_height"
+            ]
+
+
 class DatabaseFanThrustNormalization(om.ExplicitComponent):
     """Compute FAST turbofan database thrust totals and thrust loading."""
 
@@ -493,6 +572,72 @@ def mac_lift_drag_values(aspect_ratio, reynolds):
         "dlift_drag_daspect_ratio": lift_drag * dlog_daspect_ratio,
         "dlift_drag_dreynolds": lift_drag * dlog_dreynolds,
     }
+
+
+def database_design_group_limits(design_group):
+    """Return FAST ADG span and height limits in ft."""
+
+    limits = {
+        "I": (49.0, 20.0),
+        "II": (79.0, 30.0),
+        "III": (118.0, 45.0),
+        "IV": (171.0, 60.0),
+        "V": (214.0, 66.0),
+        "VI": (262.0, 80.0),
+    }
+
+    if design_group not in limits:
+        raise ValueError("DatabaseDesignGroupPercent design_group must be I-VI.")
+
+    return limits[design_group]
+
+
+def database_design_group_percent_output_names():
+    """Return database ADG percent output names."""
+
+    return [
+        "span_percent",
+        "height_percent",
+        "design_group_percent",
+    ]
+
+
+def database_design_group_percent_values(
+    wing_span,
+    tail_height,
+    design_group,
+    limiting_dimension,
+):
+    """Return FAST ADG percent values and analytical derivatives."""
+
+    ft_per_m = 3.28083989501312
+    span_limit, height_limit = database_design_group_limits(design_group)
+    span_percent = wing_span * ft_per_m / span_limit
+    height_percent = tail_height * ft_per_m / height_limit
+    dspan_percent_dwing_span = ft_per_m / span_limit
+    dheight_percent_dtail_height = ft_per_m / height_limit
+
+    values = {
+        "span_percent": span_percent,
+        "height_percent": height_percent,
+        "design_group_percent": span_percent,
+        "dspan_percent_dwing_span": dspan_percent_dwing_span,
+        "dheight_percent_dtail_height": dheight_percent_dtail_height,
+        "ddesign_group_percent_dwing_span": dspan_percent_dwing_span,
+        "ddesign_group_percent_dtail_height": 0.0,
+    }
+
+    if limiting_dimension == "tail_height":
+        values["design_group_percent"] = height_percent
+        values["ddesign_group_percent_dwing_span"] = 0.0
+        values["ddesign_group_percent_dtail_height"] = dheight_percent_dtail_height
+    elif limiting_dimension != "wingspan":
+        raise ValueError(
+            "DatabaseDesignGroupPercent limiting_dimension must be "
+            "wingspan or tail_height."
+        )
+
+    return values
 
 
 def turboprop_cruise_lift_drag_values(mtow, cruise_power, cruise_mach, temperature):
