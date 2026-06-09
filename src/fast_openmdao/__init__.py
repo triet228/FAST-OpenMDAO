@@ -2,7 +2,7 @@
 
 """OpenMDAO integration layer for FAST-Python."""
 
-from fast_openmdao.analysis import ConvergenceError, WeightSum
+from fast_openmdao.analysis import ConvergenceError, SourceWeightVector, WeightSum
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.battery import AvailableCellCapacity, BatteryCurrent
 from fast_openmdao.components import FastPythonComponent
@@ -107,6 +107,7 @@ __all__ = [
     "PowerLimitConstraints",
     "PsLossSigmoid",
     "SafeComponentWeight",
+    "SourceWeightVector",
     "StaticDensity",
     "StaticPressure",
     "StaticTemperature",

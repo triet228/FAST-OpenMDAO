@@ -46,8 +46,8 @@ derivative-native FAST equation components:
 - Generic FAR 25 climb residual component with analytical partial derivatives.
 - Battery scalar primitives for effective cell capacity and selected current
   root with analytical partial derivatives.
-- Analysis and OEW summation helpers for scalar/vector weight values with
-  analytical partial derivatives.
+- Analysis source-weight vectorization plus analysis and OEW summation helpers
+  for scalar/vector weight values with analytical partial derivatives.
 - Optimization helper primitives for available electric motor power and
   battery energy with analytical partial derivatives.
 - Optimization power/energy limit residual helper with analytical partial
@@ -72,7 +72,7 @@ derivative-native FAST equation components:
 The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
-- Analysis: `ConvergenceError`, `WeightSum`
+- Analysis: `ConvergenceError`, `SourceWeightVector`, `WeightSum`
 - Battery: `AvailableCellCapacity`, `BatteryCurrent`
 - Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
   `FAR25EngineGradient`, `JetApproachConstraint`, `JetCruiseConstraint`,
@@ -293,8 +293,10 @@ FAST-Python residual functions.
    partial derivatives. Done.
 27. Convert optimization objective selector helpers with analytical partial
    derivatives. Done.
-28. Add complex-step derivative checks where supported by FAST-Python internals.
-29. Build reusable groups for mission, propulsion, weights, and objective
+28. Convert analysis source-weight vectorization helper with analytical partial
+   derivatives. Done.
+29. Add complex-step derivative checks where supported by FAST-Python internals.
+30. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.
