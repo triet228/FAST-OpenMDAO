@@ -133,6 +133,8 @@ from fast_openmdao.projection import (
 )
 from fast_openmdao.regression import (
     GaussianProcessPrediction,
+    RegressionNumericColumn,
+    RegressionNumericScalar,
     RegressionSampleVariance,
     RegressionTargetMatrix,
     RegressionTwoDimensionalArray,
@@ -272,6 +274,8 @@ __all__ = [
     "PropulsionTwoDimensionalArray",
     "PropulsionVector",
     "PsLossSigmoid",
+    "RegressionNumericColumn",
+    "RegressionNumericScalar",
     "RegressionSampleVariance",
     "RegressionTargetMatrix",
     "RegressionTwoDimensionalArray",

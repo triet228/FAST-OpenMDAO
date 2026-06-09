@@ -242,6 +242,70 @@ class RegressionSampleVariance(om.ExplicitComponent):
         partials["sample_variance", "values"] = values["dsample_variance_dvalues"]
 
 
+class RegressionNumericScalar(om.ExplicitComponent):
+    """Select FAST regression's first numeric scalar from fixed-shape data."""
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = regression_shape_tuple(self.options["input_shape"])
+        input_size = int(np.prod(input_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("numeric_scalar", val=0.0)
+        self.declare_partials(
+            of="numeric_scalar",
+            wrt="values",
+            rows=np.zeros(1, dtype=int),
+            cols=np.zeros(1, dtype=int),
+            val=np.ones(1),
+        )
+
+        if input_size < 1:
+            raise ValueError("RegressionNumericScalar requires nonempty input_shape.")
+
+    def compute(self, inputs, outputs):
+        outputs["numeric_scalar"] = regression_numeric_scalar_values(
+            inputs["values"],
+        )["numeric_scalar"]
+
+
+class RegressionNumericColumn(om.ExplicitComponent):
+    """Select FAST regression numeric scalars from fixed-shape rows."""
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1, 1))
+
+    def setup(self):
+        input_shape = regression_shape_tuple(self.options["input_shape"])
+        row_count = regression_numeric_column_row_count(input_shape)
+        input_size = int(np.prod(input_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("numeric_column", val=np.zeros(row_count))
+        rows = np.arange(row_count)
+
+        if len(input_shape) <= 1:
+            cols = rows
+        else:
+            cols = np.arange(row_count) * input_shape[1]
+
+        self.declare_partials(
+            of="numeric_column",
+            wrt="values",
+            rows=rows,
+            cols=cols,
+            val=np.ones(row_count),
+        )
+
+        if input_size < 1:
+            raise ValueError("RegressionNumericColumn requires nonempty input_shape.")
+
+    def compute(self, inputs, outputs):
+        outputs["numeric_column"] = regression_numeric_column_values(
+            inputs["values"],
+        )["numeric_column"]
+
+
 def squared_exponential_kernel_value(x_value, y_value, length_scales, signal_variance):
     """Return FAST squared-exponential kernel value."""
 
@@ -412,3 +476,31 @@ def regression_sample_variance_values(values):
         "sample_variance": variance,
         "dsample_variance_dvalues": derivative,
     }
+
+
+def regression_numeric_scalar_values(values):
+    """Return the first numeric scalar represented by fixed-shape values."""
+
+    return {"numeric_scalar": float(np.asarray(values, dtype=float).reshape(-1)[0])}
+
+
+def regression_numeric_column_row_count(input_shape):
+    """Return output row count for FAST regression numeric-column conversion."""
+
+    if len(input_shape) <= 1:
+        return int(np.prod(input_shape))
+
+    return input_shape[0]
+
+
+def regression_numeric_column_values(values):
+    """Return fixed-shape values as FAST regression numeric-column data."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim <= 1:
+        column = array.reshape(-1)
+    else:
+        column = array.reshape(array.shape[0], -1)[:, 0]
+
+    return {"numeric_column": column}

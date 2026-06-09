@@ -11,6 +11,8 @@ import openmdao.api as om
 
 from fast_openmdao import (
     GaussianProcessPrediction,
+    RegressionNumericColumn,
+    RegressionNumericScalar,
     RegressionSampleVariance,
     RegressionTargetMatrix,
     RegressionTwoDimensionalArray,
@@ -21,6 +23,8 @@ from fast_python.regression import (
     as_2d,
     as_vector,
     nlgpr,
+    numeric_column,
+    numeric_scalar,
     sample_variance,
     square_exp_kernel,
     target_matrix,
@@ -152,6 +156,38 @@ def test_regression_shape_and_variance_helpers_match_fast_python():
         sample_variance(variance_values),
     )
 
+    scalar_values = np.asarray([[12.0, 13.0], [14.0, 15.0]])
+    scalar_problem = om.Problem()
+    scalar_problem.model.add_subsystem(
+        "scalar",
+        RegressionNumericScalar(input_shape=scalar_values.shape),
+        promotes=["*"],
+    )
+    scalar_problem.setup()
+    scalar_problem.set_val("values", scalar_values)
+    scalar_problem.run_model()
+
+    assert np.isclose(
+        scalar_problem.get_val("numeric_scalar")[0],
+        numeric_scalar(scalar_values),
+    )
+
+    column_values = np.asarray([[16.0, 17.0], [18.0, 19.0], [20.0, 21.0]])
+    column_problem = om.Problem()
+    column_problem.model.add_subsystem(
+        "column",
+        RegressionNumericColumn(input_shape=column_values.shape),
+        promotes=["*"],
+    )
+    column_problem.setup()
+    column_problem.set_val("values", column_values)
+    column_problem.run_model()
+
+    assert np.allclose(
+        column_problem.get_val("numeric_column"),
+        numeric_column(column_values),
+    )
+
 
 def test_squared_exponential_kernel_declares_analytic_partials():
     """Check kernel analytical partials against finite difference."""
@@ -233,6 +269,16 @@ def test_regression_shape_and_variance_helpers_declare_analytic_partials():
             "variance",
             RegressionSampleVariance(vec_size=4),
             {"values": np.asarray([2.0, 4.0, 7.0, 11.0])},
+        ),
+        (
+            "scalar",
+            RegressionNumericScalar(input_shape=(2, 2)),
+            {"values": np.asarray([[12.0, 13.0], [14.0, 15.0]])},
+        ),
+        (
+            "column",
+            RegressionNumericColumn(input_shape=(3, 2)),
+            {"values": np.asarray([[16.0, 17.0], [18.0, 19.0], [20.0, 21.0]])},
         ),
     ]
 

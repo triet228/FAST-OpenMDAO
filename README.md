@@ -112,7 +112,8 @@ derivative-native FAST equation components:
   objective values with analytical partial derivatives.
 - Regression squared-exponential kernel, fixed-preprocessing Gaussian process
   posterior prediction, fixed-shape target/vector/2D normalization, and
-  sample-variance helpers with analytical partial derivatives.
+  numeric-scalar, numeric-column, and sample-variance helpers with analytical
+  partial derivatives.
 - OEW turboprop linear fit, one-step turboprop and turbofan fixed-point
   balances, turbofan airframe GPR weight, and numeric-sum helpers with
   analytical partial derivatives.
@@ -193,8 +194,9 @@ The public `fast_openmdao` package currently exports:
   `TurboelectricArchitecture`, `TurbofanEngineWeightForSizing`,
   `TurbopropEngineWeightForSizing`
 - Regression: `GaussianProcessPrediction`, `RegressionSampleVariance`,
-  `RegressionTargetMatrix`, `RegressionTwoDimensionalArray`,
-  `RegressionVector`, `SquaredExponentialKernel`
+  `RegressionNumericColumn`, `RegressionNumericScalar`,
+  `RegressionTargetMatrix`, `RegressionTwoDimensionalArray`, `RegressionVector`,
+  `SquaredExponentialKernel`
 - Units: `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
   `make_fast_optimization_problem`
