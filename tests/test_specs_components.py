@@ -13,12 +13,16 @@ from fast_openmdao import (
     AEACustomArchitecture,
     LM100JHybridArchitecture,
     LM100JHybridOperationMatrices,
+    SplitScalar,
+    ZeroSegmentSplits,
 )
 from fast_python.specs import (
     aea_architecture_matrices,
     lm100j_hybrid_architecture,
     lm100j_hybrid_oper_dwn,
     lm100j_hybrid_oper_ups,
+    split_scalar,
+    zero_segment_splits,
 )
 
 
@@ -94,6 +98,49 @@ def test_lm100j_hybrid_operation_matrices_match_fast_python():
         problem.get_val("downstream_split"),
         np.asarray(lm100j_hybrid_oper_dwn(power_split), dtype=float),
     )
+
+
+def test_split_scalar_matches_fast_python():
+    """Check fixed-shape split scalar flattening parity with FAST-Python."""
+
+    split_values = np.asarray([[0.42, 0.31], [0.27, 0.15]])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "split",
+        SplitScalar(input_shape=split_values.shape),
+        promotes=["*"],
+    )
+    problem.setup(force_alloc_complex=True)
+    problem.set_val("split_values", split_values)
+    problem.run_model()
+
+    assert np.allclose(problem.get_val("split_scalar"), split_scalar(split_values))
+
+    partials = problem.check_partials(method="cs", out_stream=None)
+    for component_partials in partials.values():
+        for partial in component_partials.values():
+            assert partial["abs error"].forward < 1.0e-12
+
+
+def test_zero_segment_splits_match_fast_python():
+    """Check zero segment split parity with FAST-Python."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "splits",
+        ZeroSegmentSplits(),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.run_model()
+
+    expected = zero_segment_splits()
+    assert np.allclose(problem.get_val("sls"), expected["SLS"])
+    assert np.allclose(problem.get_val("takeoff"), expected["Tko"])
+    assert np.allclose(problem.get_val("climb"), expected["Clb"])
+    assert np.allclose(problem.get_val("cruise"), expected["Crs"])
+    assert np.allclose(problem.get_val("descent"), expected["Des"])
+    assert np.allclose(problem.get_val("landing"), expected["Lnd"])
 
 
 def test_lm100j_hybrid_operation_matrices_partials():

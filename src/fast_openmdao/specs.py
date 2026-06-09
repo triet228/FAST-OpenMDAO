@@ -120,6 +120,64 @@ class LM100JHybridOperationMatrices(om.ExplicitComponent):
         ].reshape(-1)
 
 
+class SplitScalar(om.ExplicitComponent):
+    """Return FAST-Python's first numeric split value from a fixed-shape input.
+
+    Inputs:
+        split_values: Fixed-shape scalar, vector, or matrix split field.
+
+    Outputs:
+        split_scalar: First value after FAST-Python's flattening rule.
+
+    Assumptions:
+        OpenMDAO fixes the split input shape at setup. The derivative is one
+        with respect to the first flattened entry and zero elsewhere.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = fixed_specs_shape_tuple(self.options["input_shape"])
+        self.add_input("split_values", val=np.zeros(input_shape))
+        self.add_output("split_scalar", val=0.0)
+        self.declare_partials(
+            of="split_scalar",
+            wrt="split_values",
+            rows=np.asarray([0]),
+            cols=np.asarray([0]),
+            val=np.asarray([1.0]),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["split_scalar"] = split_scalar_value(inputs["split_values"])[
+            "split_scalar"
+        ]
+
+
+class ZeroSegmentSplits(om.ExplicitComponent):
+    """Return zero-valued FAST segment split fields as OpenMDAO outputs.
+
+    Outputs:
+        sls, takeoff, climb, cruise, descent, landing: Zero split values
+        matching FAST-Python's SLS, Tko, Clb, Crs, Des, and Lnd fields.
+
+    Assumptions:
+        This is a constant preset helper. With no inputs, it has no derivative
+        surface.
+    """
+
+    def setup(self):
+        for name in zero_segment_split_output_names():
+            self.add_output(name, val=0.0)
+
+    def compute(self, inputs, outputs):
+        values = zero_segment_split_values()
+
+        for name in zero_segment_split_output_names():
+            outputs[name] = values[name]
+
+
 def lm100j_hybrid_architecture_output_names():
     """Return output names for the LM100J_Hybrid architecture component."""
 
@@ -132,6 +190,49 @@ def lm100j_hybrid_architecture_output_names():
         "source_type",
         "transmitter_type",
     ]
+
+
+def fixed_specs_shape_tuple(shape):
+    """Return a tuple shape for fixed-shape specs helper components."""
+
+    if np.isscalar(shape):
+        return (int(shape),)
+
+    return tuple(int(value) for value in shape)
+
+
+def split_scalar_value(split_values):
+    """Return FAST-Python's first flattened numeric split value."""
+
+    return {
+        "split_scalar": np.asarray(split_values).reshape(-1)[0],
+    }
+
+
+def zero_segment_split_output_names():
+    """Return OpenMDAO output names for FAST zero segment split fields."""
+
+    return [
+        "sls",
+        "takeoff",
+        "climb",
+        "cruise",
+        "descent",
+        "landing",
+    ]
+
+
+def zero_segment_split_values():
+    """Return zero-valued segment split fields in OpenMDAO naming."""
+
+    return {
+        "sls": 0.0,
+        "takeoff": 0.0,
+        "climb": 0.0,
+        "cruise": 0.0,
+        "descent": 0.0,
+        "landing": 0.0,
+    }
 
 
 def aea_custom_architecture_output_names():

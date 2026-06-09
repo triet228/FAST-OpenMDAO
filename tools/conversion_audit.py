@@ -26,6 +26,8 @@ COVERAGE_ALIASES = {
     "lm100j_hybrid_architecture": {"LM100JHybridArchitecture"},
     "lm100j_hybrid_oper_dwn": {"LM100JHybridOperationMatrices"},
     "lm100j_hybrid_oper_ups": {"LM100JHybridOperationMatrices"},
+    "split_scalar": {"SplitScalar"},
+    "zero_segment_splits": {"ZeroSegmentSplits"},
 }
 
 

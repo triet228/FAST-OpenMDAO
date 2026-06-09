@@ -176,6 +176,8 @@ from fast_openmdao.specs import (
     AEACustomArchitecture,
     LM100JHybridArchitecture,
     LM100JHybridOperationMatrices,
+    SplitScalar,
+    ZeroSegmentSplits,
 )
 from fast_openmdao.propulsion import (
     BatteryEnergyCutoff,
@@ -357,6 +359,7 @@ __all__ = [
     "SimpleOffDesignTurbofan",
     "SimplexPostSplitHistory",
     "SimpleSourceTransmitterArchitecture",
+    "SplitScalar",
     "SplitValuesVector",
     "SourceWeightRestore",
     "SourceWeightVector",
@@ -391,6 +394,7 @@ __all__ = [
     "UnitArrayConversion",
     "WeightSum",
     "WingAreaFromLoading",
+    "ZeroSegmentSplits",
     "__version__",
     "make_fast_optimization_problem",
     "make_fast_problem",
