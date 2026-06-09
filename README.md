@@ -14,6 +14,13 @@ groups, derivative checks, and optimization examples while keeping
 This repository has a working OpenMDAO bridge plus a growing set of
 derivative-native FAST equation components:
 
+As of the current conversion audit, the fixed-shape FAST-Python equation
+kernels that are practical as explicit OpenMDAO components have native
+components with analytical partial derivatives and FAST-Python parity tests.
+Remaining FAST-Python behavior is kept as support, group orchestration,
+adaptive loop logic, or OpenMDAO driver setup rather than forced into
+single-component derivatives.
+
 - `FastPythonComponent`: an `om.ExplicitComponent` that wraps a `FAST-Python`
   run.
 - `Gravity` and `StandardAtmosphere`: native OpenMDAO components matching
@@ -491,8 +498,13 @@ residual functions.
    derivatives. Done.
 52. Convert fan-exit core/bypass flow split with analytical partial
    derivatives. Done.
-53. Add complex-step derivative checks where supported by FAST-Python internals.
-54. Build reusable groups for mission, propulsion, weights, and objective
+53. Convert fixed-index split-schedule and aggregate sizing-constraint
+    assembly helpers with analytical partial derivatives. Done.
+54. Re-audit FAST-Python modules and classify remaining code as support,
+    orchestration, adaptive loops, or driver setup where it is not a
+    standalone differentiable equation kernel. Done.
+55. Add complex-step derivative checks where supported by FAST-Python internals.
+56. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.
