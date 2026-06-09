@@ -1004,6 +1004,72 @@ class BatteryEnergyHistory(om.ExplicitComponent):
                 ]
 
 
+class DetailedBatterySOCOff(om.ExplicitComponent):
+    """Apply FAST detailed-battery SOC cutoff for a fixed stop row."""
+
+    def initialize(self):
+        self.options.declare("num_points", default=2)
+        self.options.declare("num_components", default=2)
+        self.options.declare("num_sources", default=1)
+        self.options.declare("num_lam_down", default=1)
+        self.options.declare("battery_source", default=0)
+        self.options.declare("cutoff_index", default=0)
+
+    def setup(self):
+        num_points = self.options["num_points"]
+        num_components = self.options["num_components"]
+        num_sources = self.options["num_sources"]
+        num_lam_down = self.options["num_lam_down"]
+        self.add_input(
+            "component_power",
+            val=np.zeros((num_points, num_components)),
+            units="W",
+        )
+        self.add_input("lam_down", val=np.ones((num_points, num_lam_down)))
+        self.add_input("soc", val=np.ones((num_points, num_sources)) * 100.0)
+        self.add_output(
+            "adjusted_component_power",
+            val=np.zeros((num_points, num_components)),
+            units="W",
+        )
+        self.add_output(
+            "adjusted_lam_down",
+            val=np.ones((num_points, num_lam_down)),
+        )
+        self.add_output(
+            "adjusted_soc",
+            val=np.ones((num_points, num_sources)) * 100.0,
+        )
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = detailed_battery_soc_off_values(
+            inputs["component_power"],
+            inputs["lam_down"],
+            inputs["soc"],
+            self.options["battery_source"],
+            self.options["cutoff_index"],
+        )
+
+        for output_name in detailed_battery_soc_off_output_names():
+            outputs[output_name] = values[output_name]
+
+    def compute_partials(self, inputs, partials):
+        values = detailed_battery_soc_off_values(
+            inputs["component_power"],
+            inputs["lam_down"],
+            inputs["soc"],
+            self.options["battery_source"],
+            self.options["cutoff_index"],
+        )
+
+        for output_name in detailed_battery_soc_off_output_names():
+            for input_name in detailed_battery_soc_off_input_names():
+                partials[output_name, input_name] = values[
+                    "d%s_d%s" % (output_name, input_name)
+                ]
+
+
 class BatteryEnergyCutoff(om.ExplicitComponent):
     """Apply FAST non-detailed battery depletion cutoff for a fixed stop row.
 
@@ -3081,6 +3147,86 @@ def battery_energy_cutoff_output_names():
         "adjusted_lam_down",
         "adjusted_soc",
     )
+
+
+def detailed_battery_soc_off_input_names():
+    """Return DetailedBatterySOCOff input names."""
+
+    return (
+        "component_power",
+        "lam_down",
+        "soc",
+    )
+
+
+def detailed_battery_soc_off_output_names():
+    """Return DetailedBatterySOCOff output names."""
+
+    return (
+        "adjusted_component_power",
+        "adjusted_lam_down",
+        "adjusted_soc",
+    )
+
+
+def detailed_battery_soc_off_values(
+    component_power,
+    lam_down,
+    soc,
+    battery_source,
+    cutoff_index,
+):
+    """Return FAST fixed-branch detailed-battery SOC cutoff values."""
+
+    component_power = np.asarray(component_power, dtype=float)
+    lam_down = np.asarray(lam_down, dtype=float)
+    soc = np.asarray(soc, dtype=float)
+    battery_source = int(battery_source)
+    num_points, num_components = component_power.shape
+    num_sources = soc.shape[1]
+    cutoff_index = max(0, min(int(cutoff_index), num_points - 1))
+    adjusted_power = np.array(component_power, dtype=float, copy=True)
+    adjusted_lam = np.array(lam_down, dtype=float, copy=True)
+    adjusted_soc = np.array(soc, dtype=float, copy=True)
+    dpower_dpower = np.eye(component_power.size)
+    dlam_dlam = np.eye(lam_down.size)
+    dsoc_dsoc = np.eye(soc.size)
+    hold_row = max(0, cutoff_index - 1)
+
+    for row in range(cutoff_index, num_points):
+        adjusted_power[row, battery_source] = 0.0
+        output_index = row * num_components + battery_source
+        dpower_dpower[output_index, :] = 0.0
+        adjusted_lam[row, :] = 0.0
+        lam_row_start = row * lam_down.shape[1]
+        lam_row_stop = lam_row_start + lam_down.shape[1]
+        dlam_dlam[lam_row_start:lam_row_stop, :] = 0.0
+        adjusted_soc[row, battery_source] = soc[hold_row, battery_source]
+        output_index = row * num_sources + battery_source
+        input_index = hold_row * num_sources + battery_source
+        dsoc_dsoc[output_index, :] = 0.0
+        dsoc_dsoc[output_index, input_index] = 1.0
+
+    zero_power_lam = np.zeros((component_power.size, lam_down.size))
+    zero_power_soc = np.zeros((component_power.size, soc.size))
+    zero_lam_power = np.zeros((lam_down.size, component_power.size))
+    zero_lam_soc = np.zeros((lam_down.size, soc.size))
+    zero_soc_power = np.zeros((soc.size, component_power.size))
+    zero_soc_lam = np.zeros((soc.size, lam_down.size))
+    return {
+        "adjusted_component_power": adjusted_power,
+        "adjusted_lam_down": adjusted_lam,
+        "adjusted_soc": adjusted_soc,
+        "dadjusted_component_power_dcomponent_power": dpower_dpower,
+        "dadjusted_component_power_dlam_down": zero_power_lam,
+        "dadjusted_component_power_dsoc": zero_power_soc,
+        "dadjusted_lam_down_dcomponent_power": zero_lam_power,
+        "dadjusted_lam_down_dlam_down": dlam_dlam,
+        "dadjusted_lam_down_dsoc": zero_lam_soc,
+        "dadjusted_soc_dcomponent_power": zero_soc_power,
+        "dadjusted_soc_dlam_down": zero_soc_lam,
+        "dadjusted_soc_dsoc": dsoc_dsoc,
+    }
 
 
 def battery_energy_cutoff_values(

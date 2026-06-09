@@ -220,8 +220,8 @@ The public `fast_openmdao` package currently exports:
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `BatteryEnergyCutoff`, `BatteryEnergyHistory`,
-  `CableWeightForSizing`, `EngineLapse`, `EngineThrustRequirement`,
-  `FuelUseHistory`, `ParallelHybridArchitecture`,
+  `CableWeightForSizing`, `DetailedBatterySOCOff`, `EngineLapse`,
+  `EngineThrustRequirement`, `FuelUseHistory`, `ParallelHybridArchitecture`,
   `PartialTurboelectricArchitecture`, `PowerAvailable`, `PowerFlow`,
   `PowerSupplementCheck`, `PropulsionHistoryMatrix`,
   `PropulsionHistoryMatrixSlice`, `PropulsionHistoryVectorSlice`,

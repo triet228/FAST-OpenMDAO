@@ -3,6 +3,7 @@
 """Tests for OpenMDAO FAST propulsion primitive components."""
 
 import os
+from unittest.mock import patch
 
 os.environ.setdefault("OPENMDAO_REPORTS", "0")
 
@@ -13,6 +14,7 @@ from fast_openmdao import (
     BatteryEnergyCutoff,
     BatteryEnergyHistory,
     CableWeightForSizing,
+    DetailedBatterySOCOff,
     EngineLapse,
     EngineThrustRequirement,
     FuelUseHistory,
@@ -651,6 +653,38 @@ def test_battery_energy_cutoff_matches_fast_python_update():
     assert np.allclose(problem.get_val("adjusted_soc"), expected["soc"])
 
 
+def test_detailed_battery_soc_off_matches_fast_python_update():
+    """Check fixed detailed-battery SOC cutoff parity with FAST-Python."""
+
+    case = make_detailed_battery_soc_off_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "soc_off",
+        DetailedBatterySOCOff(
+            num_points=case["component_power"].shape[0],
+            num_components=case["component_power"].shape[1],
+            num_sources=case["soc"].shape[1],
+            num_lam_down=case["lam_down"].shape[1],
+            battery_source=case["battery_source"],
+            cutoff_index=case["cutoff_index"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("component_power", case["component_power"], units="W")
+    problem.set_val("lam_down", case["lam_down"])
+    problem.set_val("soc", case["soc"])
+    problem.run_model()
+
+    expected = evaluate_fast_python_detailed_battery_soc_off_case(case)
+    assert np.allclose(
+        problem.get_val("adjusted_component_power", units="W"),
+        expected["component_power"],
+    )
+    assert np.allclose(problem.get_val("adjusted_lam_down"), expected["lam_down"])
+    assert np.allclose(problem.get_val("adjusted_soc"), expected["soc"])
+
+
 def test_fuel_use_history_matches_fast_python_custom_model():
     """Check fuel-use accumulation parity with FAST-Python."""
 
@@ -1080,6 +1114,22 @@ def test_propulsion_primitives_declare_analytic_partials():
                 "initial_source_energy_left": battery_cutoff_case[
                     "initial_source_energy_left"
                 ],
+                "lam_down": battery_cutoff_case["lam_down"],
+                "soc": battery_cutoff_case["soc"],
+            },
+        ),
+        (
+            "detailed_soc_off",
+            DetailedBatterySOCOff(
+                num_points=battery_cutoff_case["component_power"].shape[0],
+                num_components=battery_cutoff_case["component_power"].shape[1],
+                num_sources=battery_cutoff_case["soc"].shape[1],
+                num_lam_down=battery_cutoff_case["lam_down"].shape[1],
+                battery_source=battery_cutoff_case["battery_source"],
+                cutoff_index=battery_cutoff_case["cutoff_index"],
+            ),
+            {
+                "component_power": battery_cutoff_case["component_power"],
                 "lam_down": battery_cutoff_case["lam_down"],
                 "soc": battery_cutoff_case["soc"],
             },
@@ -1832,6 +1882,107 @@ def evaluate_fast_python_battery_cutoff_case(case):
         "component_power": component_power,
         "energy": source_energy,
         "energy_left": source_energy_left,
+        "lam_down": lam_down,
+        "soc": soc,
+    }
+
+
+def make_detailed_battery_soc_off_case():
+    """Return a detailed battery case that triggers FAST SOC cutoff handling."""
+
+    case = make_battery_energy_cutoff_case()
+    case["cutoff_index"] = 2
+    case["initial_source_energy_left"] = np.asarray([1.0e9])
+    case["soc"] = np.asarray(
+        [
+            [80.0],
+            [30.0],
+            [19.0],
+            [18.0],
+        ]
+    )
+    return case
+
+
+def evaluate_fast_python_detailed_battery_soc_off_case(case):
+    """Run FAST-Python update_battery_energy on the detailed SOC cutoff branch."""
+
+    component_power = np.array(case["component_power"], dtype=float, copy=True)
+    num_points, num_components = component_power.shape
+    num_sources = case["soc"].shape[1]
+    source_energy = np.zeros((num_points, num_sources))
+    source_energy_left = np.tile(
+        case["initial_source_energy_left"],
+        (num_points, 1),
+    )
+    soc = np.array(case["soc"], dtype=float, copy=True)
+    voltage = np.zeros((num_points, num_sources))
+    current = np.zeros((num_points, num_sources))
+    capacity = np.zeros((num_points, num_sources))
+    c_rate = np.zeros((num_points, num_sources))
+    lam_down = np.array(case["lam_down"], dtype=float, copy=True)
+    mass = np.ones(num_points) * 1000.0
+    aircraft = {
+        "Settings": {
+            "Analysis": {
+                "Type": -1,
+            },
+        },
+        "Specs": {
+            "Power": {
+                "Battery": {
+                    "SerCells": 100.0,
+                    "ParCells": 10.0,
+                },
+            },
+            "Propulsion": {
+                "PropArch": {
+                    "Type": "PHE",
+                },
+            },
+        },
+        "Mission": {
+            "Profile": {
+                "MissID": 1,
+            },
+            "History": {
+                "Flags": {
+                    "SOCOff": [0],
+                },
+            },
+        },
+    }
+    discharge_result = (
+        np.ones(num_points - 1) * 300.0,
+        np.ones(num_points - 1) * 10.0,
+        np.zeros(num_points - 1),
+        np.zeros(num_points - 1),
+        case["soc"].reshape(-1),
+        np.ones(num_points - 1),
+    )
+
+    with patch("fast_python.propulsion.discharging", return_value=discharge_result):
+        update_battery_energy(
+            aircraft,
+            component_power,
+            case["time_step"],
+            case["battery_sources"],
+            case["engine_transmitters"],
+            num_sources,
+            source_energy,
+            source_energy_left,
+            soc,
+            voltage,
+            current,
+            capacity,
+            c_rate,
+            lam_down,
+            mass,
+            0,
+        )
+
+    return {
+        "component_power": component_power,
         "lam_down": lam_down,
         "soc": soc,
     }
