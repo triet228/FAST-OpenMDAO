@@ -77,6 +77,7 @@ from fast_openmdao.mission import (
 from fast_openmdao.oew import NumericSum, TurbofanAirframeWeight, TurbopropAirframeWeight
 from fast_openmdao.optimization import (
     BatteryEnergyAvailable,
+    CruisePowerAvailableConstraint,
     DesignSplitBounds,
     ElectricMotorPowerAvailable,
     FeasibleStep,
@@ -146,6 +147,7 @@ __all__ = [
     "CruiseBreguetPowerSplit",
     "CruiseBreguetPropulsiveEfficiency",
     "CruiseBreguetSourceEnergy",
+    "CruisePowerAvailableConstraint",
     "CruiseSegmentKinematicsPower",
     "CruiseTimeTargetDistance",
     "DesignSplitBounds",

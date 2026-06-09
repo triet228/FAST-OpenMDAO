@@ -266,6 +266,67 @@ class DesignSplitBounds(om.ExplicitComponent):
         partials["upper_bounds", "design_splits"] = values["dupper_ddesign_splits"]
 
 
+class CruisePowerAvailableConstraint(om.ExplicitComponent):
+    """Compute FAST cruise power availability sizing residuals.
+
+    Inputs:
+        cruise_power: Required cruise power from FAST ``DesCrsPow``.
+        gas_turbine_power_available: Available gas-turbine power from
+            ``DesPavGT``.
+
+    Outputs:
+        cruise_power_constraint: FAST residual ``cruise_power / available - 1``.
+
+    Assumptions:
+        This represents the active analysis-type-1 branch of
+        ``ConSizeOpt``. FAST sanitizes NaN/Inf residuals; derivatives are exact
+        for finite, nonzero available power.
+    """
+
+    def initialize(self):
+        self.options.declare("vec_size", default=1)
+        self.options.declare("eps", default=1.0e-6)
+
+    def setup(self):
+        vec_size = self.options["vec_size"]
+        rows = np.arange(vec_size)
+        self.add_input("cruise_power", val=np.ones(vec_size), units="W")
+        self.add_input(
+            "gas_turbine_power_available",
+            val=np.ones(vec_size),
+            units="W",
+        )
+        self.add_output("cruise_power_constraint", val=np.zeros(vec_size))
+        self.declare_partials(
+            of="cruise_power_constraint",
+            wrt=["cruise_power", "gas_turbine_power_available"],
+            rows=rows,
+            cols=rows,
+        )
+
+    def compute(self, inputs, outputs):
+        values = cruise_power_available_constraint_values(
+            inputs["cruise_power"],
+            inputs["gas_turbine_power_available"],
+            self.options["eps"],
+        )
+        outputs["cruise_power_constraint"] = values["constraint"]
+
+    def compute_partials(self, inputs, partials):
+        values = cruise_power_available_constraint_values(
+            inputs["cruise_power"],
+            inputs["gas_turbine_power_available"],
+            self.options["eps"],
+        )
+        partials["cruise_power_constraint", "cruise_power"] = values[
+            "dconstraint_dcruise_power"
+        ]
+        partials[
+            "cruise_power_constraint",
+            "gas_turbine_power_available",
+        ] = values["dconstraint_dgas_turbine_power_available"]
+
+
 class OperationalObjective(om.ExplicitComponent):
     """Compute FAST OpsOptimize's unscaled objective selector.
 
@@ -511,6 +572,25 @@ def design_split_bound_values(design_splits):
         "upper": design_splits - 1.0,
         "dlower_ddesign_splits": -np.ones(size),
         "dupper_ddesign_splits": np.ones(size),
+    }
+
+
+def cruise_power_available_constraint_values(cruise_power, available, eps):
+    """Return FAST cruise power availability residual and derivatives."""
+
+    cruise_power = np.asarray(cruise_power, dtype=float).reshape(-1)
+    available = np.asarray(available, dtype=float).reshape(-1)
+    raw = cruise_power / available - 1.0
+    finite = np.isfinite(raw) & (available != 0.0)
+    constraint = sanitize_values(raw, eps)
+    dcruise = np.zeros_like(cruise_power)
+    davailable = np.zeros_like(cruise_power)
+    dcruise[finite] = 1.0 / available[finite]
+    davailable[finite] = -cruise_power[finite] / available[finite] ** 2
+    return {
+        "constraint": constraint,
+        "dconstraint_dcruise_power": dcruise,
+        "dconstraint_dgas_turbine_power_available": davailable,
     }
 
 

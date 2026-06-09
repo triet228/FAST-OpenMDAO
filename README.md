@@ -89,8 +89,8 @@ derivative-native FAST equation components:
 - Optimization helper primitives for available electric motor power and
   battery energy plus interior-point feasible slack-step limits with
   analytical partial derivatives.
-- Optimization power/energy and design split bound residual helpers with
-  analytical partial derivatives for active constraints.
+- Optimization power/energy, design split bound, and cruise power availability
+  residual helpers with analytical partial derivatives for active constraints.
 - Optimization operational split bound residual helper with analytical partial
   derivatives.
 - Optimization objective selector helpers for operational and power-management
@@ -143,9 +143,9 @@ The public `fast_openmdao` package currently exports:
   `TakeoffSegmentKinematics`
 - OEW: `NumericSum`, `TurbofanAirframeWeight`, `TurbopropAirframeWeight`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,
-  `DesignSplitBounds`, `FeasibleStep`, `OperationalObjective`,
-  `OperationalSplitConstraints`, `PowerManagementObjective`,
-  `PowerLimitConstraints`
+  `CruisePowerAvailableConstraint`, `DesignSplitBounds`, `FeasibleStep`,
+  `OperationalObjective`, `OperationalSplitConstraints`,
+  `PowerManagementObjective`, `PowerLimitConstraints`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `BatteryEnergyHistory`, `CableWeightForSizing`, `EngineLapse`,

@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     BatteryEnergyAvailable,
+    CruisePowerAvailableConstraint,
     DesignSplitBounds,
     ElectricMotorPowerAvailable,
     FeasibleStep,
@@ -214,6 +215,31 @@ def test_design_split_bounds_match_fast_python_con_size_opt():
     assert np.allclose(problem.get_val("upper_bounds"), expected[design_splits.size:])
 
 
+def test_cruise_power_available_constraint_matches_fast_python_con_size_opt():
+    """Check FAST ConSizeOpt cruise power availability residuals."""
+
+    cruise_power = np.asarray([8.0e5, 9.5e5])
+    available_power = np.asarray([1.0e6, 1.0e6])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "cruise",
+        CruisePowerAvailableConstraint(vec_size=cruise_power.size, eps=1.0e-6),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("cruise_power", cruise_power, units="W")
+    problem.set_val("gas_turbine_power_available", available_power, units="W")
+    problem.run_model()
+
+    expected, _, _, _ = con_size_opt(
+        np.asarray([]),
+        0,
+        make_cruise_power_constraint_aircraft(cruise_power, available_power),
+    )
+
+    assert np.allclose(problem.get_val("cruise_power_constraint"), expected)
+
+
 def test_optimization_objectives_match_fast_python():
     """Check operational and power-management objective parity."""
 
@@ -319,6 +345,14 @@ def test_optimization_helpers_declare_analytic_partials():
             DesignSplitBounds(vec_size=3),
             {
                 "design_splits": np.asarray([0.2, 0.5, 0.8]),
+            },
+        ),
+        (
+            "cruise_power",
+            CruisePowerAvailableConstraint(vec_size=2, eps=1.0e-6),
+            {
+                "cruise_power": np.asarray([8.0e5, 9.5e5]),
+                "gas_turbine_power_available": np.asarray([1.0e6, 1.0e6]),
             },
         ),
         (
@@ -429,6 +463,33 @@ def make_design_split_bound_aircraft(num_design_splits):
             "nopers": 0,
             "ndesns": num_design_splits,
             "ndvars": num_design_splits,
+        },
+    }
+
+
+def make_cruise_power_constraint_aircraft(cruise_power, available_power):
+    """Return minimal aircraft with active cruise power constraint only."""
+
+    return {
+        "Settings": {
+            "Analysis": {
+                "Type": 1,
+            },
+        },
+        "Specs": {
+            "Propulsion": {
+                "PropArch": {},
+            },
+        },
+        "PowerOpt": {
+            "Settings": {},
+            "Constraints": {
+                "DesCrsPow": cruise_power,
+                "DesPavGT": available_power,
+            },
+            "nopers": 0,
+            "ndesns": 0,
+            "ndvars": 0,
         },
     }
 
