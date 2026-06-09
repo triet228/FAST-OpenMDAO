@@ -13,6 +13,8 @@ from fast_openmdao import (
     AirIntegratedHeat,
     AirSpecificHeat,
     AirSpecificHeatVolume,
+    AirTemperatureFromHeatAdded,
+    AirTemperatureFromHeatRemoved,
     ChokedArea,
     FlowArea,
     JetAIntegratedHeat,
@@ -37,6 +39,8 @@ from fast_python.engine import (
     local_reynolds,
     mass_flow_parameter,
     new_gamma,
+    newton_raphson_tt1,
+    newton_raphson_tt3,
     off_design_nozzle,
     ps_pt,
     pt_ps,
@@ -217,6 +221,30 @@ def test_engine_specific_heat_components_match_fast_python():
 
     assert np.isclose(jeta_heat.get_val("integrated_cp_jeta")[0], cp_jeta(300.0, 1200.0))
 
+    heat_added = om.Problem()
+    heat_added.model.add_subsystem("inverse", AirTemperatureFromHeatAdded(), promotes=["*"])
+    heat_added.setup()
+    heat_added.set_val("temperature_start", 300.0, units="K")
+    heat_added.set_val("heat", 100000.0)
+    heat_added.run_model()
+
+    assert np.isclose(
+        heat_added.get_val("temperature_end", units="K")[0],
+        newton_raphson_tt1(300.0, 100000.0),
+    )
+
+    heat_removed = om.Problem()
+    heat_removed.model.add_subsystem("inverse", AirTemperatureFromHeatRemoved(), promotes=["*"])
+    heat_removed.setup()
+    heat_removed.set_val("temperature_start", 1200.0, units="K")
+    heat_removed.set_val("heat", 100000.0)
+    heat_removed.run_model()
+
+    assert np.isclose(
+        heat_removed.get_val("temperature_end", units="K")[0],
+        newton_raphson_tt3(1200.0, 100000.0),
+    )
+
 
 def test_engine_local_efficiency_and_reynolds_match_fast_python():
     """Check local efficiency and Reynolds primitive parity."""
@@ -279,6 +307,8 @@ def test_engine_primitives_declare_analytic_partials():
         ),
         ("air_heat", AirIntegratedHeat(), {"temperature_low": 300.0, "temperature_high": 1200.0}),
         ("jeta_heat", JetAIntegratedHeat(), {"temperature_low": 300.0, "temperature_high": 1200.0}),
+        ("heat_added", AirTemperatureFromHeatAdded(), {"temperature_start": 300.0, "heat": 100000.0}),
+        ("heat_removed", AirTemperatureFromHeatRemoved(), {"temperature_start": 1200.0, "heat": 100000.0}),
         ("efficiency", LocalEfficiency(), {"reynolds": 2.5e7}),
         (
             "reynolds",

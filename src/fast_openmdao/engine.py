@@ -400,6 +400,60 @@ class JetAIntegratedHeat(om.ExplicitComponent):
         )
 
 
+class AirTemperatureFromHeatAdded(om.ExplicitComponent):
+    """Invert FAST integrated air Cp for heat added from a start temperature."""
+
+    def setup(self):
+        self.add_input("temperature_start", val=300.0, units="K")
+        self.add_input("heat", val=100000.0)
+        self.add_output("temperature_end", val=383.0, units="K")
+        self.declare_partials(of="temperature_end", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = air_temperature_from_heat_added_values(
+            inputs["temperature_start"][0],
+            inputs["heat"][0],
+        )
+        outputs["temperature_end"] = values["temperature_end"]
+
+    def compute_partials(self, inputs, partials):
+        values = air_temperature_from_heat_added_values(
+            inputs["temperature_start"][0],
+            inputs["heat"][0],
+        )
+        partials["temperature_end", "temperature_start"] = values[
+            "dtemperature_end_dtemperature_start"
+        ]
+        partials["temperature_end", "heat"] = values["dtemperature_end_dheat"]
+
+
+class AirTemperatureFromHeatRemoved(om.ExplicitComponent):
+    """Invert FAST integrated air Cp for heat removed from a start temperature."""
+
+    def setup(self):
+        self.add_input("temperature_start", val=1200.0, units="K")
+        self.add_input("heat", val=100000.0)
+        self.add_output("temperature_end", val=1115.0, units="K")
+        self.declare_partials(of="temperature_end", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = air_temperature_from_heat_removed_values(
+            inputs["temperature_start"][0],
+            inputs["heat"][0],
+        )
+        outputs["temperature_end"] = values["temperature_end"]
+
+    def compute_partials(self, inputs, partials):
+        values = air_temperature_from_heat_removed_values(
+            inputs["temperature_start"][0],
+            inputs["heat"][0],
+        )
+        partials["temperature_end", "temperature_start"] = values[
+            "dtemperature_end_dtemperature_start"
+        ]
+        partials["temperature_end", "heat"] = values["dtemperature_end_dheat"]
+
+
 class LocalEfficiency(om.ExplicitComponent):
     """Compute FAST's local engine efficiency fit from Reynolds number."""
 
@@ -624,6 +678,203 @@ def density_ratio_values(mach, gamma):
         "dratio_dmach": ratio * dlogratio_dmach,
         "dratio_dgamma": ratio * dlogratio_dgamma,
     }
+
+
+def air_temperature_from_heat_added_values(temperature_start, heat):
+    """Return FAST heat-added inverse Cp temperature and loop derivatives."""
+
+    return solve_air_temperature_from_heat_added(
+        temperature_start,
+        heat,
+        return_derivatives=True,
+    )
+
+
+def air_temperature_from_heat_removed_values(temperature_start, heat):
+    """Return FAST heat-removed inverse Cp temperature and loop derivatives."""
+
+    return solve_air_temperature_from_heat_removed(
+        temperature_start,
+        heat,
+        return_derivatives=True,
+    )
+
+
+def solve_air_temperature_from_heat_added(
+    temperature_start,
+    heat,
+    return_derivatives=False,
+):
+    """Return the same added-heat Newton estimate as FAST-Python."""
+
+    temperature_end = temperature_start * 1.05
+    dtemperature_dstart = 1.05
+    dtemperature_dheat = 0.0
+    iteration = 0
+
+    while (
+        abs(
+            integrated_heat_value(
+                temperature_start,
+                temperature_end,
+                233.0,
+                1.0 / 210.0,
+                875.0,
+                993.0,
+            )
+            - heat
+        )
+        / heat
+        > 1.0e-3
+        and iteration < 10
+    ):
+        numerator = (
+            integrated_heat_value(
+                temperature_end,
+                temperature_start,
+                233.0,
+                1.0 / 210.0,
+                875.0,
+                993.0,
+            )
+            + heat
+        )
+        denominator = cp_air_inverse_prime(temperature_end)
+        denominator_prime = cp_air_inverse_prime_derivative(temperature_end)
+        cp_start = sigmoid_heat_value(
+            temperature_start,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+        cp_end = sigmoid_heat_value(
+            temperature_end,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+        dnumerator_dstart = cp_start - cp_end * dtemperature_dstart
+        dnumerator_dheat = 1.0 - cp_end * dtemperature_dheat
+        ddenominator_dstart = denominator_prime * dtemperature_dstart
+        ddenominator_dheat = denominator_prime * dtemperature_dheat
+        dtemperature_dstart = dtemperature_dstart - (
+            dnumerator_dstart * denominator - numerator * ddenominator_dstart
+        ) / denominator ** 2
+        dtemperature_dheat = dtemperature_dheat - (
+            dnumerator_dheat * denominator - numerator * ddenominator_dheat
+        ) / denominator ** 2
+        temperature_end = temperature_end - numerator / denominator
+        iteration += 1
+
+    if return_derivatives:
+        return {
+            "temperature_end": temperature_end,
+            "dtemperature_end_dtemperature_start": dtemperature_dstart,
+            "dtemperature_end_dheat": dtemperature_dheat,
+        }
+
+    return temperature_end
+
+
+def solve_air_temperature_from_heat_removed(
+    temperature_start,
+    heat,
+    return_derivatives=False,
+):
+    """Return the same removed-heat Newton estimate as FAST-Python."""
+
+    temperature_end = temperature_start * 0.95
+    dtemperature_dstart = 0.95
+    dtemperature_dheat = 0.0
+    iteration = 0
+
+    while (
+        abs(
+            integrated_heat_value(
+                temperature_end,
+                temperature_start,
+                233.0,
+                1.0 / 210.0,
+                875.0,
+                993.0,
+            )
+            - heat
+        )
+        / heat
+        > 1.0e-3
+        and iteration < 10
+    ):
+        numerator = (
+            integrated_heat_value(
+                temperature_end,
+                temperature_start,
+                233.0,
+                1.0 / 210.0,
+                875.0,
+                993.0,
+            )
+            - heat
+        )
+        denominator = cp_air_inverse_prime(temperature_end)
+        denominator_prime = cp_air_inverse_prime_derivative(temperature_end)
+        cp_start = sigmoid_heat_value(
+            temperature_start,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+        cp_end = sigmoid_heat_value(
+            temperature_end,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+        dnumerator_dstart = cp_start - cp_end * dtemperature_dstart
+        dnumerator_dheat = -1.0 - cp_end * dtemperature_dheat
+        ddenominator_dstart = denominator_prime * dtemperature_dstart
+        ddenominator_dheat = denominator_prime * dtemperature_dheat
+        dtemperature_dstart = dtemperature_dstart - (
+            dnumerator_dstart * denominator - numerator * ddenominator_dstart
+        ) / denominator ** 2
+        dtemperature_dheat = dtemperature_dheat - (
+            dnumerator_dheat * denominator - numerator * ddenominator_dheat
+        ) / denominator ** 2
+        temperature_end = temperature_end - numerator / denominator
+        iteration += 1
+
+    if return_derivatives:
+        return {
+            "temperature_end": temperature_end,
+            "dtemperature_end_dtemperature_start": dtemperature_dstart,
+            "dtemperature_end_dheat": dtemperature_dheat,
+        }
+
+    return temperature_end
+
+
+def cp_air_inverse_prime(temperature):
+    """Return FAST's Newton derivative expression for inverse Cp solvers."""
+
+    return -(
+        993.0
+        + 233.0 / (math.exp((1.0 / 210.0) * (875.0 - temperature)) + 1.0)
+        - 2.0 * 233.0
+    )
+
+
+def cp_air_inverse_prime_derivative(temperature):
+    """Return derivative of FAST's inverse-Cp Newton denominator."""
+
+    return -sigmoid_heat_derivative(
+        temperature,
+        233.0,
+        1.0 / 210.0,
+        875.0,
+    )
 
 
 def thermal_perfect_gamma_values(total_temperature, mach, gamma):
