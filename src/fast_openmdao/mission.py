@@ -291,6 +291,92 @@ class CruiseBreguetSourceEnergy(om.ExplicitComponent):
                 ]
 
 
+class CruiseBreguetPropulsiveEfficiency(om.ExplicitComponent):
+    """Select FAST CruiseBRE propulsive efficiency from fixed storage path."""
+
+    def initialize(self):
+        self.options.declare("source", default="propulsion")
+
+    def setup(self):
+        self.add_input("propulsion_propulsive_efficiency", val=0.84)
+        self.add_input("power_propeller_efficiency", val=0.82)
+        self.add_output("propulsive_efficiency", val=0.84)
+        if self.options["source"] == "propulsion":
+            self.declare_partials(
+                of="propulsive_efficiency",
+                wrt="propulsion_propulsive_efficiency",
+            )
+        else:
+            self.declare_partials(
+                of="propulsive_efficiency",
+                wrt="power_propeller_efficiency",
+            )
+
+    def compute(self, inputs, outputs):
+        values = cruise_breguet_propulsive_efficiency_values(
+            self.options["source"],
+            inputs["propulsion_propulsive_efficiency"][0],
+            inputs["power_propeller_efficiency"][0],
+        )
+        outputs["propulsive_efficiency"] = values["propulsive_efficiency"]
+
+    def compute_partials(self, inputs, partials):
+        values = cruise_breguet_propulsive_efficiency_values(
+            self.options["source"],
+            inputs["propulsion_propulsive_efficiency"][0],
+            inputs["power_propeller_efficiency"][0],
+        )
+        if self.options["source"] == "propulsion":
+            partials[
+                "propulsive_efficiency",
+                "propulsion_propulsive_efficiency",
+            ] = values["dpropulsive_efficiency_dpropulsion_propulsive_efficiency"]
+        else:
+            partials[
+                "propulsive_efficiency",
+                "power_propeller_efficiency",
+            ] = values["dpropulsive_efficiency_dpower_propeller_efficiency"]
+
+
+class CruiseBreguetPowerSplit(om.ExplicitComponent):
+    """Select FAST CruiseBRE power split from fixed storage path."""
+
+    def initialize(self):
+        self.options.declare("source", default="phi")
+
+    def setup(self):
+        self.add_input("phi_cruise", val=0.3)
+        self.add_input("lambda_down_cruise", val=0.2)
+        self.add_output("power_split", val=0.3)
+        if self.options["source"] == "phi":
+            self.declare_partials(of="power_split", wrt="phi_cruise")
+        elif self.options["source"] == "lambda_down":
+            self.declare_partials(of="power_split", wrt="lambda_down_cruise")
+
+    def compute(self, inputs, outputs):
+        values = cruise_breguet_power_split_values(
+            self.options["source"],
+            inputs["phi_cruise"][0],
+            inputs["lambda_down_cruise"][0],
+        )
+        outputs["power_split"] = values["power_split"]
+
+    def compute_partials(self, inputs, partials):
+        values = cruise_breguet_power_split_values(
+            self.options["source"],
+            inputs["phi_cruise"][0],
+            inputs["lambda_down_cruise"][0],
+        )
+        if self.options["source"] == "phi":
+            partials["power_split", "phi_cruise"] = values[
+                "dpower_split_dphi_cruise"
+            ]
+        elif self.options["source"] == "lambda_down":
+            partials["power_split", "lambda_down_cruise"] = values[
+                "dpower_split_dlambda_down_cruise"
+            ]
+
+
 class InitialEnergyRemaining(om.ExplicitComponent):
     """Initialize FAST mission source-energy remaining history.
 
@@ -657,6 +743,58 @@ def cruise_breguet_efficiency_values(
         return values
 
     raise ValueError("architecture must be AC, PHE, SHE, or TE.")
+
+
+def cruise_breguet_propulsive_efficiency_values(
+    source,
+    propulsion_propulsive_efficiency,
+    power_propeller_efficiency,
+):
+    """Return fixed-path CruiseBRE propulsive efficiency selection."""
+
+    values = {
+        "dpropulsive_efficiency_dpropulsion_propulsive_efficiency": 0.0,
+        "dpropulsive_efficiency_dpower_propeller_efficiency": 0.0,
+    }
+
+    if source == "propulsion":
+        values["propulsive_efficiency"] = propulsion_propulsive_efficiency
+        values["dpropulsive_efficiency_dpropulsion_propulsive_efficiency"] = 1.0
+        return values
+
+    if source == "power":
+        values["propulsive_efficiency"] = power_propeller_efficiency
+        values["dpropulsive_efficiency_dpower_propeller_efficiency"] = 1.0
+        return values
+
+    raise ValueError(
+        "CruiseBreguetPropulsiveEfficiency source must be propulsion or power."
+    )
+
+
+def cruise_breguet_power_split_values(source, phi_cruise, lambda_down_cruise):
+    """Return fixed-path CruiseBRE power split selection."""
+
+    values = {
+        "dpower_split_dphi_cruise": 0.0,
+        "dpower_split_dlambda_down_cruise": 0.0,
+    }
+
+    if source == "phi":
+        values["power_split"] = phi_cruise
+        values["dpower_split_dphi_cruise"] = 1.0
+        return values
+
+    if source == "lambda_down":
+        values["power_split"] = lambda_down_cruise
+        values["dpower_split_dlambda_down_cruise"] = 1.0
+        return values
+
+    if source == "zero":
+        values["power_split"] = 0.0
+        return values
+
+    raise ValueError("CruiseBreguetPowerSplit source must be phi, lambda_down, or zero.")
 
 
 def breguet_efficiency_input_names():

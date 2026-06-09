@@ -11,6 +11,8 @@ import openmdao.api as om
 
 from fast_openmdao import (
     CruiseBreguetEfficiencyTriplet,
+    CruiseBreguetPowerSplit,
+    CruiseBreguetPropulsiveEfficiency,
     CruiseBreguetSourceEnergy,
     CruiseTimeTargetDistance,
     FlightConditions,
@@ -19,6 +21,8 @@ from fast_openmdao import (
 from fast_python.mission import (
     compute_flight_conditions,
     cruise_breguet_efficiency_triplet,
+    cruise_breguet_power_split,
+    cruise_breguet_propulsive_efficiency,
     cruise_breguet_source_energy,
     cruise_time_target_to_distance,
     initial_energy_remaining,
@@ -193,6 +197,112 @@ def test_cruise_breguet_efficiency_triplet_declares_analytic_partials():
 
         for partial_data in partials["efficiency"].values():
             assert partial_data["abs error"].forward < 1.0e-8
+
+
+def test_cruise_breguet_selectors_match_fast_python():
+    """Check CruiseBRE propulsive efficiency and power split selectors."""
+
+    efficiency_problem = om.Problem()
+    efficiency_problem.model.add_subsystem(
+        "selector",
+        CruiseBreguetPropulsiveEfficiency(source="propulsion"),
+        promotes=["*"],
+    )
+    efficiency_problem.setup()
+    efficiency_problem.set_val("propulsion_propulsive_efficiency", 0.84)
+    efficiency_problem.set_val("power_propeller_efficiency", 0.82)
+    efficiency_problem.run_model()
+
+    assert np.isclose(
+        efficiency_problem.get_val("propulsive_efficiency")[0],
+        cruise_breguet_propulsive_efficiency(
+            {
+                "Propulsion": {"Eta": {"Prop": 0.84}},
+                "Power": {"Eta": {"Propeller": 0.82}},
+            }
+        ),
+    )
+
+    split_problem = om.Problem()
+    split_problem.model.add_subsystem(
+        "selector",
+        CruiseBreguetPowerSplit(source="phi"),
+        promotes=["*"],
+    )
+    split_problem.setup()
+    split_problem.set_val("phi_cruise", 0.3)
+    split_problem.set_val("lambda_down_cruise", 0.2)
+    split_problem.run_model()
+
+    assert np.isclose(
+        split_problem.get_val("power_split")[0],
+        cruise_breguet_power_split(
+            {
+                "Power": {
+                    "Phi": {"Crs": 0.3},
+                    "LamDwn": {"Crs": 0.2},
+                },
+            }
+        ),
+    )
+
+
+def test_cruise_breguet_selectors_declare_analytic_partials():
+    """Check CruiseBRE selector derivatives by fixed source path."""
+
+    cases = [
+        (
+            "propulsion_efficiency",
+            CruiseBreguetPropulsiveEfficiency(source="propulsion"),
+            {
+                "propulsion_propulsive_efficiency": 0.84,
+                "power_propeller_efficiency": 0.82,
+            },
+        ),
+        (
+            "power_efficiency",
+            CruiseBreguetPropulsiveEfficiency(source="power"),
+            {
+                "propulsion_propulsive_efficiency": 0.84,
+                "power_propeller_efficiency": 0.82,
+            },
+        ),
+        (
+            "phi_split",
+            CruiseBreguetPowerSplit(source="phi"),
+            {
+                "phi_cruise": 0.3,
+                "lambda_down_cruise": 0.2,
+            },
+        ),
+        (
+            "lambda_split",
+            CruiseBreguetPowerSplit(source="lambda_down"),
+            {
+                "phi_cruise": 0.3,
+                "lambda_down_cruise": 0.2,
+            },
+        ),
+    ]
+
+    for name, component, values in cases:
+        problem = om.Problem()
+        problem.model.add_subsystem(name, component, promotes=["*"])
+        problem.setup()
+
+        for variable, value in values.items():
+            problem.set_val(variable, value)
+
+        problem.run_model()
+        partials = problem.check_partials(
+            out_stream=None,
+            method="fd",
+            form="central",
+            step=1.0e-6,
+        )
+
+        for partial_data in partials[name].values():
+            assert partial_data["abs error"].forward < 1.0e-10
 
 
 def test_cruise_breguet_source_energy_matches_fast_python():
