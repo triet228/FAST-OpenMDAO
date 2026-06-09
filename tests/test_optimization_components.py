@@ -9,10 +9,15 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import BatteryEnergyAvailable, ElectricMotorPowerAvailable
+from fast_openmdao import (
+    BatteryEnergyAvailable,
+    ElectricMotorPowerAvailable,
+    PowerLimitConstraints,
+)
 from fast_python.optimization import (
     battery_energy_available,
     electric_motor_power_available,
+    power_limit_constraints,
 )
 
 
@@ -52,6 +57,37 @@ def test_available_power_and_energy_match_fast_python():
     )
 
 
+def test_power_limit_constraints_match_fast_python():
+    """Check paired power-limit residual parity with FAST-Python."""
+
+    used = np.asarray([20.0, 50.0, 75.0])
+    available = np.asarray([100.0, 80.0, 75.0])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "limits",
+        PowerLimitConstraints(vec_size=used.size, eps=1.0e-6),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("used", used)
+    problem.set_val("available", available)
+    problem.run_model()
+
+    expected_lower, expected_upper = power_limit_constraints(
+        True,
+        {
+            "used": used,
+            "available": available,
+        },
+        "used",
+        "available",
+        1.0e-6,
+    )
+
+    assert np.allclose(problem.get_val("lower_limit"), expected_lower)
+    assert np.allclose(problem.get_val("upper_limit"), expected_upper)
+
+
 def test_optimization_helpers_declare_analytic_partials():
     """Check optimization helper derivatives against finite difference."""
 
@@ -70,6 +106,14 @@ def test_optimization_helpers_declare_analytic_partials():
             {
                 "battery_specific_energy": 745000.0,
                 "battery_weight": 860.0,
+            },
+        ),
+        (
+            "limits",
+            PowerLimitConstraints(vec_size=3, eps=1.0e-6),
+            {
+                "used": np.asarray([20.0, 50.0, 75.0]),
+                "available": np.asarray([100.0, 80.0, 75.0]),
             },
         ),
     ]

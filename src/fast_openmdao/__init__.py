@@ -44,6 +44,7 @@ from fast_openmdao.oew import NumericSum, TurbopropAirframeWeight
 from fast_openmdao.optimization import (
     BatteryEnergyAvailable,
     ElectricMotorPowerAvailable,
+    PowerLimitConstraints,
 )
 from fast_openmdao.problem import make_fast_optimization_problem, make_fast_problem
 from fast_openmdao.projection import (
@@ -97,6 +98,7 @@ __all__ = [
     "MassFlowParameter",
     "NumericSum",
     "OEIMultiplier",
+    "PowerLimitConstraints",
     "PsLossSigmoid",
     "SafeComponentWeight",
     "StaticDensity",

@@ -50,6 +50,8 @@ derivative-native FAST equation components:
   analytical partial derivatives.
 - Optimization helper primitives for available electric motor power and
   battery energy with analytical partial derivatives.
+- Optimization power/energy limit residual helper with analytical partial
+  derivatives for finite active constraints.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
   design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
@@ -80,7 +82,8 @@ The public `fast_openmdao` package currently exports:
 - Mission: `CruiseBreguetEfficiencyTriplet`, `CruiseBreguetSourceEnergy`,
   `CruiseTimeTargetDistance`, `FlightConditions`
 - OEW: `NumericSum`, `TurbopropAirframeWeight`
-- Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`
+- Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,
+  `PowerLimitConstraints`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `EngineLapse`, `SafeComponentWeight`, `ThrustSinkEfficiency`,
@@ -279,8 +282,10 @@ FAST-Python residual functions.
    derivatives. Done.
 24. Convert Breguet source-energy allocation helper with analytical partial
    derivatives. Done.
-25. Add complex-step derivative checks where supported by FAST-Python internals.
-26. Build reusable groups for mission, propulsion, weights, and objective
+25. Convert optimization power-limit residual helper with analytical partial
+   derivatives. Done.
+26. Add complex-step derivative checks where supported by FAST-Python internals.
+27. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.
