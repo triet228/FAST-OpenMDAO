@@ -30,7 +30,10 @@ from fast_openmdao.constraint import (
     PsLossSigmoid,
 )
 from fast_openmdao.cost import BatteryReplacementCost
-from fast_openmdao.database import MacLiftDragEstimate
+from fast_openmdao.database import (
+    MacLiftDragEstimate,
+    TurbopropCruiseLiftDragEstimate,
+)
 from fast_openmdao.engine import (
     AirIntegratedHeat,
     AirSpecificHeat,
@@ -221,6 +224,7 @@ __all__ = [
     "TurboelectricArchitecture",
     "TurbofanEngineWeightForSizing",
     "TurbopropEngineWeightForSizing",
+    "TurbopropCruiseLiftDragEstimate",
     "TurbopropAirframeWeight",
     "TurbofanAirframeWeight",
     "UnitConversion",

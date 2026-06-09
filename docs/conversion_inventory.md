@@ -29,7 +29,7 @@ closed-form derivatives are practical.
 | `core.py` | bridge | Existing `FastPythonComponent` wrapper preserves end-to-end execution. |
 | `cost.py` | converted | `fast_openmdao.cost.BatteryReplacementCost` for replacement cost; add more cost components if FAST-Python grows. |
 | `data_struct.py` | support | Defaults and schema preparation; may later feed OpenMDAO options. |
-| `database.py` | candidate | MAC lift-to-drag estimate converted; database loading, field mutation, keyword classification, and regression source processing remain support. |
+| `database.py` | candidate | MAC and turboprop cruise lift-to-drag estimates converted; database loading, field mutation, keyword classification, and regression source processing remain support. |
 | `engine.py` | candidate | Isentropic pressure, temperature, area-Mach, mass-flow, density, off-design nozzle Mach, perfect-expansion nozzle flow, fitted specific-heat, inverse air-heat Newton solvers, thermally perfect gamma update, diffuser flow, burner fuel/exit-state flow, compressor/fan stage flow, turbine stage flow, local Reynolds, local efficiency, simple off-design turbofan fuel-flow primitives, and low-fidelity turboprop/turbofan linear sizing converted; thermodynamic cycle, multi-stage compressor/fan/turbine wrappers, and nonlinear sizing components remain. |
 | `history.py` | support | Mission history table formatting. |
 | `io.py` | support | JSON input/output validation. |
