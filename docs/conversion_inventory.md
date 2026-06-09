@@ -30,7 +30,7 @@ closed-form derivatives are practical.
 | `cost.py` | converted | `fast_openmdao.cost.BatteryReplacementCost` for replacement cost; add more cost components if FAST-Python grows. |
 | `data_struct.py` | support | Defaults and schema preparation; may later feed OpenMDAO options. |
 | `database.py` | support | Database loading and regression source processing. |
-| `engine.py` | candidate | Thermodynamic cycle, nozzle, fan, compressor, turbine, and sizing components. |
+| `engine.py` | candidate | Isentropic pressure, temperature, area-Mach, mass-flow, and density primitives converted; nozzle iteration, thermodynamic cycle, fan, compressor, turbine, and sizing components remain. |
 | `history.py` | support | Mission history table formatting. |
 | `io.py` | support | JSON input/output validation. |
 | `main.py` | support | CLI entry point. |
