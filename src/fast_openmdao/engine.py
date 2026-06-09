@@ -476,6 +476,75 @@ class CompressorStageFlow(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class TurbineStageFlow(om.ExplicitComponent):
+    """Compute one FAST on-design turbine stage."""
+
+    def setup(self):
+        self.add_input("mass_flow_1", val=50.0, units="kg/s")
+        self.add_input("total_pressure_1", val=800000.0, units="Pa")
+        self.add_input("total_temperature_1", val=1400.0, units="K")
+        self.add_input("mach_1", val=0.35)
+        self.add_input("gamma_1", val=1.32)
+        self.add_input("outer_radius_1", val=0.8, units="m")
+        self.add_input("inner_radius_1", val=0.45, units="m")
+        self.add_input("target_total_temperature_3", val=1300.0, units="K")
+        self.add_input("stage_mach_2", val=1.1)
+        self.add_input("rpm", val=6200.0, units="rpm")
+        self.add_input("turbine_efficiency", val=0.9)
+        self.add_output("total_temperature_3", val=1300.0, units="K")
+        self.add_output("total_pressure_3", val=600000.0, units="Pa")
+        self.add_output("mach_3", val=0.8)
+        self.add_output("static_temperature_3", val=1250.0, units="K")
+        self.add_output("cp_air_3", val=1200.0)
+        self.add_output("cv_air_3", val=913.0)
+        self.add_output("gamma_3", val=1.31)
+        self.add_output("static_pressure_3", val=500000.0, units="Pa")
+        self.add_output("area_3", val=0.5, units="m**2")
+        self.add_output("inner_radius_3", val=0.45, units="m")
+        self.add_output("outer_radius_3", val=0.8, units="m")
+        self.add_output("pressure_ratio", val=0.8)
+        self.add_output("temperature_ratio", val=0.9)
+        self.add_output("stage_psi", val=0.5)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = turbine_stage_flow_values(
+            inputs["mass_flow_1"][0],
+            inputs["total_pressure_1"][0],
+            inputs["total_temperature_1"][0],
+            inputs["mach_1"][0],
+            inputs["gamma_1"][0],
+            inputs["outer_radius_1"][0],
+            inputs["inner_radius_1"][0],
+            inputs["target_total_temperature_3"][0],
+            inputs["stage_mach_2"][0],
+            inputs["rpm"][0],
+            inputs["turbine_efficiency"][0],
+        )
+
+        for output in turbine_stage_flow_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = turbine_stage_flow_values(
+            inputs["mass_flow_1"][0],
+            inputs["total_pressure_1"][0],
+            inputs["total_temperature_1"][0],
+            inputs["mach_1"][0],
+            inputs["gamma_1"][0],
+            inputs["outer_radius_1"][0],
+            inputs["inner_radius_1"][0],
+            inputs["target_total_temperature_3"][0],
+            inputs["stage_mach_2"][0],
+            inputs["rpm"][0],
+            inputs["turbine_efficiency"][0],
+        )
+
+        for output in turbine_stage_flow_output_names():
+            for variable in turbine_stage_flow_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class AirIntegratedHeat(om.ExplicitComponent):
     """Compute FAST integrated air specific heat between two temperatures."""
 
@@ -1098,6 +1167,152 @@ def compressor_stage_flow_values(
         result[output_name] = ad_value.value
 
         for input_name in compressor_stage_flow_input_names():
+            result["d%s_d%s" % (output_name, input_name)] = (
+                ad_value.derivatives.get(input_name, 0.0)
+            )
+
+    return result
+
+
+def turbine_stage_flow_input_names():
+    """Return scalar inputs for TurbineStageFlow derivative bookkeeping."""
+
+    return (
+        "mass_flow_1",
+        "total_pressure_1",
+        "total_temperature_1",
+        "mach_1",
+        "gamma_1",
+        "outer_radius_1",
+        "inner_radius_1",
+        "target_total_temperature_3",
+        "stage_mach_2",
+        "rpm",
+        "turbine_efficiency",
+    )
+
+
+def turbine_stage_flow_output_names():
+    """Return scalar TurbineStageFlow outputs."""
+
+    return (
+        "total_temperature_3",
+        "total_pressure_3",
+        "mach_3",
+        "static_temperature_3",
+        "cp_air_3",
+        "cv_air_3",
+        "gamma_3",
+        "static_pressure_3",
+        "area_3",
+        "inner_radius_3",
+        "outer_radius_3",
+        "pressure_ratio",
+        "temperature_ratio",
+        "stage_psi",
+    )
+
+
+def turbine_stage_flow_values(
+    mass_flow_1,
+    total_pressure_1,
+    total_temperature_1,
+    mach_1,
+    gamma_1,
+    outer_radius_1,
+    inner_radius_1,
+    target_total_temperature_3,
+    stage_mach_2,
+    rpm,
+    turbine_efficiency,
+):
+    """Return FAST turbine-stage outputs with forward derivatives."""
+
+    raw_inputs = {
+        "mass_flow_1": mass_flow_1,
+        "total_pressure_1": total_pressure_1,
+        "total_temperature_1": total_temperature_1,
+        "mach_1": mach_1,
+        "gamma_1": gamma_1,
+        "outer_radius_1": outer_radius_1,
+        "inner_radius_1": inner_radius_1,
+        "target_total_temperature_3": target_total_temperature_3,
+        "stage_mach_2": stage_mach_2,
+        "rpm": rpm,
+        "turbine_efficiency": turbine_efficiency,
+    }
+    values = {
+        name: _Ad.variable(raw_inputs[name], name)
+        for name in turbine_stage_flow_input_names()
+    }
+    mass1 = values["mass_flow_1"]
+    pt1 = values["total_pressure_1"]
+    tt1 = values["total_temperature_1"]
+    mach1 = values["mach_1"]
+    gamma1 = values["gamma_1"]
+    ro1 = values["outer_radius_1"]
+    ri1 = values["inner_radius_1"]
+    tt3 = values["target_total_temperature_3"]
+    mach2 = values["stage_mach_2"]
+    rpm_ad = values["rpm"]
+    eta_turbine = values["turbine_efficiency"]
+    ts1 = tt1 / _ad_isentropic_q(mach1, gamma1)
+    u1 = mach1 * _ad_sqrt(gamma1 * GAS_CONSTANT_AIR * ts1)
+    omega = rpm_ad / 60.0 * 2.0 * math.pi
+    radius_pitch = 0.5 * (ro1 + ri1)
+    heat_removed = _ad_integrated_heat_value(
+        tt3,
+        tt1,
+        233.0,
+        1.0 / 210.0,
+        875.0,
+        993.0,
+    )
+    psi = heat_removed / (omega * radius_pitch) ** 2.0
+    tau = tt3 / tt1
+    pressure_ratio = tau ** (gamma1 / (gamma1 - 1.0) * eta_turbine)
+    cp_total = _ad_sigmoid_heat_value(tt1, 233.0, 1.0 / 210.0, 875.0, 993.0)
+    velocity_prime = _ad_sqrt(cp_total * tt1)
+    velocity2 = velocity_prime * _ad_sqrt(
+        (gamma1 - 1.0) * mach2 ** 2.0
+        / (1.0 + (gamma1 - 1.0) / 2.0 * mach2 ** 2.0)
+    )
+    mach3 = mach2 * (u1 / velocity2) / _ad_sqrt(
+        1.0
+        - (1.0 - tau)
+        * (1.0 - psi / 2.0)
+        * (1.0 + (gamma1 - 1.0) / 2.0 * mach2 ** 2.0)
+    )
+    pt3 = pressure_ratio * pt1
+    thermals = _ad_thermal_perfect_gamma(tt3, mach3, gamma1)
+    gamma3 = thermals["updated_gamma"]
+    ps3 = pt3 / _ad_pressure_ratio(mach3, gamma3)
+    u3 = mach3 * _ad_sqrt(thermals["static_temperature"] * gamma3 * GAS_CONSTANT_AIR)
+    rho3 = ps3 / thermals["static_temperature"] / GAS_CONSTANT_AIR
+    area3 = mass1 / u3 / rho3
+    ro3 = _ad_sqrt(ri1 ** 2.0 + area3 / math.pi)
+    ad_outputs = {
+        "total_temperature_3": tt3,
+        "total_pressure_3": pt3,
+        "mach_3": mach3,
+        "static_temperature_3": thermals["static_temperature"],
+        "cp_air_3": thermals["cp_air"],
+        "cv_air_3": thermals["cv_air"],
+        "gamma_3": gamma3,
+        "static_pressure_3": ps3,
+        "area_3": area3,
+        "inner_radius_3": ri1,
+        "outer_radius_3": ro3,
+        "pressure_ratio": pressure_ratio,
+        "temperature_ratio": tau,
+        "stage_psi": psi,
+    }
+    result = {}
+
+    for output_name, ad_value in ad_outputs.items():
+        result[output_name] = ad_value.value
+
+        for input_name in turbine_stage_flow_input_names():
             result["d%s_d%s" % (output_name, input_name)] = (
                 ad_value.derivatives.get(input_name, 0.0)
             )

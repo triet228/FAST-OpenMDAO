@@ -48,6 +48,7 @@ from fast_openmdao.engine import (
     ThermalPerfectGamma,
     TotalPressure,
     TotalTemperature,
+    TurbineStageFlow,
 )
 from fast_openmdao.mission import (
     CruiseBreguetEfficiencyTriplet,
@@ -158,6 +159,7 @@ __all__ = [
     "ThermalPerfectGamma",
     "TotalPressure",
     "TotalTemperature",
+    "TurbineStageFlow",
     "ThrustSinkEfficiency",
     "TransmitterFanEfficiency",
     "TurbopropEngineWeightForSizing",

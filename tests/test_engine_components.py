@@ -31,6 +31,7 @@ from fast_openmdao import (
     ThermalPerfectGamma,
     TotalPressure,
     TotalTemperature,
+    TurbineStageFlow,
 )
 from fast_python.engine import (
     a_astar,
@@ -53,6 +54,7 @@ from fast_python.engine import (
     simple_off_design,
     ts_tt,
     tt_ts,
+    turb_stage,
 )
 
 
@@ -363,6 +365,39 @@ def test_compressor_stage_flow_matches_fast_python():
     assert np.isclose(problem.get_val("stage_zeta")[0], expected_state["Zeta"])
 
 
+def test_turbine_stage_flow_matches_fast_python():
+    """Check FAST one-stage turbine flow parity."""
+
+    state1 = make_turbine_stage_state()
+    eta_poly = {"Turbines": 0.91}
+    expected_state, expected_pi, expected_tau = turb_stage(
+        state1,
+        1280.0,
+        6200.0,
+        True,
+        eta_poly,
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem("stage", TurbineStageFlow(), promotes=["*"])
+    problem.setup()
+    set_turbine_stage_values(problem, state1, 1280.0, 1.1, 6200.0, eta_poly["Turbines"])
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("total_temperature_3", units="K")[0], expected_state["Tt"])
+    assert np.isclose(problem.get_val("total_pressure_3", units="Pa")[0], expected_state["Pt"])
+    assert np.isclose(problem.get_val("mach_3")[0], expected_state["Mach"])
+    assert np.isclose(problem.get_val("static_temperature_3", units="K")[0], expected_state["Ts"])
+    assert np.isclose(problem.get_val("cp_air_3")[0], expected_state["Cp"])
+    assert np.isclose(problem.get_val("cv_air_3")[0], expected_state["Cv"])
+    assert np.isclose(problem.get_val("gamma_3")[0], expected_state["Gam"])
+    assert np.isclose(problem.get_val("static_pressure_3", units="Pa")[0], expected_state["Ps"])
+    assert np.isclose(problem.get_val("area_3", units="m**2")[0], expected_state["Area"])
+    assert np.isclose(problem.get_val("inner_radius_3", units="m")[0], expected_state["Ri"])
+    assert np.isclose(problem.get_val("outer_radius_3", units="m")[0], expected_state["Ro"])
+    assert np.isclose(problem.get_val("pressure_ratio")[0], expected_pi)
+    assert np.isclose(problem.get_val("temperature_ratio")[0], expected_tau)
+
+
 def test_simple_off_design_turbofan_matches_fast_python():
     """Check BADA-style simple off-design turbofan parity."""
 
@@ -488,6 +523,23 @@ def test_engine_primitives_declare_analytic_partials():
                 "stage_efficiency": 0.9,
             },
         ),
+        (
+            "turbine_stage",
+            TurbineStageFlow(),
+            {
+                "mass_flow_1": 48.0,
+                "total_pressure_1": 750000.0,
+                "total_temperature_1": 1400.0,
+                "mach_1": 0.42,
+                "gamma_1": 1.32,
+                "outer_radius_1": 0.82,
+                "inner_radius_1": 0.45,
+                "target_total_temperature_3": 1280.0,
+                "stage_mach_2": 1.1,
+                "rpm": 6200.0,
+                "turbine_efficiency": 0.91,
+            },
+        ),
     ]
 
     for name, component, values in cases:
@@ -507,7 +559,12 @@ def test_engine_primitives_declare_analytic_partials():
         )
 
         for partial_data in partials[name].values():
-            tolerance = 1.0e-3 if name in ("nozzle", "burner", "stage") else 1.0e-4
+            tolerance = 1.0e-3 if name in (
+                "nozzle",
+                "burner",
+                "stage",
+                "turbine_stage",
+            ) else 1.0e-4
             assert partial_data["abs error"].forward < tolerance
 
 
@@ -579,6 +636,41 @@ def set_compressor_stage_values(problem, state, stage_pressure_ratio, rpm, effic
     problem.set_val("stage_pressure_ratio", stage_pressure_ratio)
     problem.set_val("rpm", rpm, units="rpm")
     problem.set_val("stage_efficiency", efficiency)
+
+
+def make_turbine_stage_state():
+    """Return a compact FAST-Python flow state for turbine-stage tests."""
+
+    return {
+        "MDot": 48.0,
+        "Area": 0.6,
+        "Pt": 750000.0,
+        "Tt": 1400.0,
+        "Mach": 0.42,
+        "Gam": 1.32,
+        "Ro": 0.82,
+        "Ri": 0.45,
+        "Ts": ts_tt(1400.0, 0.42, 1.32),
+        "Cp": cp_air(ts_tt(1400.0, 0.42, 1.32)),
+        "Cv": cv_air(ts_tt(1400.0, 0.42, 1.32)),
+        "Ps": ps_pt(750000.0, 0.42, 1.32),
+    }
+
+
+def set_turbine_stage_values(problem, state, total_temperature_3, mach_2, rpm, efficiency):
+    """Set OpenMDAO turbine-stage inputs from a FAST-Python flow state."""
+
+    problem.set_val("mass_flow_1", state["MDot"], units="kg/s")
+    problem.set_val("total_pressure_1", state["Pt"], units="Pa")
+    problem.set_val("total_temperature_1", state["Tt"], units="K")
+    problem.set_val("mach_1", state["Mach"])
+    problem.set_val("gamma_1", state["Gam"])
+    problem.set_val("outer_radius_1", state["Ro"], units="m")
+    problem.set_val("inner_radius_1", state["Ri"], units="m")
+    problem.set_val("target_total_temperature_3", total_temperature_3, units="K")
+    problem.set_val("stage_mach_2", mach_2)
+    problem.set_val("rpm", rpm, units="rpm")
+    problem.set_val("turbine_efficiency", efficiency)
 
 
 def make_simple_off_design_aircraft():
