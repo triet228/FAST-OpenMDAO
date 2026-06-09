@@ -14,6 +14,7 @@ from fast_openmdao import (
     DatabaseFanThrustNormalization,
     DatabaseGeometryLoads,
     DatabasePropPowerNormalization,
+    DatabasePropThrustLoading,
     DatabaseWeightFractions,
     MacLiftDragEstimate,
     TurbofanCruiseLiftDragEstimate,
@@ -496,6 +497,36 @@ def test_database_prop_power_normalization_matches_fast_python_calc_prop_vals():
     )
 
 
+def test_database_prop_thrust_loading_matches_fast_python_calc_prop_vals():
+    """Check FAST turboprop default thrust-loading parity."""
+
+    plane = make_prop_plane()
+    expected = calc_prop_vals(plane, "Vals")["Specs"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "thrust",
+        DatabasePropThrustLoading(),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val(
+        "sea_level_power_loading",
+        expected["Power"]["P_W"]["SLS"],
+        units="kW/kg",
+    )
+    problem.set_val(
+        "takeoff_velocity",
+        expected["Performance"]["Vels"]["Tko"],
+        units="m/s",
+    )
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("thrust_loading_sls")[0],
+        expected["Propulsion"]["T_W"]["SLS"],
+    )
+
+
 def test_database_propulsion_normalization_declares_analytic_partials():
     """Check database propulsion-normalization derivatives."""
 
@@ -535,6 +566,31 @@ def test_database_propulsion_normalization_declares_analytic_partials():
                 partial_data["abs error"].forward < 1.0e-6
                 or partial_data["rel error"].forward < 1.0e-6
             )
+
+
+def test_database_prop_thrust_loading_declares_analytic_partials():
+    """Check turboprop default thrust-loading derivatives."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "thrust",
+        DatabasePropThrustLoading(),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("sea_level_power_loading", 0.13, units="kW/kg")
+    problem.set_val("takeoff_velocity", 77.0, units="m/s")
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["thrust"].values():
+        assert partial_data["abs error"].forward < 1.0e-6
 
 
 def set_database_weight_fraction_values(problem, plane):

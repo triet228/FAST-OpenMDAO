@@ -456,6 +456,42 @@ class DatabasePropPowerNormalization(om.ExplicitComponent):
                 ]
 
 
+class DatabasePropThrustLoading(om.ExplicitComponent):
+    """Compute FAST turboprop default SLS thrust loading from power loading.
+
+    Inputs:
+        sea_level_power_loading: FAST ``P_W.SLS`` value in kW/kg.
+        takeoff_velocity: Takeoff speed in m/s.
+
+    Outputs:
+        thrust_loading_sls: FAST default turboprop ``T_W.SLS`` value.
+    """
+
+    def setup(self):
+        self.add_input("sea_level_power_loading", val=0.1, units="kW/kg")
+        self.add_input("takeoff_velocity", val=70.0, units="m/s")
+        self.add_output("thrust_loading_sls", val=0.0001)
+        self.declare_partials(of="thrust_loading_sls", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["thrust_loading_sls"] = database_prop_thrust_loading_values(
+            inputs["sea_level_power_loading"][0],
+            inputs["takeoff_velocity"][0],
+        )["thrust_loading_sls"]
+
+    def compute_partials(self, inputs, partials):
+        values = database_prop_thrust_loading_values(
+            inputs["sea_level_power_loading"][0],
+            inputs["takeoff_velocity"][0],
+        )
+        partials["thrust_loading_sls", "sea_level_power_loading"] = values[
+            "dthrust_loading_sls_dsea_level_power_loading"
+        ]
+        partials["thrust_loading_sls", "takeoff_velocity"] = values[
+            "dthrust_loading_sls_dtakeoff_velocity"
+        ]
+
+
 class TurbofanCruiseLiftDragEstimate(om.ExplicitComponent):
     """Compute FAST turbofan database cruise lift-to-drag estimates."""
 
@@ -654,6 +690,24 @@ def turboprop_cruise_lift_drag_values(mtow, cruise_power, cruise_mach, temperatu
         "dlift_drag_dmtow": lift_drag / mtow,
         "dlift_drag_dcruise_power": -lift_drag / cruise_power,
         "dlift_drag_dcruise_mach": lift_drag / cruise_mach,
+    }
+
+
+def database_prop_thrust_loading_values(sea_level_power_loading, takeoff_velocity):
+    """Return FAST turboprop default SLS thrust loading and derivatives."""
+
+    sea_level_power_loading = float(sea_level_power_loading)
+    takeoff_velocity = float(takeoff_velocity)
+    gravity = 9.81
+    thrust_loading = sea_level_power_loading / takeoff_velocity / gravity
+    return {
+        "thrust_loading_sls": thrust_loading,
+        "dthrust_loading_sls_dsea_level_power_loading": (
+            1.0 / takeoff_velocity / gravity
+        ),
+        "dthrust_loading_sls_dtakeoff_velocity": (
+            -sea_level_power_loading / takeoff_velocity ** 2 / gravity
+        ),
     }
 
 
