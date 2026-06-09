@@ -571,6 +571,125 @@ class TwoDimensionalArray(om.ExplicitComponent):
         )["two_dimensional_array"]
 
 
+class SanitizedValues(om.ExplicitComponent):
+    """Apply FAST optimization scalar-vector NaN/Inf sanitization.
+
+    Inputs:
+        values: Flat residual vector before FAST replaces invalid entries.
+
+    Outputs:
+        sanitized_values: Vector with NaN entries set to zero and Inf entries
+            set to the configured epsilon.
+
+    Assumptions:
+        The finite/NaN/Inf branch is fixed for derivative checks. Derivatives
+        are one for finite pass-through entries and zero for replaced entries.
+    """
+
+    def initialize(self):
+        self.options.declare("vec_size", default=1)
+        self.options.declare("eps", default=1.0e-6)
+
+    def setup(self):
+        vec_size = self.options["vec_size"]
+        indices = np.arange(vec_size)
+        self.add_input("values", val=np.zeros(vec_size))
+        self.add_output("sanitized_values", val=np.zeros(vec_size))
+        self.declare_partials(
+            of="sanitized_values",
+            wrt="values",
+            rows=indices,
+            cols=indices,
+        )
+
+    def compute(self, inputs, outputs):
+        values = sanitized_value_pack(
+            inputs["values"],
+            self.options["eps"],
+        )
+        outputs["sanitized_values"] = values["sanitized_values"]
+
+    def compute_partials(self, inputs, partials):
+        values = sanitized_value_pack(
+            inputs["values"],
+            self.options["eps"],
+        )
+        partials["sanitized_values", "values"] = values[
+            "dsanitized_values_dvalues"
+        ]
+
+
+class SanitizedArray(om.ExplicitComponent):
+    """Apply FAST optimization NaN/Inf sanitization while preserving shape."""
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+        self.options.declare("eps", default=1.0e-6)
+
+    def setup(self):
+        shape = optimization_shape_tuple(self.options["input_shape"])
+        indices = np.arange(int(np.prod(shape)))
+        self.add_input("array_values", val=np.zeros(shape))
+        self.add_output("sanitized_array", val=np.zeros(shape))
+        self.declare_partials(
+            of="sanitized_array",
+            wrt="array_values",
+            rows=indices,
+            cols=indices,
+        )
+
+    def compute(self, inputs, outputs):
+        values = sanitized_value_pack(
+            inputs["array_values"],
+            self.options["eps"],
+        )
+        outputs["sanitized_array"] = values["sanitized_values"]
+
+    def compute_partials(self, inputs, partials):
+        values = sanitized_value_pack(
+            inputs["array_values"],
+            self.options["eps"],
+        )
+        partials["sanitized_array", "array_values"] = values[
+            "dsanitized_values_dvalues"
+        ]
+
+
+class SanitizedGradient(om.ExplicitComponent):
+    """Apply FAST split-gradient NaN/Inf sanitization with fixed shape."""
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        shape = optimization_shape_tuple(self.options["input_shape"])
+        indices = np.arange(int(np.prod(shape)))
+        self.add_input("gradient_values", val=np.zeros(shape))
+        self.add_output("sanitized_gradient", val=np.zeros(shape))
+        self.declare_partials(
+            of="sanitized_gradient",
+            wrt="gradient_values",
+            rows=indices,
+            cols=indices,
+        )
+
+    def compute(self, inputs, outputs):
+        values = sanitized_value_pack(
+            inputs["gradient_values"],
+            1.0,
+        )
+        outputs["sanitized_gradient"] = values["sanitized_values"]
+
+    def compute_partials(self, inputs, partials):
+        values = sanitized_value_pack(
+            inputs["gradient_values"],
+            1.0,
+        )
+        partials["sanitized_gradient", "gradient_values"] = values[
+            "dsanitized_values_dvalues"
+        ]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -1627,6 +1746,28 @@ def operational_split_constraint_values(
         "constraints": constraints,
         "dconstraints_doperational_splits": doper,
         "dconstraints_ddesign_splits": ddesign,
+    }
+
+
+def optimization_shape_tuple(shape):
+    """Return a fixed input shape tuple for optimization helper components."""
+
+    return tuple(int(value) for value in np.asarray(shape).reshape(-1))
+
+
+def sanitized_value_pack(values, inf_replacement):
+    """Return FAST sanitization values and diagonal pass-through derivative."""
+
+    array = np.asarray(values, dtype=float)
+    sanitized = array.copy()
+    nan_mask = np.isnan(sanitized)
+    inf_mask = np.isinf(sanitized)
+    sanitized[nan_mask] = 0.0
+    sanitized[inf_mask] = inf_replacement
+    derivative = np.isfinite(array).astype(float).reshape(-1)
+    return {
+        "sanitized_values": sanitized,
+        "dsanitized_values_dvalues": derivative,
     }
 
 

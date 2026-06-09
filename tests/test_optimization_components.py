@@ -28,6 +28,9 @@ from fast_openmdao import (
     OperationalSplitConstraints,
     PowerManagementObjective,
     PowerLimitConstraints,
+    SanitizedArray,
+    SanitizedGradient,
+    SanitizedValues,
     SplitScheduleFill,
     TwoDimensionalArray,
 )
@@ -50,6 +53,9 @@ from fast_python.optimization import (
     operational_split_constraint_blocks,
     power_management_objective,
     power_limit_constraints,
+    sanitize_array,
+    sanitize_gradient,
+    sanitize_values,
     two_dimensional,
 )
 
@@ -398,6 +404,68 @@ def test_two_dimensional_array_matches_fast_python():
         )
 
 
+def test_sanitized_values_match_fast_python():
+    """Check FAST residual vector sanitization parity."""
+
+    values = np.asarray([np.nan, -2.0, np.inf, -np.inf, 4.0])
+    eps = 1.0e-4
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "sanitize",
+        SanitizedValues(vec_size=values.size, eps=eps),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("values", values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("sanitized_values"),
+        sanitize_values(values, eps),
+    )
+
+
+def test_sanitized_array_matches_fast_python():
+    """Check FAST shaped-array sanitization parity."""
+
+    values = np.asarray([[np.nan, 2.0], [np.inf, -3.0]])
+    eps = 1.0e-5
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "sanitize",
+        SanitizedArray(input_shape=values.shape, eps=eps),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("array_values", values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("sanitized_array"),
+        sanitize_array(values, eps),
+    )
+
+
+def test_sanitized_gradient_matches_fast_python():
+    """Check FAST split-gradient sanitization parity."""
+
+    values = np.asarray([[np.nan, 2.0], [np.inf, -3.0]])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "sanitize",
+        SanitizedGradient(input_shape=values.shape),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("gradient_values", values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("sanitized_gradient"),
+        sanitize_gradient(values),
+    )
+
+
 def test_merit_function_matches_fast_python():
     """Check FAST line-search merit value parity."""
 
@@ -737,6 +805,27 @@ def test_optimization_helpers_declare_analytic_partials():
             TwoDimensionalArray(input_shape=(3,)),
             {
                 "array_values": np.asarray([0.2, 0.4, 0.6]),
+            },
+        ),
+        (
+            "sanitized_values",
+            SanitizedValues(vec_size=3, eps=1.0e-6),
+            {
+                "values": np.asarray([0.2, -0.4, 0.6]),
+            },
+        ),
+        (
+            "sanitized_array",
+            SanitizedArray(input_shape=(2, 2), eps=1.0e-6),
+            {
+                "array_values": np.asarray([[0.2, -0.4], [0.6, 0.8]]),
+            },
+        ),
+        (
+            "sanitized_gradient",
+            SanitizedGradient(input_shape=(2, 2)),
+            {
+                "gradient_values": np.asarray([[0.2, -0.4], [0.6, 0.8]]),
             },
         ),
         (
