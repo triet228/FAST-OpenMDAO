@@ -4,313 +4,79 @@ FAST OpenMDAO is the OpenMDAO integration layer for **Future Aircraft Sizing
 Tool (FAST)** by The IDEAS Lab in the Aerospace Engineering Department at the
 University of Michigan.
 
-The goal is to turn the native `FAST-Python` workflow into a gradient-based
-aircraft sizing framework. This repository will hold OpenMDAO components,
-groups, derivative checks, and optimization examples while keeping
-`FAST-Python` as the source of the FAST equations and data model.
+The package wraps `FAST-Python` cases and provides derivative-native OpenMDAO
+components for converted FAST equation kernels. `FAST-Python` remains the
+source of FAST equations and data structures; this repository focuses on
+OpenMDAO components, derivative checks, optimization setup, and examples.
 
-## Current Status
+## Status
 
-This repository has a working OpenMDAO bridge plus a growing set of
-derivative-native FAST equation components:
+- `FastPythonComponent` wraps a `FAST-Python` run as an `om.ExplicitComponent`.
+- `make_fast_problem` builds path-based FAST input/output bridges.
+- `make_fast_optimization_problem` adds design variables, objective,
+  constraints, and an SLSQP driver by default.
+- Native components cover atmosphere, mission, propulsion, engine, battery,
+  constraints, cost, database, analysis, OEW, regression, safety, optimization,
+  units, specs, and data-structure helpers.
+- Converted fixed-shape equation kernels include analytical partial derivatives
+  and FAST-Python parity tests where practical.
+- Remaining FAST-Python behavior is treated as support, orchestration,
+  adaptive-loop logic, or driver setup rather than forced into standalone
+  differentiable components.
 
-As of the current conversion audit, the fixed-shape FAST-Python equation
-kernels that are practical as explicit OpenMDAO components have native
-components with analytical partial derivatives and FAST-Python parity tests.
-Remaining FAST-Python behavior is kept as support, group orchestration,
-adaptive loop logic, or OpenMDAO driver setup rather than forced into
-single-component derivatives.
+See `docs/conversion_inventory.md` for the module-by-module conversion status.
 
-- `FastPythonComponent`: an `om.ExplicitComponent` that wraps a `FAST-Python`
-  run.
-- `Gravity` and `StandardAtmosphere`: native OpenMDAO components matching
-  `fast_python.atmosphere` with analytical partial derivatives.
-- `KPPProjection`, battery cost curve/replacement-cost components,
-  `UnitConversion`, and `UnitArrayConversion`: native OpenMDAO utility
-  components for projection, cost, and scalar/fixed-shape conversion equations
-  with analytical partial derivatives.
-- `FlightConditions`: native mission primitive matching
-  `fast_python.mission.compute_flight_conditions` with analytical partial
-  derivatives.
-- Mission Breguet cruise efficiency triplet helper with analytical partial
-  derivatives for fixed architectures.
-- Mission Breguet propulsive-efficiency and power-split selectors with
-  analytical partial derivatives for fixed storage paths.
-- Mission Breguet mass, power, and energy history component with analytical
-  partial derivatives for fixed non-detailed-battery architectures.
-- Mission Breguet detailed-battery discharge and SOC cutoff helper with
-  analytical partial derivatives for fixed active branches.
-- Mission Breguet source-energy allocation helper with analytical partial
-  derivatives for fixed source layouts.
-- Mission Breguet aggregate source-delta application helper with analytical
-  partial derivatives for fixed source columns.
-- Mission initial source-energy remaining helper with analytical partial
-  derivatives for fixed source layouts.
-- Mission fixed-shape row-matrix history expansion helper with analytical
-  partial derivatives.
-- Mission fixed-shape segment split-history expansion helper with analytical
-  partial derivatives.
-- Mission fixed-shape scalar/list restoration helper with analytical partial
-  derivatives.
-- Mission fixed-slice history vector/matrix assignment helpers with analytical
-  partial derivatives.
-- Mission simple and detailed EvalTakeoff, EvalLanding, smooth EvalCruise, and
-  prescribed-rate EvalClimb/EvalDescent kinematics and required-power kernels
-  with analytical partial derivatives.
-- Engine primitives for isentropic pressure, temperature, area-Mach,
-  mass-flow parameter, off-design nozzle Mach, perfect-expansion nozzle flow,
-  and static-density equations with analytical partial derivatives.
-- Engine specific-heat components for air Cp, air Cv, thermally perfect gamma
-  update, integrated air heat, integrated Jet-A heat, and inverse air heat
-  solvers with analytical partial derivatives.
-- Engine local Reynolds and local efficiency components with analytical
-  partial derivatives.
-- Engine on-design diffuser flow-state component with analytical partial
-  derivatives.
-- Engine on-design burner flow, fuel addition, combustor pressure loss, and
-  exit-state component with analytical partial derivatives.
-- Engine one-stage compressor/fan flow component with corrected map scalars
-  and analytical partial derivatives.
-- Engine fan-exit core/bypass flow split and annulus geometry component with
-  analytical partial derivatives.
-- Engine one-stage turbine flow component with analytical partial derivatives.
-- Engine BADA-style simple off-design turbofan fuel-flow component with
-  analytical partial derivatives.
-- Engine low-fidelity turboprop linear sizing component with analytical
-  partial derivatives.
-- Engine low-fidelity turbofan linear sizing component with analytical partial
-  derivatives.
-- Engine fixed-shape vector normalization helper with analytical partial
-  derivatives.
-- Engine fixed-shape scalar/list restoration helper with analytical partial
-  derivatives.
-- Propulsion primitives for cable sizing weight, engine lapse, engine thrust
-  requirement, turboprop/piston engine sizing weight, power-flow propagation,
-  power-available propagation, safe component weight, efficiency selection, and
-  supplemental transmitter power with analytical partial derivatives.
-- Propulsion fuel-use, battery-source energy history accumulation, and
-  fixed-branch battery depletion cutoff with analytical partial derivatives.
-- Propulsion fixed-shape split, vector, two-dimensional array, and history
-  matrix normalization helpers with analytical partial derivatives.
-- Propulsion fixed-shape scalar/list restoration helper with analytical partial
-  derivatives.
-- Propulsion fixed-slice history vector/matrix assignment helpers with
-  analytical partial derivatives.
-- Propulsion conventional/electric, parallel-hybrid, series-hybrid,
-  turboelectric, and partial-turboelectric architecture matrix builders for
-  architecture, split, efficiency, source-type, and transmitter-type arrays
-  with analytical partial derivatives.
-- Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
-  engine-gradient selection, and cruise dynamic pressure with analytical
-  partial derivatives.
-- Constraint residual components for approach speed, takeoff field length,
-  landing field length, all-engines-operative climb, service ceiling, and
-  cruise/diversion with analytical partial derivatives and optimization
-  validation against FAST-Python residual roots.
-- Generic and named FAR 25 climb residual components with analytical partial
-  derivatives.
-- Battery scalar primitives for effective cell capacity, selected current root,
-  ground-charge OCV estimation, nonzero history averaging, empirical
-  cycling-aging SOH, detailed parallel-cell resizing, one-step and fixed-history
-  equivalent-circuit power dynamics, and simple energy-based battery source
-  weight with analytical partial derivatives.
-- Battery fixed-shape vector and history-matrix normalization helpers with
-  analytical partial derivatives.
-- Battery fixed-shape scalar/list restoration helper with analytical partial
-  derivatives.
-- Battery requested-power/time broadcast and initial-SOC normalization helpers
-  with analytical partial derivatives for fixed shapes.
-- Analysis source-weight vectorization/restoration plus analysis and OEW
-  summation helpers for scalar/vector weight values, and detailed-battery flag
-  setup, with
-  analytical partial derivatives where continuous inputs apply.
-- Optimization helper primitives for available electric motor power and
-  battery energy plus interior-point feasible slack-step limits,
-  Gaussian-elimination pivots, damped BFGS Hessian updates, fixed-shape
-  gradient-block formatting, gradient-matrix reshaping, fixed-piece vector and
-  matrix concatenation, split-array dimensional normalization, NaN/Inf
-  sanitizer helpers, empty-output normalization, and merit values with
-  analytical partial derivatives.
-- Optimization power/energy, design split bound, and cruise power availability
-  residual helpers with analytical partial derivatives for active constraints.
-- Optimization operational split bound residual helper with analytical partial
-  derivatives.
-- Optimization aggregate design/operational sizing constraint assembly with
-  analytical partial derivatives.
-- Optimization fixed-index mission-history selectors with analytical partial
-  derivatives.
-- Optimization fixed-index split-schedule filling and aggregate optimized split
-  schedule assembly helpers with analytical partial derivatives.
-- Optimization objective selector helpers for operational and power-management
-  objective values with analytical partial derivatives.
-- Regression squared-exponential kernel, fixed-preprocessing Gaussian process
-  posterior prediction, fixed-shape target/vector/2D normalization, and
-  numeric-scalar, numeric-column, sample-variance, and prior-mean helpers with
-  analytical partial derivatives.
-- Safety failure-probability helper with analytical partial derivatives.
-- OEW turboprop linear fit, one-step turboprop and turbofan fixed-point
-  balances, turbofan airframe GPR weight, and numeric-sum helpers with
-  analytical partial derivatives.
-- Propulsion turboprop/piston linear and turbofan GPR engine sizing-weight
-  helpers with analytical partial derivatives.
-- Database-derived MAC and turboprop cruise lift-to-drag estimates with
-  analytical partial derivatives.
-- Database-derived airframe weight, weight fractions, wing loading,
-  fixed-branch airplane design-group percent margins, and turboprop default
-  thrust loading with analytical partial derivatives.
-- Data-structure preprocessing power-to-weight and specific-energy unit
-  conversion helper with analytical partial derivatives.
-- `make_fast_optimization_problem`: a driver-ready builder that attaches
-  design variables, objective, constraints, and an SLSQP driver by default.
-- Path-based scalar input specs that write OpenMDAO values into nested FAST
-  aircraft or mission dictionaries.
-- Path-based scalar output specs that extract values from the FAST result.
-- Analytic scalar partial derivatives when supplied through
-  `partial_derivatives`, with OpenMDAO finite-difference fallback for
-  black-box FAST-Python quantities.
-- `fast-openmdao-compact`: a small command-line optimization example using the
-  real FAST-Python backend.
-
-## Converted Component Index
-
-The public `fast_openmdao` package currently exports:
-
-- Atmosphere: `Gravity`, `StandardAtmosphere`
-- Analysis: `AnalysisWeightUpdate`, `ConvergenceError`, `SourceWeightRestore`,
-  `SourceWeightVector`, `DetailedBatteryFlag`, `WeightSum`,
-  `WingAreaFromLoading`
-- Battery: `AvailableCellCapacity`, `BatteryChargeOCV`, `BatteryCyclingAging`,
-  `BatteryCurrent`, `BatteryHistoryColumnMatrix`, `BatteryHistoryMatrix`,
-  `BatteryInitialSOC`, `BatteryNonzeroMean`, `BatteryPowerHistory`,
-  `BatteryPowerStep`, `BatteryPowerTimeBroadcast`, `BatteryVector`,
-  `BatteryScalarOrListRestore`, `DetailedBatterySizing`,
-  `BatteryWeightFromEnergy`
-- Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
-  `FAR25EngineGradient`, `JetAEOClimbConstraint`, `JetApproachConstraint`,
-  `JetCeilingConstraint`, `JetCruiseConstraint`, `JetFAR25NamedClimbConstraint`,
-  `JetLandingFieldLengthConstraint`, `JetTakeoffFieldLengthConstraint`,
-  `OEIMultiplier`, `PsLossSigmoid`
-- Cost: `BMSCostFraction`, `BatteryCapacityCost`, `BatteryReplacementCost`
-- Database: `DatabaseDesignGroupPercent`, `DatabaseFanThrustNormalization`,
-  `DatabaseGeometryLoads`, `DatabasePropPowerNormalization`,
-  `DatabasePropThrustLoading`, `DatabaseWeightFractions`,
-  `MacLiftDragEstimate`, `TurbofanCruiseLiftDragEstimate`,
-  `TurbofanMacLiftDragEstimate`, `TurbopropCruiseLiftDragEstimate`
-- Data structure: `SpecPowerUnitConversion`
-- Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
-  `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
-  `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FanFlowSplit`,
-  `FlowArea`,
-  `EngineScalarOrListRestore`, `EngineVector`, `JetAIntegratedHeat`,
-  `LocalEfficiency`, `LocalReynolds`,
-  `MassFlowParameter`, `OffDesignNozzleMach`, `PerfectExpansionNozzleFlow`,
-  `SimpleOffDesignTurbofan`, `StaticDensity`, `StaticPressure`,
-  `StaticTemperature`, `ThermalPerfectGamma`, `TotalPressure`,
-  `TotalTemperature`, `TurbineStageFlow`, `TurbofanLinearSizing`,
-  `TurbopropLinearSizing`
-- Mission: `CruiseBreguetDetailedBattery`, `CruiseBreguetEfficiencyTriplet`,
-  `CruiseBreguetPowerHistory`, `CruiseBreguetPowerSplit`,
-  `CruiseBreguetPropulsiveEfficiency`, `CruiseBreguetSourceDelta`,
-  `CruiseBreguetSourceEnergy`,
-  `CruiseSegmentKinematicsPower`, `CruiseTimeTargetDistance`,
-  `DetailedTakeoffSegmentKinematicsPower`, `FlightConditions`,
-  `HistoryMatrixSlice`, `HistoryVectorSlice`, `InitialEnergyRemaining`,
-  `LandingSegmentKinematicsPower`, `MissionScalarOrListRestore`,
-  `MissionSplitHistory`, `PrescribedRateSegmentKinematicsPower`,
-  `RowMatrix`, `TakeoffSegmentKinematics`
-- OEW: `NumericSum`, `TurbofanAirframeWeight`, `TurbofanOEWIterationStep`,
-  `TurbopropAirframeWeight`, `TurbopropOEWIterationStep`
-- Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,
-  `CruisePowerAvailableConstraint`, `DesignSplitBounds`, `FeasibleStep`,
-  `DesignOperationalConstraints`, `GaussianEliminationPivot`, `GradientBlock`,
-  `GradientMatrix`, `ConcatenateMatrices`, `ConcatenateVectors`,
-  `HessianUpdate`, `HistoryArray`,
-  `MeritFunction`, `OneBasedHistoryValues`, `OperationalObjective`,
-  `OperationalSimplexTableau`, `OperationalSplitConstraints`,
-  `OptimizedSplitSchedules`, `PowerManagementObjective`,
-  `PowerLimitConstraints`, `SanitizedArray`, `SanitizedGradient`,
-  `SanitizedValues`, `SimplexPostSplitHistory`, `SplitScheduleFill`,
-  `TwoDimensionalArray`,
-  `ZeroIfEmpty`
-- Projection: `BatterySpecificEnergyProjection`,
-  `ElectricMotorSpecificPowerProjection`, `KPPProjection`
-- Specs: `AEACustomArchitecture`, `LM100JHybridArchitecture`, `LM100JHybridOperationMatrices`, `SplitScalar`, `ZeroSegmentSplits`
-- Propulsion: `BatteryEnergyCutoff`, `BatteryEnergyHistory`,
-  `CableWeightForSizing`, `DetailedBatterySOCOff`, `EngineLapse`,
-  `EngineThrustRequirement`, `FuelUseHistory`, `ParallelHybridArchitecture`,
-  `PartialTurboelectricArchitecture`, `PowerAvailable`, `PowerFlow`,
-  `PowerSupplementCheck`, `PropulsionHistoryMatrix`,
-  `PropulsionHistoryMatrixSlice`, `PropulsionHistoryVectorSlice`,
-  `PropulsionScalarOrListRestore`, `PropulsionTwoDimensionalArray`,
-  `PropulsionVector`, `SafeComponentWeight`,
-  `SeriesHybridArchitecture`, `SimpleSourceTransmitterArchitecture`,
-  `SplitValuesVector`, `ThrustSinkEfficiency`, `TransmitterFanEfficiency`,
-  `TurboelectricArchitecture`, `TurbofanEngineWeightForSizing`,
-  `TurbopropEngineWeightForSizing`
-- Regression: `GaussianProcessPrediction`, `RegressionInverseTerm`,
-  `RegressionSampleVariance`,
-  `RegressionNumericColumn`, `RegressionNumericScalar`, `RegressionPriorMean`,
-  `RegressionTargetMatrix`, `RegressionTwoDimensionalArray`, `RegressionVector`,
-  `RegressionWeightedHyperparameters`, `SquaredExponentialKernel`
-- Safety: `FailureModel`
-- Units: `UnitArrayConversion`, `UnitConversion`
-- Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
-  `make_fast_optimization_problem`
-
-## Repository Layout
+## Layout
 
 ```text
-FAST-OpenMDAO/
-  docs/                  Conversion inventory and design notes
-  src/fast_openmdao/     Python package for OpenMDAO integration
-  tests/                 Unit and smoke tests
-  tools/                 Conversion audit utilities
-  README.md              Project overview and setup notes
-  pyproject.toml         Package metadata and test configuration
+src/fast_openmdao/     Python package
+tests/                 parity, derivative, regression, and smoke tests
+docs/                  conversion inventory and audit notes
+tools/                 conversion audit utilities
 ```
 
-## Local Setup
+## Setup
 
-Use Python 3.11 so the environment matches `FAST-Python`.
+Use the `FAST-OpenMDAO` conda environment.
 
 ```powershell
-conda create -n FAST-OpenMDAO python=3.11 -y
 conda activate FAST-OpenMDAO
-python -m pip install -e C:\Users\homin\Projects\FAST-Python
-python -m pip install -e .[dev]
+pip install -e .[dev]
 ```
 
-If Conda resolves that name to an unwritable system prefix, create and activate
-the user-local path explicitly:
+`FAST-Python` must be importable. This project expects it at:
+
+```text
+C:\Users\homin\Projects\FAST-Python
+```
+
+If needed, add it to `PYTHONPATH`:
 
 ```powershell
-conda create -p C:\Users\homin\.conda\envs\FAST-OpenMDAO python=3.11 -y
-conda activate C:\Users\homin\.conda\envs\FAST-OpenMDAO
-python -m pip install -e C:\Users\homin\Projects\FAST-Python
-python -m pip install -e .[dev]
+$env:PYTHONPATH = "C:\Users\homin\Projects\FAST-Python;$env:PYTHONPATH"
 ```
-
-If the environment already exists, activate it and run the two install commands
-again to refresh editable installs.
 
 ## Validate
 
+Run the test suite:
+
 ```powershell
-conda run -n FAST-OpenMDAO python -m pytest -q
+pytest
 ```
 
-To re-check the FAST-Python conversion inventory against the local checkout:
+Run the conversion audit:
 
-```bash
-conda run -n FAST-OpenMDAO python tools/conversion_audit.py
+```powershell
+python tools/conversion_audit.py
 ```
 
-The compact audit should finish with `unsupported=0`. Use
-`--show-remaining` to list FAST-Python functions that are intentionally kept as
-support, orchestration, adaptive-loop logic, or OpenMDAO driver setup according
-to `docs/conversion_inventory.md`.
+Show remaining FAST-Python functions classified as non-component scope:
 
-## Minimal OpenMDAO Usage
+```powershell
+python tools/conversion_audit.py --show-remaining
+```
+
+## Basic Usage
 
 ```python
 from fast_openmdao import make_fast_problem
@@ -338,29 +104,11 @@ problem.setup()
 problem.run_model()
 ```
 
-When a FAST quantity has an analytical derivative, pass it through
-`partial_derivatives`:
+Analytical derivatives can be supplied through `partial_derivatives`. Missing
+partials use OpenMDAO finite difference, keeping black-box FAST-Python runs
+driver-ready while native components are added.
 
-```python
-def d_mtow_d_range(_inputs, _result, aircraft, _mission):
-    return 1.0 / aircraft["Specs"]["Aero"]["L_D"]["Crs"]
-
-
-problem = make_fast_problem(
-    aircraft=aircraft,
-    mission=mission,
-    input_specs=[range_spec],
-    partial_derivatives={
-        ("mtow", "mission_range"): d_mtow_d_range,
-    },
-)
-```
-
-The component declares supplied partials as exact OpenMDAO derivatives. Missing
-partials still use finite difference, which keeps black-box FAST-Python runs
-driver-ready while internals are converted toward derivative-native equations.
-
-## Minimal Optimization Setup
+## Optimization
 
 ```python
 from fast_openmdao import make_fast_optimization_problem
@@ -383,9 +131,7 @@ problem = make_fast_optimization_problem(
             "upper": 25.0,
         },
     ],
-    objective={
-        "name": "mtow",
-    },
+    objective={"name": "mtow"},
 )
 
 problem.setup()
@@ -394,7 +140,7 @@ problem.run_driver()
 
 ## Compact Example
 
-Run the real FAST-Python compact electric optimization smoke example:
+Run the compact electric optimization smoke example:
 
 ```powershell
 fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40000
@@ -406,123 +152,8 @@ Validate the OpenMDAO optimum against repeated FAST-Python point evaluations:
 fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40000 --validate-samples 7
 ```
 
-The test suite also includes an independent compact cruise-L/D system-level
-optimization checked against a FAST-Python L/D sweep, compact hybrid
-power-split multi-start validation checked against a shared FAST-Python split
-sweep, plus constraint-residual optimization checks that solve OpenMDAO
-zero-residual points and verify the optimized values against FAST-Python
-residual functions.
+## Roadmap
 
-## Development Roadmap
-
-1. Add a minimal OpenMDAO component that wraps a `FAST-Python` case. Done.
-2. Expose scalar FAST inputs as OpenMDAO design variables. Done.
-3. Add finite-difference checks around the component bridge. Done.
-4. Add a driver-ready optimization problem builder. Done.
-5. Add optimization examples that run from the command line. Done.
-6. Add analytic partial hooks for components when derivatives are available.
-   Done.
-7. Inventory every FAST-Python module for OpenMDAO conversion scope. Done.
-8. Convert atmosphere utilities into native OpenMDAO components with analytical
-   partial derivatives. Done.
-9. Convert projection, cost, and scalar unit-conversion utilities with
-   analytical partial derivatives. Done.
-10. Convert scalar mission flight-condition primitive with analytical partial
-   derivatives. Done.
-11. Convert scalar engine primitive equations and fitted specific-heat
-   equations with analytical partial derivatives. Done.
-12. Convert scalar propulsion primitive equations with analytical partial
-   derivatives. Done.
-13. Convert scalar constraint primitive equations with analytical partial
-   derivatives. Done.
-14. Convert scalar battery primitive equations with analytical partial
-   derivatives. Done.
-15. Convert approach, takeoff field length, landing field length, and
-   cruise/diversion constraint residuals with analytical partial derivatives.
-   Done.
-16. Convert shared FAR 25 climb residual with analytical partial derivatives.
-   Done.
-17. Convert squared-exponential regression kernel with analytical partial
-   derivatives. Done.
-18. Convert turboprop airframe-weight linear fit with analytical partial
-   derivatives. Done.
-19. Convert cruise time-target distance helper with analytical partial
-   derivatives. Done.
-20. Convert scalar convergence-error helper with analytical partial
-   derivatives. Done.
-21. Convert optimization available-power and available-energy helpers with
-   analytical partial derivatives. Done.
-22. Convert scalar/vector analysis and OEW summation helpers with analytical
-   partial derivatives. Done.
-23. Convert Breguet cruise efficiency triplet helper with analytical partial
-   derivatives. Done.
-24. Convert Breguet source-energy allocation helper with analytical partial
-   derivatives. Done.
-25. Convert initial source-energy remaining helper with analytical partial
-   derivatives. Done.
-26. Convert simple energy-based battery source weight helper with analytical
-   partial derivatives. Done.
-27. Convert fixed-preprocessing Gaussian process posterior prediction with
-   analytical partial derivatives. Done.
-28. Convert turbofan airframe-weight regression helper with analytical partial
-   derivatives. Done.
-29. Convert off-design nozzle Mach helper with analytical partial derivatives.
-   Done.
-30. Convert inverse air heat Newton helpers with analytical partial
-   derivatives. Done.
-31. Convert simple off-design turbofan fuel-flow helper with analytical
-   partial derivatives. Done.
-32. Convert propulsion fuel-use history accumulation with analytical partial
-   derivatives. Done.
-33. Convert one-step battery equivalent-circuit dynamics with analytical
-   partial derivatives. Done.
-34. Convert Breguet cruise selector helpers with analytical partial
-   derivatives. Done.
-35. Convert named FAR 25 climb wrappers with analytical partial derivatives.
-   Done.
-36. Convert all-engines-operative climb residual with analytical partial
-   derivatives. Done.
-37. Convert service-ceiling residual with analytical partial derivatives.
-   Done.
-38. Convert turboprop engine-weight sizing helper with analytical partial
-   derivatives. Done.
-39. Convert optimization power-limit residual helper with analytical partial
-   derivatives. Done.
-40. Convert optimization operational split bound helper with analytical
-   partial derivatives. Done.
-41. Convert optimization objective selector helpers with analytical partial
-   derivatives. Done.
-42. Convert analysis source-weight vectorization helper with analytical partial
-   derivatives. Done.
-43. Convert thermally perfect gamma update helper with analytical partial
-   derivatives. Done.
-44. Convert supplemental transmitter power helper with analytical partial
-   derivatives. Done.
-45. Convert propulsion power-flow propagation with analytical partial
-   derivatives. Done.
-46. Convert engine thrust requirement selector with analytical partial
-   derivatives. Done.
-47. Convert cable sizing weight helper with analytical partial derivatives.
-   Done.
-48. Convert empirical battery cycling-aging SOH helper with analytical partial
-   derivatives. Done.
-49. Convert propulsion power-available propagation helper with analytical
-   partial derivatives. Done.
-50. Convert one-step turboprop OEW fixed-point balance with analytical partial
-   derivatives. Done.
-51. Convert one-step turbofan OEW fixed-point balance with analytical partial
-   derivatives. Done.
-52. Convert fan-exit core/bypass flow split with analytical partial
-   derivatives. Done.
-53. Convert fixed-index split-schedule and aggregate sizing-constraint
-    assembly helpers with analytical partial derivatives. Done.
-54. Re-audit FAST-Python modules and classify remaining code as support,
-    orchestration, adaptive loops, or driver setup where it is not a
-    standalone differentiable equation kernel. Done.
-55. Convert SpecProcessing power-unit conversion helper with analytical partial
-    derivatives. Done.
-56. Add complex-step derivative checks where supported by FAST-Python internals.
-57. Build reusable groups for mission, propulsion, weights, and objective
-   functions.
-
-See `docs/conversion_inventory.md` for module-by-module conversion status.
+- Add complex-step derivative checks where supported by FAST-Python internals.
+- Build reusable OpenMDAO groups for mission, propulsion, weights, and
+  objective functions.
