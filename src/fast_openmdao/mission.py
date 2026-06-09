@@ -951,6 +951,48 @@ class RowMatrix(om.ExplicitComponent):
         partials["matrix", "value"] = values["dmatrix_dvalue"]
 
 
+class MissionSplitHistory(om.ExplicitComponent):
+    """Repeat FAST mission LamDwn and LamUps split rows for one segment."""
+
+    def initialize(self):
+        self.options.declare("rows", default=1)
+        self.options.declare("lam_down_size", default=1)
+        self.options.declare("lam_up_size", default=1)
+
+    def setup(self):
+        rows = self.options["rows"]
+        lam_down_size = self.options["lam_down_size"]
+        lam_up_size = self.options["lam_up_size"]
+        self.add_input("lam_down", val=np.zeros(lam_down_size))
+        self.add_input("lam_up", val=np.zeros(lam_up_size))
+        self.add_output("lam_down_history", val=np.zeros((rows, lam_down_size)))
+        self.add_output("lam_up_history", val=np.zeros((rows, lam_up_size)))
+        self.declare_partials(of="lam_down_history", wrt="lam_down")
+        self.declare_partials(of="lam_up_history", wrt="lam_up")
+
+    def compute(self, inputs, outputs):
+        rows = self.options["rows"]
+        outputs["lam_down_history"] = row_matrix_values(
+            inputs["lam_down"],
+            rows,
+        )["matrix"]
+        outputs["lam_up_history"] = row_matrix_values(
+            inputs["lam_up"],
+            rows,
+        )["matrix"]
+
+    def compute_partials(self, inputs, partials):
+        rows = self.options["rows"]
+        partials["lam_down_history", "lam_down"] = row_matrix_values(
+            inputs["lam_down"],
+            rows,
+        )["dmatrix_dvalue"]
+        partials["lam_up_history", "lam_up"] = row_matrix_values(
+            inputs["lam_up"],
+            rows,
+        )["dmatrix_dvalue"]
+
+
 class HistoryVectorSlice(om.ExplicitComponent):
     """Assign a fixed FAST mission-history vector slice.
 

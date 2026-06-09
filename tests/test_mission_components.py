@@ -25,6 +25,7 @@ from fast_openmdao import (
     HistoryVectorSlice,
     InitialEnergyRemaining,
     LandingSegmentKinematicsPower,
+    MissionSplitHistory,
     PrescribedRateSegmentKinematicsPower,
     RowMatrix,
     TakeoffSegmentKinematics,
@@ -50,6 +51,7 @@ from fast_python.mission import (
     eval_takeoff,
     initial_energy_remaining,
     row_matrix,
+    set_split_history,
 )
 
 
@@ -1065,6 +1067,66 @@ def test_row_matrix_declares_analytic_partials():
     )
 
     for partial_data in partials["row_matrix"].values():
+        assert partial_data["abs error"].forward < 1.0e-8
+
+
+def test_mission_split_history_matches_fast_python():
+    """Check segment split-history row expansion parity with FAST-Python."""
+
+    lam_down = np.asarray([0.2, 0.8])
+    lam_up = np.asarray([0.4, 0.6, 0.0])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "split",
+        MissionSplitHistory(rows=3, lam_down_size=2, lam_up_size=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("lam_down", lam_down)
+    problem.set_val("lam_up", lam_up)
+    problem.run_model()
+
+    history = {"Power": {}}
+    specs = {
+        "Power": {
+            "LamDwn": {"Clb": lam_down},
+            "LamUps": {"Clb": lam_up},
+        }
+    }
+    set_split_history(history, specs, "Clb", 1, 4)
+
+    assert np.allclose(
+        problem.get_val("lam_down_history"),
+        np.asarray(history["Power"]["LamDwn"])[1:4],
+    )
+    assert np.allclose(
+        problem.get_val("lam_up_history"),
+        np.asarray(history["Power"]["LamUps"])[1:4],
+    )
+
+
+def test_mission_split_history_declares_analytic_partials():
+    """Check segment split-history row expansion derivatives."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "split",
+        MissionSplitHistory(rows=3, lam_down_size=2, lam_up_size=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("lam_down", np.asarray([0.2, 0.8]))
+    problem.set_val("lam_up", np.asarray([0.4, 0.6, 0.0]))
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["split"].values():
         assert partial_data["abs error"].forward < 1.0e-8
 
 
