@@ -234,7 +234,7 @@ The public `fast_openmdao` package currently exports:
 - Regression: `GaussianProcessPrediction`, `RegressionSampleVariance`,
   `RegressionNumericColumn`, `RegressionNumericScalar`, `RegressionPriorMean`,
   `RegressionTargetMatrix`, `RegressionTwoDimensionalArray`, `RegressionVector`,
-  `SquaredExponentialKernel`
+  `RegressionWeightedHyperparameters`, `SquaredExponentialKernel`
 - Safety: `FailureModel`
 - Units: `UnitArrayConversion`, `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,

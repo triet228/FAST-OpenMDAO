@@ -162,6 +162,7 @@ from fast_openmdao.regression import (
     RegressionTargetMatrix,
     RegressionTwoDimensionalArray,
     RegressionVector,
+    RegressionWeightedHyperparameters,
     SquaredExponentialKernel,
 )
 from fast_openmdao.safety import FailureModel
@@ -326,6 +327,7 @@ __all__ = [
     "RegressionTargetMatrix",
     "RegressionTwoDimensionalArray",
     "RegressionVector",
+    "RegressionWeightedHyperparameters",
     "RowMatrix",
     "SafeComponentWeight",
     "SanitizedArray",

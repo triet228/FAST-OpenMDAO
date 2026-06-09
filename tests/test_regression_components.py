@@ -18,11 +18,13 @@ from fast_openmdao import (
     RegressionTargetMatrix,
     RegressionTwoDimensionalArray,
     RegressionVector,
+    RegressionWeightedHyperparameters,
     SquaredExponentialKernel,
 )
 from fast_python.regression import (
     as_2d,
     as_vector,
+    build_data,
     nlgpr,
     numeric_column,
     numeric_scalar,
@@ -158,6 +160,30 @@ def test_regression_shape_and_variance_helpers_match_fast_python():
         sample_variance(variance_values),
     )
 
+    weights = np.asarray([1.0, 2.0])
+    hyper_database = make_weighted_hyperparameter_database()
+    hyper_io_space = make_weighted_hyperparameter_io_space()
+    _, expected_hyperparams = build_data(hyper_database, hyper_io_space, weights)
+    hyper_variances = np.asarray(
+        [
+            sample_variance([1.0, 2.0, 4.0]),
+            sample_variance([10.0, 20.0, 40.0]),
+            sample_variance([100.0, 120.0, 160.0]),
+        ]
+    )
+    hyper_problem = om.Problem()
+    hyper_problem.model.add_subsystem(
+        "hyperparams",
+        RegressionWeightedHyperparameters(num_inputs=2),
+        promotes=["*"],
+    )
+    hyper_problem.setup()
+    hyper_problem.set_val("variances", hyper_variances)
+    hyper_problem.set_val("weights", weights)
+    hyper_problem.run_model()
+
+    assert np.allclose(hyper_problem.get_val("hyperparams"), expected_hyperparams)
+
     prior_values = np.asarray([10.0, 20.0, np.nan])
     prior_problem = om.Problem()
     prior_problem.model.add_subsystem(
@@ -289,6 +315,14 @@ def test_regression_shape_and_variance_helpers_declare_analytic_partials():
             {"values": np.asarray([2.0, 4.0, 7.0, 11.0])},
         ),
         (
+            "hyperparams",
+            RegressionWeightedHyperparameters(num_inputs=2),
+            {
+                "variances": np.asarray([3.0, 30.0, 300.0]),
+                "weights": np.asarray([1.0, 2.0]),
+            },
+        ),
+        (
             "prior",
             RegressionPriorMean(vec_size=3),
             {"values": np.asarray([10.0, 20.0, 30.0])},
@@ -364,3 +398,23 @@ def make_regression_io_space():
     """Return FAST regression input/output path list for prior tests."""
 
     return [["Specs", "Weight", "Fuel"]]
+
+
+def make_weighted_hyperparameter_database():
+    """Return small FAST-style database for build_data hyperparameter tests."""
+
+    return {
+        "AC1": {"Specs": {"A": {"x": 1.0, "y": 10.0, "z": 100.0}}},
+        "AC2": {"Specs": {"A": {"x": 2.0, "y": 20.0, "z": 120.0}}},
+        "AC3": {"Specs": {"A": {"x": 4.0, "y": 40.0, "z": 160.0}}},
+    }
+
+
+def make_weighted_hyperparameter_io_space():
+    """Return FAST regression paths for weighted hyperparameter tests."""
+
+    return [
+        ["Specs", "A", "x"],
+        ["Specs", "A", "y"],
+        ["Specs", "A", "z"],
+    ]

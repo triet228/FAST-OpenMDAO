@@ -242,6 +242,46 @@ class RegressionSampleVariance(om.ExplicitComponent):
         partials["sample_variance", "values"] = values["dsample_variance_dvalues"]
 
 
+class RegressionWeightedHyperparameters(om.ExplicitComponent):
+    """Scale FAST regression variance hyperparameters by relevance weights."""
+
+    def initialize(self):
+        self.options.declare("num_inputs", default=1)
+
+    def setup(self):
+        num_inputs = self.options["num_inputs"]
+        hyper_size = num_inputs + 1
+        self.add_input("variances", val=np.ones(hyper_size))
+        self.add_input("weights", val=np.ones(num_inputs))
+        self.add_output("hyperparams", val=np.ones(hyper_size))
+        self.declare_partials(
+            of="hyperparams",
+            wrt="variances",
+            rows=np.arange(hyper_size),
+            cols=np.arange(hyper_size),
+        )
+        self.declare_partials(
+            of="hyperparams",
+            wrt="weights",
+            rows=np.repeat(np.arange(num_inputs), num_inputs),
+            cols=np.tile(np.arange(num_inputs), num_inputs),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["hyperparams"] = regression_weighted_hyperparameter_values(
+            inputs["variances"],
+            inputs["weights"],
+        )["hyperparams"]
+
+    def compute_partials(self, inputs, partials):
+        values = regression_weighted_hyperparameter_values(
+            inputs["variances"],
+            inputs["weights"],
+        )
+        partials["hyperparams", "variances"] = values["dhyperparams_dvariances"]
+        partials["hyperparams", "weights"] = values["dhyperparams_dweights"]
+
+
 class RegressionPriorMean(om.ExplicitComponent):
     """Compute FAST regression prior mean from fixed numeric output data.
 
@@ -506,6 +546,46 @@ def regression_sample_variance_values(values):
     return {
         "sample_variance": variance,
         "dsample_variance_dvalues": derivative,
+    }
+
+
+def regression_weighted_hyperparameter_values(variances, weights):
+    """Return FAST build_data hyperparameters and analytical derivatives."""
+
+    variances = np.asarray(variances, dtype=float).reshape(-1)
+    weights = np.asarray(weights, dtype=float).reshape(-1)
+    num_inputs = weights.size
+    weight_sum = np.sum(weights)
+    hyperparams = np.zeros(num_inputs + 1)
+    dhyperparams_dvariances = np.zeros(num_inputs + 1)
+    dhyperparams_dweights = np.zeros(num_inputs * num_inputs)
+
+    scale = weight_sum / (num_inputs * weights)
+    hyperparams[:-1] = variances[:-1] * scale
+    hyperparams[-1] = variances[-1]
+    dhyperparams_dvariances[:-1] = scale
+    dhyperparams_dvariances[-1] = 1.0
+
+    dense_weight_partials = np.zeros((num_inputs, num_inputs))
+
+    for irow in range(num_inputs):
+        for jcol in range(num_inputs):
+            if irow == jcol:
+                dense_weight_partials[irow, jcol] = (
+                    variances[irow]
+                    * (weights[irow] - weight_sum)
+                    / (num_inputs * weights[irow] ** 2)
+                )
+            else:
+                dense_weight_partials[irow, jcol] = (
+                    variances[irow] / (num_inputs * weights[irow])
+                )
+
+    dhyperparams_dweights[:] = dense_weight_partials.reshape(-1)
+    return {
+        "hyperparams": hyperparams,
+        "dhyperparams_dvariances": dhyperparams_dvariances,
+        "dhyperparams_dweights": dhyperparams_dweights,
     }
 
 
