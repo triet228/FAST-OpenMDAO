@@ -25,6 +25,7 @@ from fast_openmdao import (
     HistoryVectorSlice,
     InitialEnergyRemaining,
     LandingSegmentKinematicsPower,
+    MissionScalarOrListRestore,
     MissionSplitHistory,
     PrescribedRateSegmentKinematicsPower,
     RowMatrix,
@@ -51,6 +52,7 @@ from fast_python.mission import (
     eval_takeoff,
     initial_energy_remaining,
     row_matrix,
+    restore_scalar_or_list,
     set_split_history,
 )
 
@@ -1256,6 +1258,69 @@ def test_history_matrix_slice_declares_analytic_partials():
 
     for partial_data in partials["history_slice"].values():
         assert partial_data["abs error"].forward < 1.0e-9
+
+
+def test_mission_scalar_or_list_restore_matches_fast_python():
+    """Check FAST mission scalar/list restoration parity."""
+
+    scalar_problem = om.Problem()
+    scalar_problem.model.add_subsystem(
+        "restore",
+        MissionScalarOrListRestore(value_size=1),
+        promotes=["*"],
+    )
+    scalar_problem.setup()
+    scalar_problem.set_val("values", [11.0])
+    scalar_problem.run_model()
+
+    assert np.isclose(
+        scalar_problem.get_val("restored_values")[0],
+        restore_scalar_or_list([11.0]),
+    )
+
+    vector = np.asarray([11.0, 3.0, 4.0])
+    vector_problem = om.Problem()
+    vector_problem.model.add_subsystem(
+        "restore",
+        MissionScalarOrListRestore(value_size=3),
+        promotes=["*"],
+    )
+    vector_problem.setup()
+    vector_problem.set_val("values", vector)
+    vector_problem.run_model()
+
+    assert np.allclose(
+        vector_problem.get_val("restored_values"),
+        restore_scalar_or_list(vector),
+    )
+
+
+def test_mission_scalar_or_list_restore_declares_analytic_partials():
+    """Check FAST mission scalar/list restoration derivatives."""
+
+    for value_size, values in [
+        (1, np.asarray([11.0])),
+        (3, np.asarray([11.0, 3.0, 4.0])),
+    ]:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "restore",
+            MissionScalarOrListRestore(value_size=value_size),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("values", values)
+        problem.run_model()
+
+        partials = problem.check_partials(
+            out_stream=None,
+            method="fd",
+            form="central",
+            step=1.0e-6,
+        )
+
+        for partial_data in partials["restore"].values():
+            assert partial_data["abs error"].forward < 1.0e-8
 
 
 def output_names():

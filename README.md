@@ -43,6 +43,8 @@ derivative-native FAST equation components:
   partial derivatives.
 - Mission fixed-shape segment split-history expansion helper with analytical
   partial derivatives.
+- Mission fixed-shape scalar/list restoration helper with analytical partial
+  derivatives.
 - Mission fixed-slice history vector/matrix assignment helpers with analytical
   partial derivatives.
 - Mission simple and detailed EvalTakeoff, EvalLanding, smooth EvalCruise, and
@@ -197,8 +199,8 @@ The public `fast_openmdao` package currently exports:
   `CruiseSegmentKinematicsPower`, `CruiseTimeTargetDistance`,
   `DetailedTakeoffSegmentKinematicsPower`, `FlightConditions`,
   `HistoryMatrixSlice`, `HistoryVectorSlice`, `InitialEnergyRemaining`,
-  `LandingSegmentKinematicsPower`, `MissionSplitHistory`,
-  `PrescribedRateSegmentKinematicsPower`,
+  `LandingSegmentKinematicsPower`, `MissionScalarOrListRestore`,
+  `MissionSplitHistory`, `PrescribedRateSegmentKinematicsPower`,
   `RowMatrix`, `TakeoffSegmentKinematics`
 - OEW: `NumericSum`, `TurbofanAirframeWeight`, `TurbofanOEWIterationStep`,
   `TurbopropAirframeWeight`, `TurbopropOEWIterationStep`

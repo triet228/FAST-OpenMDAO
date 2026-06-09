@@ -1090,6 +1090,43 @@ class HistoryMatrixSlice(om.ExplicitComponent):
         ]
 
 
+class MissionScalarOrListRestore(om.ExplicitComponent):
+    """Restore FAST mission values as scalar or vector with fixed output shape."""
+
+    def initialize(self):
+        self.options.declare("value_size", default=1)
+
+    def setup(self):
+        value_size = self.options["value_size"]
+        output_shape = () if value_size == 1 else (value_size,)
+        self.add_input("values", val=np.ones(value_size))
+        self.add_output("restored_values", val=np.ones(output_shape))
+
+        if value_size == 1:
+            self.declare_partials(
+                of="restored_values",
+                wrt="values",
+                val=np.ones(1),
+            )
+        else:
+            rows = np.arange(value_size)
+            self.declare_partials(
+                of="restored_values",
+                wrt="values",
+                rows=rows,
+                cols=rows,
+                val=np.ones(value_size),
+            )
+
+    def compute(self, inputs, outputs):
+        values = np.asarray(inputs["values"], dtype=float).reshape(-1)
+
+        if self.options["value_size"] == 1:
+            outputs["restored_values"] = values[0]
+        else:
+            outputs["restored_values"] = values
+
+
 def flight_condition_values(altitude, disa, velocity_type, velocity):
     """Return FAST flight-condition values and analytical derivatives."""
 
