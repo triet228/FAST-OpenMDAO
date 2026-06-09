@@ -1583,6 +1583,350 @@ def cruise_breguet_power_split_values(source, phi_cruise, lambda_down_cruise):
     raise ValueError("CruiseBreguetPowerSplit source must be phi, lambda_down, or zero.")
 
 
+def cruise_segment_kinematics_power_input_names():
+    """Return smooth EvalCruise kernel input names."""
+
+    return (
+        "initial_distance",
+        "initial_time",
+        "altitude",
+        "true_airspeed",
+        "mass",
+        "available_power",
+        "target_distance",
+        "lift_drag",
+    )
+
+
+def cruise_segment_kinematics_power_output_names():
+    """Return smooth EvalCruise kernel output names."""
+
+    return (
+        "distance",
+        "time",
+        "time_step",
+        "rate_of_climb",
+        "acceleration",
+        "flight_path_angle",
+        "drag_power",
+        "required_power",
+        "specific_excess_power",
+        "potential_energy",
+        "kinetic_energy",
+    )
+
+
+def cruise_segment_kinematics_power_inputs(inputs):
+    """Return numeric inputs for the smooth EvalCruise kernel."""
+
+    return {
+        "initial_distance": inputs["initial_distance"][0],
+        "initial_time": inputs["initial_time"][0],
+        "altitude": np.asarray(inputs["altitude"], dtype=float).reshape(-1),
+        "true_airspeed": np.asarray(inputs["true_airspeed"], dtype=float).reshape(-1),
+        "mass": np.asarray(inputs["mass"], dtype=float).reshape(-1),
+        "available_power": np.asarray(inputs["available_power"], dtype=float).reshape(-1),
+        "target_distance": inputs["target_distance"][0],
+        "lift_drag": inputs["lift_drag"][0],
+    }
+
+
+def cruise_segment_kinematics_power_values(npoint, gravity, data):
+    """Return smooth EvalCruise kernel outputs and dense derivatives."""
+
+    values = cruise_segment_kinematics_power_seed_values(
+        npoint,
+        gravity,
+        data,
+        zero_cruise_segment_kinematics_power_seeds(npoint),
+    )
+    input_sizes = cruise_segment_kinematics_power_input_sizes(npoint)
+    output_sizes = cruise_segment_kinematics_power_output_sizes(npoint)
+
+    for output_name in cruise_segment_kinematics_power_output_names():
+        for input_name in cruise_segment_kinematics_power_input_names():
+            values["d%s_d%s" % (output_name, input_name)] = np.zeros(
+                (output_sizes[output_name], input_sizes[input_name])
+            )
+
+    for input_name in cruise_segment_kinematics_power_input_names():
+        for column in range(input_sizes[input_name]):
+            seeds = zero_cruise_segment_kinematics_power_seeds(npoint)
+            seeds[input_name].reshape(-1)[column] = 1.0
+            derivative_values = cruise_segment_kinematics_power_seed_values(
+                npoint,
+                gravity,
+                data,
+                seeds,
+            )
+
+            for output_name in cruise_segment_kinematics_power_output_names():
+                values["d%s_d%s" % (output_name, input_name)][:, column] = (
+                    derivative_values["d%s" % output_name].reshape(-1)
+                )
+
+    return values
+
+
+def cruise_segment_kinematics_power_input_sizes(npoint):
+    """Return input sizes for smooth EvalCruise dense derivative blocks."""
+
+    return {
+        "initial_distance": 1,
+        "initial_time": 1,
+        "altitude": npoint,
+        "true_airspeed": npoint,
+        "mass": npoint,
+        "available_power": npoint,
+        "target_distance": 1,
+        "lift_drag": 1,
+    }
+
+
+def cruise_segment_kinematics_power_output_sizes(npoint):
+    """Return output sizes for smooth EvalCruise dense derivative blocks."""
+
+    nstep = npoint - 1
+    return {
+        "distance": npoint,
+        "time": npoint,
+        "time_step": nstep,
+        "rate_of_climb": npoint,
+        "acceleration": npoint,
+        "flight_path_angle": npoint,
+        "drag_power": npoint,
+        "required_power": npoint,
+        "specific_excess_power": npoint,
+        "potential_energy": npoint,
+        "kinetic_energy": npoint,
+    }
+
+
+def zero_cruise_segment_kinematics_power_seeds(npoint):
+    """Return zero derivative seeds for the smooth EvalCruise kernel."""
+
+    return {
+        "initial_distance": np.zeros(1),
+        "initial_time": np.zeros(1),
+        "altitude": np.zeros(npoint),
+        "true_airspeed": np.zeros(npoint),
+        "mass": np.zeros(npoint),
+        "available_power": np.zeros(npoint),
+        "target_distance": np.zeros(1),
+        "lift_drag": np.zeros(1),
+    }
+
+
+def cruise_segment_kinematics_power_seed_values(npoint, gravity, data, seeds):
+    """Return smooth EvalCruise outputs and one seeded derivative direction."""
+
+    altitude = data["altitude"]
+    true_airspeed = data["true_airspeed"]
+    mass = data["mass"]
+    available_power = data["available_power"]
+    lift_drag = data["lift_drag"]
+    initial_distance = data["initial_distance"]
+    initial_time = data["initial_time"]
+    target_distance = data["target_distance"]
+    daltitude = seeds["altitude"]
+    dtrue_airspeed = seeds["true_airspeed"]
+    dmass = seeds["mass"]
+    davailable_power = seeds["available_power"]
+    dlift_drag = seeds["lift_drag"][0]
+    dinitial_distance = seeds["initial_distance"][0]
+    dinitial_time = seeds["initial_time"][0]
+    dtarget_distance = seeds["target_distance"][0]
+    alpha = np.linspace(0.0, 1.0, npoint)
+    distance = initial_distance + alpha * (target_distance - initial_distance)
+    ddistance = (
+        dinitial_distance
+        + alpha * (dtarget_distance - dinitial_distance)
+    )
+    distance_step = np.diff(distance)
+    ddistance_step = np.diff(ddistance)
+    time_step = distance_step / true_airspeed[:-1]
+    dtime_step = (
+        ddistance_step * true_airspeed[:-1]
+        - distance_step * dtrue_airspeed[:-1]
+    ) / true_airspeed[:-1] ** 2
+    time = np.zeros(npoint)
+    dtime = np.zeros(npoint)
+    time[0] = initial_time
+    dtime[0] = dinitial_time
+    time[1:] = initial_time + np.cumsum(time_step)
+    dtime[1:] = dinitial_time + np.cumsum(dtime_step)
+    altitude_step = np.diff(altitude)
+    daltitude_step = np.diff(daltitude)
+    rate_of_climb = np.zeros(npoint)
+    drate_of_climb = np.zeros(npoint)
+    rate_of_climb[:-1] = altitude_step / time_step
+    drate_of_climb[:-1] = (
+        daltitude_step * time_step
+        - altitude_step * dtime_step
+    ) / time_step ** 2
+    speed_step = np.diff(true_airspeed)
+    dspeed_step = np.diff(dtrue_airspeed)
+    acceleration = np.zeros(npoint)
+    dacceleration = np.zeros(npoint)
+    acceleration[:-1] = speed_step / time_step
+    dacceleration[:-1] = (
+        dspeed_step * time_step
+        - speed_step * dtime_step
+    ) / time_step ** 2
+    climb_ratio = rate_of_climb / true_airspeed
+    dclimb_ratio = (
+        drate_of_climb * true_airspeed
+        - rate_of_climb * dtrue_airspeed
+    ) / true_airspeed ** 2
+    flight_path_angle = np.degrees(np.arcsin(climb_ratio))
+    dflight_path_angle = (
+        180.0
+        / np.pi
+        * dclimb_ratio
+        / np.sqrt(1.0 - climb_ratio ** 2)
+    )
+    cosine_fpa = np.sqrt(1.0 - climb_ratio ** 2)
+    dcosine_fpa = -climb_ratio * dclimb_ratio / cosine_fpa
+    drag_power = mass * gravity * cosine_fpa * true_airspeed / lift_drag
+    ddrag_power = gravity * (
+        (
+            dmass * cosine_fpa * true_airspeed
+            + mass * dcosine_fpa * true_airspeed
+            + mass * cosine_fpa * dtrue_airspeed
+        )
+        / lift_drag
+        - mass * cosine_fpa * true_airspeed * dlift_drag / lift_drag ** 2
+    )
+    required_power = (
+        mass * gravity * rate_of_climb
+        + mass * true_airspeed * acceleration
+        + drag_power
+    )
+    drequired_power = (
+        gravity * (dmass * rate_of_climb + mass * drate_of_climb)
+        + dmass * true_airspeed * acceleration
+        + mass * dtrue_airspeed * acceleration
+        + mass * true_airspeed * dacceleration
+        + ddrag_power
+    )
+    specific_excess_power = (
+        available_power - drag_power
+    ) / (mass * gravity)
+    dspecific_excess_power = (
+        (davailable_power - ddrag_power) * mass * gravity
+        - (available_power - drag_power) * dmass * gravity
+    ) / (mass * gravity) ** 2
+    potential_energy = mass * gravity * altitude
+    dpotential_energy = gravity * (dmass * altitude + mass * daltitude)
+    kinetic_energy = 0.5 * mass * true_airspeed ** 2
+    dkinetic_energy = (
+        0.5 * dmass * true_airspeed ** 2
+        + mass * true_airspeed * dtrue_airspeed
+    )
+
+    return {
+        "distance": distance,
+        "time": time,
+        "time_step": time_step,
+        "rate_of_climb": rate_of_climb,
+        "acceleration": acceleration,
+        "flight_path_angle": flight_path_angle,
+        "drag_power": drag_power,
+        "required_power": required_power,
+        "specific_excess_power": specific_excess_power,
+        "potential_energy": potential_energy,
+        "kinetic_energy": kinetic_energy,
+        "ddistance": ddistance,
+        "dtime": dtime,
+        "dtime_step": dtime_step,
+        "drate_of_climb": drate_of_climb,
+        "dacceleration": dacceleration,
+        "dflight_path_angle": dflight_path_angle,
+        "ddrag_power": ddrag_power,
+        "drequired_power": drequired_power,
+        "dspecific_excess_power": dspecific_excess_power,
+        "dpotential_energy": dpotential_energy,
+        "dkinetic_energy": dkinetic_energy,
+    }
+
+
+class CruiseSegmentKinematicsPower(om.ExplicitComponent):
+    """Compute FAST EvalCruise smooth-branch trajectory and required power.
+
+    Inputs:
+        initial_distance: Segment starting distance in m.
+        initial_time: Segment starting time in s.
+        altitude: Segment altitude control-point history in m.
+        true_airspeed: Segment TAS control-point history in m/s.
+        mass: Segment mass control-point history in kg.
+        available_power: Total available propulsive power in W.
+        target_distance: Segment ending distance in m.
+        lift_drag: Cruise lift-to-drag ratio.
+
+    Outputs:
+        distance, time, time_step, rate_of_climb, acceleration, flight_path_angle,
+        drag_power, required_power, specific_excess_power, potential_energy, and
+        kinetic_energy histories.
+
+    Assumptions:
+        This is the smooth EvalCruise branch before propulsion-history
+        mutation. It assumes the prescribed altitude and speed histories do not
+        hit FAST's climb/descent-rate clipping branch.
+    """
+
+    def initialize(self):
+        self.options.declare("npoint", default=3)
+        self.options.declare("gravity", default=9.81)
+
+    def setup(self):
+        npoint = self.options["npoint"]
+        nstep = npoint - 1
+        self.add_input("initial_distance", val=0.0, units="m")
+        self.add_input("initial_time", val=0.0, units="s")
+        self.add_input("altitude", val=np.zeros(npoint), units="m")
+        self.add_input("true_airspeed", val=np.ones(npoint), units="m/s")
+        self.add_input("mass", val=np.ones(npoint), units="kg")
+        self.add_input("available_power", val=np.zeros(npoint), units="W")
+        self.add_input("target_distance", val=1.0, units="m")
+        self.add_input("lift_drag", val=10.0)
+        self.add_output("distance", val=np.zeros(npoint), units="m")
+        self.add_output("time", val=np.zeros(npoint), units="s")
+        self.add_output("time_step", val=np.ones(nstep), units="s")
+        self.add_output("rate_of_climb", val=np.zeros(npoint), units="m/s")
+        self.add_output("acceleration", val=np.zeros(npoint), units="m/s**2")
+        self.add_output("flight_path_angle", val=np.zeros(npoint))
+        self.add_output("drag_power", val=np.zeros(npoint), units="W")
+        self.add_output("required_power", val=np.zeros(npoint), units="W")
+        self.add_output("specific_excess_power", val=np.zeros(npoint), units="m/s")
+        self.add_output("potential_energy", val=np.zeros(npoint), units="J")
+        self.add_output("kinetic_energy", val=np.zeros(npoint), units="J")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = cruise_segment_kinematics_power_values(
+            self.options["npoint"],
+            self.options["gravity"],
+            cruise_segment_kinematics_power_inputs(inputs),
+        )
+
+        for output_name in cruise_segment_kinematics_power_output_names():
+            outputs[output_name] = values[output_name]
+
+    def compute_partials(self, inputs, partials):
+        data = cruise_segment_kinematics_power_inputs(inputs)
+        values = cruise_segment_kinematics_power_values(
+            self.options["npoint"],
+            self.options["gravity"],
+            data,
+        )
+
+        for output_name in cruise_segment_kinematics_power_output_names():
+            for input_name in cruise_segment_kinematics_power_input_names():
+                partials[output_name, input_name] = values[
+                    "d%s_d%s" % (output_name, input_name)
+                ]
+
+
 def breguet_efficiency_input_names():
     """Return CruiseBRE efficiency input names."""
 

@@ -16,10 +16,12 @@ from fast_openmdao import (
     CruiseBreguetPowerSplit,
     CruiseBreguetPropulsiveEfficiency,
     CruiseBreguetSourceEnergy,
+    CruiseSegmentKinematicsPower,
     CruiseTimeTargetDistance,
     FlightConditions,
     InitialEnergyRemaining,
 )
+from fast_python.data_struct import init_mission_history
 from fast_python.mission import (
     compute_flight_conditions,
     cruise_breguet_discharge_battery,
@@ -29,6 +31,7 @@ from fast_python.mission import (
     cruise_breguet_propulsive_efficiency,
     cruise_breguet_source_energy,
     cruise_time_target_to_distance,
+    eval_cruise,
     initial_energy_remaining,
 )
 
@@ -376,6 +379,83 @@ def test_cruise_breguet_power_history_declares_analytic_partials():
             )
 
 
+def test_cruise_segment_kinematics_power_matches_fast_python_eval_cruise():
+    """Check smooth EvalCruise kernel parity with FAST-Python."""
+
+    aircraft = init_mission_history(make_smooth_cruise_aircraft())
+    result = eval_cruise(aircraft)
+    history = result["Mission"]["History"]["SI"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "cruise",
+        CruiseSegmentKinematicsPower(npoint=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("initial_distance", 0.0, units="m")
+    problem.set_val("initial_time", 0.0, units="s")
+    problem.set_val("altitude", [0.0, 0.0, 0.0], units="m")
+    problem.set_val("true_airspeed", [100.0, 100.0, 100.0], units="m/s")
+    problem.set_val("mass", [1000.0, 1000.0, 1000.0], units="kg")
+    problem.set_val("available_power", [200000.0, 200000.0, 200000.0], units="W")
+    problem.set_val("target_distance", 1000.0, units="m")
+    problem.set_val("lift_drag", 10.0)
+    problem.run_model()
+
+    assert np.allclose(problem.get_val("distance", units="m"), history["Performance"]["Dist"])
+    assert np.allclose(problem.get_val("time", units="s"), history["Performance"]["Time"])
+    assert np.allclose(problem.get_val("rate_of_climb", units="m/s"), history["Performance"]["RC"])
+    assert np.allclose(problem.get_val("acceleration", units="m/s**2"), history["Performance"]["Acc"])
+    assert np.allclose(problem.get_val("flight_path_angle"), history["Performance"]["FPA"])
+    assert np.allclose(problem.get_val("required_power", units="W"), history["Power"]["Req"])
+    assert np.allclose(problem.get_val("specific_excess_power", units="m/s"), history["Performance"]["Ps"])
+    assert np.allclose(problem.get_val("potential_energy", units="J"), history["Energy"]["PE"])
+    assert np.allclose(problem.get_val("kinetic_energy", units="J"), history["Energy"]["KE"])
+    assert np.allclose(problem.get_val("time_step", units="s"), [5.0, 5.0])
+    assert np.allclose(problem.get_val("drag_power", units="W"), history["Power"]["Req"])
+
+
+def test_cruise_segment_kinematics_power_declares_analytic_partials():
+    """Check smooth EvalCruise kernel derivatives against finite difference."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "cruise",
+        CruiseSegmentKinematicsPower(npoint=4),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("initial_distance", 10.0, units="m")
+    problem.set_val("initial_time", 20.0, units="s")
+    problem.set_val("altitude", [100.0, 140.0, 170.0, 210.0], units="m")
+    problem.set_val("true_airspeed", [90.0, 95.0, 100.0, 105.0], units="m/s")
+    problem.set_val("mass", [1000.0, 990.0, 980.0, 970.0], units="kg")
+    problem.set_val(
+        "available_power",
+        [200000.0, 202000.0, 204000.0, 206000.0],
+        units="W",
+    )
+    problem.set_val("target_distance", 1010.0, units="m")
+    problem.set_val("lift_drag", 12.0)
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-5,
+    )
+
+    for key, partial_data in partials["cruise"].items():
+        absolute_error = partial_data["abs error"].forward
+        relative_error = partial_data["rel error"].forward
+        assert absolute_error < 1.0e-4 or relative_error < 1.0e-5, (
+            key,
+            absolute_error,
+            relative_error,
+        )
+
+
 def test_cruise_breguet_detailed_battery_matches_fast_python():
     """Check detailed CruiseBRE battery discharge parity."""
 
@@ -671,6 +751,107 @@ def make_breguet_power_history_values():
             "electric_generator_efficiency": 0.91,
             "gas_turbine_efficiency": 0.36,
             "power_split": 0.32,
+        },
+    }
+
+
+def make_smooth_cruise_aircraft():
+    """Return a minimal all-electric aircraft for smooth EvalCruise parity."""
+
+    return {
+        "Settings": {
+            "nargOperUps": 0,
+            "nargOperDwn": 0,
+            "Analysis": {
+                "Type": 1,
+            },
+        },
+        "Specs": {
+            "TLAR": {
+                "Class": "Turboprop",
+            },
+            "Aero": {
+                "L_D": {
+                    "Crs": 10,
+                },
+            },
+            "Performance": {
+                "Alts": {
+                    "Tko": 0,
+                },
+                "RCMax": 1000,
+            },
+            "Weight": {
+                "MTOW": 1000,
+                "Batt": 2000,
+            },
+            "Power": {
+                "SpecEnergy": {
+                    "Fuel": 43200000,
+                    "Batt": 1000,
+                },
+                "LamDwn": {
+                    "Crs": 0,
+                },
+                "LamUps": {
+                    "Crs": 0,
+                },
+                "Battery": {
+                    "SerCells": float("nan"),
+                    "ParCells": float("nan"),
+                },
+            },
+            "Propulsion": {
+                "SLSPower": [200000],
+                "SLSThrust": [0],
+                "PropArch": {
+                    "Type": "E",
+                    "Arch": [
+                        [0, 1, 0],
+                        [0, 0, 1],
+                        [0, 0, 0],
+                    ],
+                    "OperUps": [
+                        [0, 1, 0],
+                        [0, 0, 1],
+                        [0, 0, 0],
+                    ],
+                    "OperDwn": [
+                        [0, 0, 0],
+                        [1, 0, 0],
+                        [0, 1, 0],
+                    ],
+                    "EtaUps": [
+                        [1, 1, 1],
+                        [1, 1, 1],
+                        [1, 1, 1],
+                    ],
+                    "EtaDwn": [
+                        [1, 1, 1],
+                        [1, 1, 1],
+                        [1, 1, 1],
+                    ],
+                    "SrcType": [0],
+                    "TrnType": [0],
+                    "ParConns": [[]],
+                },
+            },
+        },
+        "Mission": {
+            "Profile": {
+                "SegsID": 1,
+                "MissID": 1,
+                "SegPts": [3],
+                "SegBeg": [1],
+                "SegEnd": [3],
+                "AltBeg": [0],
+                "AltEnd": [0],
+                "VelBeg": [100],
+                "VelEnd": [100],
+                "TypeBeg": ["TAS"],
+                "TypeEnd": ["TAS"],
+                "CrsTarget": 1000,
+            },
         },
     }
 

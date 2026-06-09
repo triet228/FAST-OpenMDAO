@@ -36,6 +36,8 @@ derivative-native FAST equation components:
   derivatives for fixed source layouts.
 - Mission initial source-energy remaining helper with analytical partial
   derivatives for fixed source layouts.
+- Mission smooth EvalCruise kinematics and required-power kernel with
+  analytical partial derivatives.
 - Engine primitives for isentropic pressure, temperature, area-Mach,
   mass-flow parameter, off-design nozzle Mach, perfect-expansion nozzle flow,
   and static-density equations with analytical partial derivatives.
@@ -134,7 +136,8 @@ The public `fast_openmdao` package currently exports:
 - Mission: `CruiseBreguetDetailedBattery`, `CruiseBreguetEfficiencyTriplet`,
   `CruiseBreguetPowerHistory`, `CruiseBreguetPowerSplit`,
   `CruiseBreguetPropulsiveEfficiency`, `CruiseBreguetSourceEnergy`,
-  `CruiseTimeTargetDistance`, `FlightConditions`, `InitialEnergyRemaining`
+  `CruiseSegmentKinematicsPower`, `CruiseTimeTargetDistance`,
+  `FlightConditions`, `InitialEnergyRemaining`
 - OEW: `NumericSum`, `TurbofanAirframeWeight`, `TurbopropAirframeWeight`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,
   `FeasibleStep`, `OperationalObjective`, `OperationalSplitConstraints`,
