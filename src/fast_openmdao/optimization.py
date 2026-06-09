@@ -268,6 +268,114 @@ class HistoryArray(om.ExplicitComponent):
         ]
 
 
+class OperationalSimplexTableau(om.ExplicitComponent):
+    """Build FAST operational power-split simplex tableau for fixed segments."""
+
+    def initialize(self):
+        self.options.declare("num_points", default=2)
+        self.options.declare("architecture", default="PHE")
+        self.options.declare("objective_type", default="FuelBurn")
+        self.options.declare("includes_takeoff", default=False)
+
+    def setup(self):
+        num_points = self.options["num_points"]
+        num_phi = num_points - 1
+        shape = operational_simplex_tableau_shape(num_points)
+        self.add_input("output_power", val=np.ones(num_points), units="W")
+        self.add_input("time", val=np.arange(num_points, dtype=float), units="s")
+        self.add_input("true_airspeed", val=np.ones(num_points))
+        self.add_input("specific_fuel_consumption", val=np.ones(num_points))
+        self.add_input("fuel_specific_energy", val=1.0)
+        self.add_input("propulsive_efficiency", val=0.8)
+        self.add_input("electric_motor_efficiency", val=0.9)
+        self.add_input("design_power_split", val=0.5)
+        self.add_input("electric_motor_specific_power", val=1.0, units="W/kg")
+        self.add_input("electric_motor_weight", val=1.0, units="kg")
+        self.add_input("battery_specific_energy", val=1.0, units="J/kg")
+        self.add_input("battery_weight", val=1.0, units="kg")
+        self.add_output("tableau", val=np.zeros(shape))
+
+        output_size = int(np.prod(shape))
+        rows = np.arange(output_size)
+        vector_rows = np.repeat(rows, num_points)
+        vector_cols = np.tile(np.arange(num_points), output_size)
+
+        for name in (
+            "output_power",
+            "time",
+            "true_airspeed",
+            "specific_fuel_consumption",
+        ):
+            self.declare_partials(
+                of="tableau",
+                wrt=name,
+                rows=vector_rows,
+                cols=vector_cols,
+            )
+
+        for name in (
+            "fuel_specific_energy",
+            "propulsive_efficiency",
+            "electric_motor_efficiency",
+            "design_power_split",
+            "electric_motor_specific_power",
+            "electric_motor_weight",
+            "battery_specific_energy",
+            "battery_weight",
+        ):
+            self.declare_partials(
+                of="tableau",
+                wrt=name,
+                rows=rows,
+                cols=np.zeros(output_size, dtype=int),
+            )
+
+        if num_phi < 1:
+            raise ValueError("OperationalSimplexTableau requires at least 2 points.")
+
+    def compute(self, inputs, outputs):
+        values = operational_simplex_tableau_values(
+            inputs["output_power"],
+            inputs["time"],
+            inputs["true_airspeed"],
+            inputs["specific_fuel_consumption"],
+            inputs["fuel_specific_energy"][0],
+            inputs["propulsive_efficiency"][0],
+            inputs["electric_motor_efficiency"][0],
+            inputs["design_power_split"][0],
+            inputs["electric_motor_specific_power"][0],
+            inputs["electric_motor_weight"][0],
+            inputs["battery_specific_energy"][0],
+            inputs["battery_weight"][0],
+            self.options["architecture"],
+            self.options["objective_type"],
+            self.options["includes_takeoff"],
+        )
+        outputs["tableau"] = values["tableau"]
+
+    def compute_partials(self, inputs, partials):
+        values = operational_simplex_tableau_values(
+            inputs["output_power"],
+            inputs["time"],
+            inputs["true_airspeed"],
+            inputs["specific_fuel_consumption"],
+            inputs["fuel_specific_energy"][0],
+            inputs["propulsive_efficiency"][0],
+            inputs["electric_motor_efficiency"][0],
+            inputs["design_power_split"][0],
+            inputs["electric_motor_specific_power"][0],
+            inputs["electric_motor_weight"][0],
+            inputs["battery_specific_energy"][0],
+            inputs["battery_weight"][0],
+            self.options["architecture"],
+            self.options["objective_type"],
+            self.options["includes_takeoff"],
+        )
+
+        for input_name in operational_simplex_tableau_input_names():
+            partials["tableau", input_name] = values["dtableau_d%s" % input_name]
+
+
 class SplitScheduleFill(om.ExplicitComponent):
     """Fill a FAST split schedule from a flattened optimized split vector.
 
@@ -1394,6 +1502,381 @@ def history_array_values(history_values, indices):
         "selected_values": selected,
         "dselected_values_dhistory_values": derivative,
     }
+
+
+def operational_simplex_tableau_input_names():
+    """Return OperationalSimplexTableau input names."""
+
+    return (
+        "output_power",
+        "time",
+        "true_airspeed",
+        "specific_fuel_consumption",
+        "fuel_specific_energy",
+        "propulsive_efficiency",
+        "electric_motor_efficiency",
+        "design_power_split",
+        "electric_motor_specific_power",
+        "electric_motor_weight",
+        "battery_specific_energy",
+        "battery_weight",
+    )
+
+
+def operational_simplex_tableau_shape(num_points):
+    """Return FAST simplex tableau shape for a fixed selected-point count."""
+
+    num_phi = int(num_points) - 1
+    return (4 * num_phi + 3, 5 * num_phi + 3)
+
+
+def operational_simplex_tableau_values(
+    output_power,
+    time,
+    true_airspeed,
+    specific_fuel_consumption,
+    fuel_specific_energy,
+    propulsive_efficiency,
+    electric_motor_efficiency,
+    design_power_split,
+    electric_motor_specific_power,
+    electric_motor_weight,
+    battery_specific_energy,
+    battery_weight,
+    architecture,
+    objective_type,
+    includes_takeoff,
+):
+    """Return FAST simplex setup tableau and dense analytical derivatives."""
+
+    output_power = np.asarray(output_power, dtype=float).reshape(-1)
+    time = np.asarray(time, dtype=float).reshape(-1)
+    true_airspeed = np.asarray(true_airspeed, dtype=float).reshape(-1)
+    sfc = np.asarray(specific_fuel_consumption, dtype=float).reshape(-1)
+    num_points = output_power.size
+    num_phi = num_points - 1
+    shape = operational_simplex_tableau_shape(num_points)
+    tableau = np.zeros(shape)
+    derivatives = operational_simplex_zero_derivatives(shape, num_points)
+    arch = str(architecture).upper()
+
+    if arch not in ("PHE", "SHE"):
+        raise ValueError("OperationalSimplexTableau requires PHE or SHE architecture.")
+
+    dt = np.diff(time)
+    eta_product = propulsive_efficiency * electric_motor_efficiency
+    pem_coeff = output_power / eta_product
+    ebatt_coeff = output_power[:-1] * dt / eta_product
+    pem_max = electric_motor_specific_power * electric_motor_weight
+    ebatt_max = battery_specific_energy * battery_weight
+    tas_effective = np.array(true_airspeed, dtype=float, copy=True)
+
+    if includes_takeoff:
+        tas_effective[0] = 1.0
+
+    for index in range(num_phi):
+        row = 4 * index
+        column = 4 * index + num_phi
+        tableau[row, index] = -1.0
+        tableau[row, column] = 1.0
+        tableau[row + 1, index] = 1.0
+        tableau[row + 1, column + 1] = 1.0
+        tableau[row + 1, -1] = 0.9 * design_power_split
+        add_tableau_derivative(
+            derivatives,
+            shape,
+            "design_power_split",
+            row + 1,
+            shape[1] - 1,
+            0.9,
+        )
+        tableau[row + 2, index] = -pem_coeff[index]
+        tableau[row + 2, column + 2] = 1.0
+        add_pem_derivatives(
+            derivatives,
+            row + 2,
+            index,
+            shape,
+            output_power[index],
+            eta_product,
+            propulsive_efficiency,
+            electric_motor_efficiency,
+            -1.0,
+        )
+        tableau[row + 3, index] = pem_coeff[index]
+        tableau[row + 3, column + 3] = 1.0
+        tableau[row + 3, -1] = pem_max
+        add_pem_derivatives(
+            derivatives,
+            row + 3,
+            index,
+            shape,
+            output_power[index],
+            eta_product,
+            propulsive_efficiency,
+            electric_motor_efficiency,
+            1.0,
+        )
+        add_tableau_derivative(
+            derivatives,
+            shape,
+            "electric_motor_specific_power",
+            row + 3,
+            shape[1] - 1,
+            electric_motor_weight,
+        )
+        add_tableau_derivative(
+            derivatives,
+            shape,
+            "electric_motor_weight",
+            row + 3,
+            shape[1] - 1,
+            electric_motor_specific_power,
+        )
+
+    row = 4 * num_phi
+    column = 5 * num_phi
+    tableau[row, :num_phi] = -ebatt_coeff
+    tableau[row, column] = 1.0
+    row += 1
+    column += 1
+    tableau[row, :num_phi] = ebatt_coeff
+    tableau[row, column] = 1.0
+    tableau[row, -1] = ebatt_max
+    add_tableau_derivative(
+        derivatives,
+        shape,
+        "battery_specific_energy",
+        row,
+        shape[1] - 1,
+        battery_weight,
+    )
+    add_tableau_derivative(
+        derivatives,
+        shape,
+        "battery_weight",
+        row,
+        shape[1] - 1,
+        battery_specific_energy,
+    )
+
+    for index in range(num_phi):
+        add_ebatt_derivatives(
+            derivatives,
+            4 * num_phi,
+            index,
+            shape,
+            output_power[index],
+            dt[index],
+            eta_product,
+            propulsive_efficiency,
+            electric_motor_efficiency,
+            -1.0,
+        )
+        add_ebatt_derivatives(
+            derivatives,
+            4 * num_phi + 1,
+            index,
+            shape,
+            output_power[index],
+            dt[index],
+            eta_product,
+            propulsive_efficiency,
+            electric_motor_efficiency,
+            1.0,
+        )
+
+    add_objective_coefficients(
+        tableau,
+        derivatives,
+        4 * num_phi + 2,
+        output_power,
+        dt,
+        tas_effective,
+        sfc,
+        fuel_specific_energy,
+        propulsive_efficiency,
+        electric_motor_efficiency,
+        objective_type,
+        includes_takeoff,
+    )
+    result = {"tableau": tableau}
+
+    for name, value in derivatives.items():
+        result["dtableau_d%s" % name] = value.reshape(-1)
+
+    return result
+
+
+def operational_simplex_zero_derivatives(shape, num_points):
+    """Return zero dense derivative matrices for simplex tableau inputs."""
+
+    output_size = int(np.prod(shape))
+    derivatives = {}
+
+    for name in (
+        "output_power",
+        "time",
+        "true_airspeed",
+        "specific_fuel_consumption",
+    ):
+        derivatives[name] = np.zeros((output_size, num_points))
+
+    for name in (
+        "fuel_specific_energy",
+        "propulsive_efficiency",
+        "electric_motor_efficiency",
+        "design_power_split",
+        "electric_motor_specific_power",
+        "electric_motor_weight",
+        "battery_specific_energy",
+        "battery_weight",
+    ):
+        derivatives[name] = np.zeros((output_size, 1))
+
+    return derivatives
+
+
+def add_tableau_derivative(derivatives, shape, input_name, row, column, value):
+    """Accumulate one scalar tableau derivative entry."""
+
+    derivatives[input_name][row * shape[1] + column, 0] += value
+
+
+def add_pem_derivatives(
+    derivatives,
+    row,
+    column,
+    shape,
+    power,
+    eta_product,
+    eta_prop,
+    eta_em,
+    sign,
+):
+    """Accumulate derivatives for one motor-power coefficient."""
+
+    output_index = row * shape[1] + column
+    derivatives["output_power"][output_index, column] += sign / eta_product
+    derivatives["propulsive_efficiency"][output_index, 0] += (
+        -sign * power / (eta_prop ** 2 * eta_em)
+    )
+    derivatives["electric_motor_efficiency"][output_index, 0] += (
+        -sign * power / (eta_prop * eta_em ** 2)
+    )
+
+
+def add_ebatt_derivatives(
+    derivatives,
+    row,
+    column,
+    shape,
+    power,
+    time_step,
+    eta_product,
+    eta_prop,
+    eta_em,
+    sign,
+):
+    """Accumulate derivatives for one battery-energy coefficient."""
+
+    output_index = row * shape[1] + column
+    derivatives["output_power"][output_index, column] += sign * time_step / eta_product
+    derivatives["time"][output_index, column] -= sign * power / eta_product
+    derivatives["time"][output_index, column + 1] += sign * power / eta_product
+    derivatives["propulsive_efficiency"][output_index, 0] += (
+        -sign * power * time_step / (eta_prop ** 2 * eta_em)
+    )
+    derivatives["electric_motor_efficiency"][output_index, 0] += (
+        -sign * power * time_step / (eta_prop * eta_em ** 2)
+    )
+
+
+def add_objective_coefficients(
+    tableau,
+    derivatives,
+    row,
+    output_power,
+    time_step,
+    true_airspeed,
+    sfc,
+    fuel_specific_energy,
+    eta_prop,
+    eta_em,
+    objective_type,
+    includes_takeoff,
+):
+    """Fill FAST simplex objective row and derivatives."""
+
+    num_phi = output_power.size - 1
+    shape_cols = tableau.shape[1]
+    objective = str(objective_type)
+
+    for index in range(num_phi):
+        output_index = row * shape_cols + index
+        tas = true_airspeed[index]
+
+        if objective == "FuelBurn":
+            coefficient = -output_power[index] * sfc[index] * time_step[index] / tas
+            tableau[row, index] = coefficient
+            derivatives["output_power"][output_index, index] += (
+                -sfc[index] * time_step[index] / tas
+            )
+            derivatives["specific_fuel_consumption"][output_index, index] += (
+                -output_power[index] * time_step[index] / tas
+            )
+            derivatives["time"][output_index, index] += (
+                output_power[index] * sfc[index] / tas
+            )
+            derivatives["time"][output_index, index + 1] += (
+                -output_power[index] * sfc[index] / tas
+            )
+
+            if not (includes_takeoff and index == 0):
+                derivatives["true_airspeed"][output_index, index] += (
+                    output_power[index] * sfc[index] * time_step[index] / tas ** 2
+                )
+        elif objective == "Energy":
+            energy_factor = (
+                1.0 / (eta_prop * eta_em)
+                - sfc[index] * fuel_specific_energy / tas
+            )
+            coefficient = output_power[index] * time_step[index] * energy_factor
+            tableau[row, index] = coefficient
+            derivatives["output_power"][output_index, index] += (
+                time_step[index] * energy_factor
+            )
+            derivatives["time"][output_index, index] -= (
+                output_power[index] * energy_factor
+            )
+            derivatives["time"][output_index, index + 1] += (
+                output_power[index] * energy_factor
+            )
+            derivatives["specific_fuel_consumption"][output_index, index] += (
+                -output_power[index] * time_step[index] * fuel_specific_energy / tas
+            )
+            derivatives["fuel_specific_energy"][output_index, 0] += (
+                -output_power[index] * time_step[index] * sfc[index] / tas
+            )
+            derivatives["propulsive_efficiency"][output_index, 0] += (
+                -output_power[index] * time_step[index] / (eta_prop ** 2 * eta_em)
+            )
+            derivatives["electric_motor_efficiency"][output_index, 0] += (
+                -output_power[index] * time_step[index] / (eta_prop * eta_em ** 2)
+            )
+
+            if not (includes_takeoff and index == 0):
+                derivatives["true_airspeed"][output_index, index] += (
+                    output_power[index]
+                    * time_step[index]
+                    * sfc[index]
+                    * fuel_specific_energy
+                    / tas ** 2
+                )
+        else:
+            raise ValueError(
+                "OperationalSimplexTableau objective must be FuelBurn or Energy."
+            )
 
 
 def split_schedule_fill_values(

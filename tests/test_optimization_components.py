@@ -25,6 +25,7 @@ from fast_openmdao import (
     MeritFunction,
     OneBasedHistoryValues,
     OperationalObjective,
+    OperationalSimplexTableau,
     OperationalSplitConstraints,
     PowerManagementObjective,
     PowerLimitConstraints,
@@ -57,6 +58,7 @@ from fast_python.optimization import (
     sanitize_array,
     sanitize_gradient,
     sanitize_values,
+    simplex_setup,
     two_dimensional,
     zero_if_empty,
 )
@@ -239,6 +241,36 @@ def test_history_array_matches_fast_python():
         problem.get_val("selected_values"),
         history_array(history_values, indices),
     )
+
+
+def test_operational_simplex_tableau_matches_fast_python():
+    """Check FAST operational simplex tableau setup parity."""
+
+    for objective_type, includes_takeoff in (
+        ("FuelBurn", False),
+        ("Energy", True),
+    ):
+        case = make_operational_simplex_tableau_case(
+            objective_type,
+            includes_takeoff,
+        )
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "tableau",
+            OperationalSimplexTableau(
+                num_points=case["output_power"].size,
+                architecture=case["architecture"],
+                objective_type=objective_type,
+                includes_takeoff=includes_takeoff,
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+        set_operational_simplex_tableau_inputs(problem, case)
+        problem.run_model()
+
+        expected = simplex_setup(case["aircraft"], case["indices"])
+        assert np.allclose(problem.get_val("tableau"), expected)
 
 
 def test_split_schedule_fill_matches_fast_python():
@@ -787,6 +819,15 @@ def test_optimization_helpers_declare_analytic_partials():
             },
         ),
         (
+            "simplex",
+            OperationalSimplexTableau(
+                num_points=4,
+                objective_type="Energy",
+                includes_takeoff=True,
+            ),
+            operational_simplex_tableau_derivative_inputs(),
+        ),
+        (
             "split_fill",
             SplitScheduleFill(
                 num_rows=make_split_schedule_fill_case()["target"].shape[0],
@@ -1085,6 +1126,120 @@ def make_split_schedule_fill_case():
         "num_points": 4,
         "offset": 1,
     }
+
+
+def make_operational_simplex_tableau_case(objective_type, includes_takeoff):
+    """Return deterministic FAST aircraft data for simplex tableau setup."""
+
+    output_power = np.asarray([1000.0, 1200.0, 900.0, 800.0])
+    time = np.asarray([0.0, 10.0, 25.0, 45.0])
+    true_airspeed = np.asarray([70.0, 85.0, 95.0, 90.0])
+    sfc = np.asarray([0.5, 0.45, 0.4, 0.35])
+    architecture = "PHE"
+    segments = ["Takeoff", "Cruise"] if includes_takeoff else ["Cruise"]
+    case = {
+        "output_power": output_power,
+        "time": time,
+        "true_airspeed": true_airspeed,
+        "specific_fuel_consumption": sfc,
+        "fuel_specific_energy": 43.2e6,
+        "propulsive_efficiency": 0.82,
+        "electric_motor_efficiency": 0.91,
+        "design_power_split": 0.64,
+        "electric_motor_specific_power": 6200.0,
+        "electric_motor_weight": 140.0,
+        "battery_specific_energy": 745000.0,
+        "battery_weight": 860.0,
+        "architecture": architecture,
+        "indices": np.asarray([1, 2, 3, 4]),
+    }
+    case["aircraft"] = {
+        "Specs": {
+            "Power": {
+                "SpecEnergy": {
+                    "Fuel": case["fuel_specific_energy"],
+                    "Batt": case["battery_specific_energy"],
+                },
+                "Eta": {
+                    "EM": case["electric_motor_efficiency"],
+                },
+                "Phi": {
+                    "SLS": case["design_power_split"],
+                },
+                "P_W": {
+                    "EM": case["electric_motor_specific_power"],
+                },
+            },
+            "Propulsion": {
+                "Eta": {
+                    "Prop": case["propulsive_efficiency"],
+                },
+                "Arch": {
+                    "Type": architecture,
+                },
+            },
+            "Weight": {
+                "EM": case["electric_motor_weight"],
+                "Batt": case["battery_weight"],
+            },
+        },
+        "PowerOpt": {
+            "ObjFun": objective_type,
+            "Segments": segments,
+        },
+        "Mission": {
+            "History": {
+                "SI": {
+                    "Power": {
+                        "Out": output_power,
+                        "Av": np.ones(output_power.size),
+                    },
+                    "Propulsion": {
+                        "TSFC": sfc,
+                    },
+                    "Performance": {
+                        "Alt": np.zeros(output_power.size),
+                        "Time": time,
+                        "TAS": true_airspeed,
+                    },
+                },
+            },
+        },
+    }
+    return case
+
+
+def operational_simplex_tableau_derivative_inputs():
+    """Return OpenMDAO inputs for simplex tableau derivative checks."""
+
+    case = make_operational_simplex_tableau_case("Energy", True)
+    case["fuel_specific_energy"] = 1200.0
+    case["output_power"] = np.asarray([10.0, 12.0, 9.0, 8.0])
+    case["time"] = np.asarray([0.0, 1.0, 2.5, 4.5])
+    return {
+        "output_power": case["output_power"],
+        "time": case["time"],
+        "true_airspeed": case["true_airspeed"],
+        "specific_fuel_consumption": case["specific_fuel_consumption"],
+        "fuel_specific_energy": case["fuel_specific_energy"],
+        "propulsive_efficiency": case["propulsive_efficiency"],
+        "electric_motor_efficiency": case["electric_motor_efficiency"],
+        "design_power_split": case["design_power_split"],
+        "electric_motor_specific_power": case["electric_motor_specific_power"],
+        "electric_motor_weight": case["electric_motor_weight"],
+        "battery_specific_energy": case["battery_specific_energy"],
+        "battery_weight": case["battery_weight"],
+    }
+
+
+def set_operational_simplex_tableau_inputs(problem, case):
+    """Set OpenMDAO simplex tableau inputs from a fixture case."""
+
+    for name, value in operational_simplex_tableau_derivative_inputs().items():
+        if name in case:
+            problem.set_val(name, case[name])
+        else:
+            problem.set_val(name, value)
 
 
 def make_design_split_bound_aircraft(num_design_splits):

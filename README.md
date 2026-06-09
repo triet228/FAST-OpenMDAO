@@ -213,8 +213,9 @@ The public `fast_openmdao` package currently exports:
   `GaussianEliminationPivot`, `GradientBlock`, `GradientMatrix`,
   `ConcatenateMatrices`, `ConcatenateVectors`, `HessianUpdate`, `HistoryArray`,
   `MeritFunction`, `OneBasedHistoryValues`, `OperationalObjective`,
-  `OperationalSplitConstraints`, `PowerManagementObjective`,
-  `PowerLimitConstraints`, `SanitizedArray`, `SanitizedGradient`,
+  `OperationalSimplexTableau`, `OperationalSplitConstraints`,
+  `PowerManagementObjective`, `PowerLimitConstraints`, `SanitizedArray`,
+  `SanitizedGradient`,
   `SanitizedValues`, `SplitScheduleFill`, `TwoDimensionalArray`,
   `ZeroIfEmpty`
 - Projection: `BatterySpecificEnergyProjection`,
