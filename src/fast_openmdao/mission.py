@@ -153,6 +153,154 @@ class CruiseTimeTargetDistance(om.ExplicitComponent):
             partials["distance", name] = values[f"ddistance_d{name}"]
 
 
+class TakeoffSegmentKinematics(om.ExplicitComponent):
+    """Compute FAST simple EvalTakeoff ground-roll kinematics.
+
+    Inputs:
+        altitude: Segment altitude used for pointwise atmosphere in m.
+        target_altitude: Altitude used to convert the terminal speed in m.
+        target_velocity: Terminal speed value in the selected FAST velocity type.
+        mass: Segment mass in kg.
+
+    Outputs:
+        FAST simple-takeoff time, distance, TAS/EAS/Mach, density,
+        acceleration, zero climb quantities, and mechanical energy histories.
+
+    Assumptions:
+        This is the smooth one-minute EvalTakeoff kinematic kernel before
+        propulsion-history mutation. Power required is infinite in FAST for
+        this segment, so it is intentionally left to the orchestration layer.
+    """
+
+    def initialize(self):
+        self.options.declare("npoint", default=3)
+        self.options.declare("target_velocity_type", default="TAS")
+        self.options.declare("takeoff_time", default=60.0)
+        self.options.declare("gravity", default=9.81)
+
+    def setup(self):
+        npoint = self.options["npoint"]
+        self.add_input("altitude", val=0.0, units="m")
+        self.add_input("target_altitude", val=0.0, units="m")
+        self.add_input("target_velocity", val=100.0)
+        self.add_input("mass", val=1000.0, units="kg")
+        self.add_output("time", val=np.zeros(npoint), units="s")
+        self.add_output("distance", val=np.zeros(npoint), units="m")
+        self.add_output("true_airspeed", val=np.zeros(npoint), units="m/s")
+        self.add_output("equivalent_airspeed", val=np.zeros(npoint), units="m/s")
+        self.add_output("mach", val=np.zeros(npoint))
+        self.add_output("density", val=np.zeros(npoint), units="kg/m**3")
+        self.add_output("rate_of_climb", val=np.zeros(npoint), units="m/s")
+        self.add_output("acceleration", val=np.zeros(npoint), units="m/s**2")
+        self.add_output("flight_path_angle", val=np.zeros(npoint))
+        self.add_output("specific_excess_power", val=np.zeros(npoint), units="m/s")
+        self.add_output("potential_energy", val=np.zeros(npoint), units="J")
+        self.add_output("kinetic_energy", val=np.zeros(npoint), units="J")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = takeoff_segment_kinematics_values(
+            self.options["npoint"],
+            self.options["target_velocity_type"],
+            self.options["takeoff_time"],
+            self.options["gravity"],
+            inputs["altitude"][0],
+            inputs["target_altitude"][0],
+            inputs["target_velocity"][0],
+            inputs["mass"][0],
+        )
+
+        for output_name in takeoff_segment_kinematics_output_names():
+            outputs[output_name] = values[output_name]
+
+    def compute_partials(self, inputs, partials):
+        values = takeoff_segment_kinematics_values(
+            self.options["npoint"],
+            self.options["target_velocity_type"],
+            self.options["takeoff_time"],
+            self.options["gravity"],
+            inputs["altitude"][0],
+            inputs["target_altitude"][0],
+            inputs["target_velocity"][0],
+            inputs["mass"][0],
+        )
+
+        for output_name in takeoff_segment_kinematics_output_names():
+            for input_name in takeoff_segment_kinematics_input_names():
+                partials[output_name, input_name] = values[
+                    "d%s_d%s" % (output_name, input_name)
+                ]
+
+
+class LandingSegmentKinematicsPower(om.ExplicitComponent):
+    """Compute FAST EvalLanding kinematics and reverse-power demand.
+
+    Inputs:
+        initial_distance: Segment starting distance in m.
+        initial_time: Segment starting time in s.
+        altitude: Landing altitude in m.
+        landing_velocity: Initial speed value in the selected FAST velocity type.
+        mass: Segment mass in kg.
+        available_power: Total available power history in W.
+
+    Outputs:
+        FAST landing time, distance, TAS/EAS/Mach, density, acceleration,
+        reverse required power, zero climb quantities, and energy histories.
+    """
+
+    def initialize(self):
+        self.options.declare("velocity_type", default="TAS")
+        self.options.declare("landing_time", default=30.0)
+        self.options.declare("gravity", default=9.81)
+
+    def setup(self):
+        self.add_input("initial_distance", val=0.0, units="m")
+        self.add_input("initial_time", val=0.0, units="s")
+        self.add_input("altitude", val=0.0, units="m")
+        self.add_input("landing_velocity", val=100.0)
+        self.add_input("mass", val=1000.0, units="kg")
+        self.add_input("available_power", val=np.zeros(2), units="W")
+        self.add_output("time", val=np.zeros(2), units="s")
+        self.add_output("distance", val=np.zeros(2), units="m")
+        self.add_output("true_airspeed", val=np.zeros(2), units="m/s")
+        self.add_output("equivalent_airspeed", val=np.zeros(2), units="m/s")
+        self.add_output("mach", val=np.zeros(2))
+        self.add_output("density", val=np.zeros(2), units="kg/m**3")
+        self.add_output("rate_of_climb", val=np.zeros(2), units="m/s")
+        self.add_output("acceleration", val=np.zeros(2), units="m/s**2")
+        self.add_output("flight_path_angle", val=np.zeros(2))
+        self.add_output("required_power", val=np.zeros(2), units="W")
+        self.add_output("specific_excess_power", val=np.zeros(2), units="m/s")
+        self.add_output("potential_energy", val=np.zeros(2), units="J")
+        self.add_output("kinetic_energy", val=np.zeros(2), units="J")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = landing_segment_kinematics_power_values(
+            self.options["velocity_type"],
+            self.options["landing_time"],
+            self.options["gravity"],
+            landing_segment_kinematics_power_inputs(inputs),
+        )
+
+        for output_name in landing_segment_kinematics_power_output_names():
+            outputs[output_name] = values[output_name]
+
+    def compute_partials(self, inputs, partials):
+        values = landing_segment_kinematics_power_values(
+            self.options["velocity_type"],
+            self.options["landing_time"],
+            self.options["gravity"],
+            landing_segment_kinematics_power_inputs(inputs),
+        )
+
+        for output_name in landing_segment_kinematics_power_output_names():
+            for input_name in landing_segment_kinematics_power_input_names():
+                partials[output_name, input_name] = values[
+                    "d%s_d%s" % (output_name, input_name)
+                ]
+
+
 class CruiseBreguetEfficiencyTriplet(om.ExplicitComponent):
     """Compute FAST CruiseBRE eta1, eta2, and eta3 coefficients.
 
@@ -682,6 +830,335 @@ def flight_condition_values(altitude, disa, velocity_type, velocity):
         dsound_speed_daltitude,
         dsound_speed_ddisa,
     )
+    return values
+
+
+def takeoff_segment_kinematics_input_names():
+    """Return simple takeoff segment input names."""
+
+    return ("altitude", "target_altitude", "target_velocity", "mass")
+
+
+def takeoff_segment_kinematics_output_names():
+    """Return simple takeoff segment output names."""
+
+    return (
+        "time",
+        "distance",
+        "true_airspeed",
+        "equivalent_airspeed",
+        "mach",
+        "density",
+        "rate_of_climb",
+        "acceleration",
+        "flight_path_angle",
+        "specific_excess_power",
+        "potential_energy",
+        "kinetic_energy",
+    )
+
+
+def takeoff_segment_kinematics_values(
+    npoint,
+    target_velocity_type,
+    takeoff_time,
+    gravity,
+    altitude,
+    target_altitude,
+    target_velocity,
+    mass,
+):
+    """Return simple takeoff segment outputs and dense derivatives."""
+
+    target = flight_condition_values(
+        target_altitude,
+        0.0,
+        target_velocity_type,
+        target_velocity,
+    )
+    target_tas = target["tas"]
+    dtarget_tas_dtarget_altitude = target["dtas_daltitude"]
+    dtarget_tas_dtarget_velocity = target["dtas_dvelocity"]
+    fraction = np.linspace(0.0, 1.0, npoint)
+    time = np.linspace(0.0, takeoff_time, npoint)
+    true_airspeed = target_tas * fraction
+    dtrue_airspeed_dtarget_altitude = (
+        dtarget_tas_dtarget_altitude * fraction
+    )
+    dtrue_airspeed_dtarget_velocity = (
+        dtarget_tas_dtarget_velocity * fraction
+    )
+    distance = 0.5 * target_tas * takeoff_time * fraction ** 2
+    ddistance_dtarget_altitude = (
+        0.5 * dtarget_tas_dtarget_altitude * takeoff_time * fraction ** 2
+    )
+    ddistance_dtarget_velocity = (
+        0.5 * dtarget_tas_dtarget_velocity * takeoff_time * fraction ** 2
+    )
+    acceleration = np.ones(npoint) * target_tas / takeoff_time
+    dacceleration_dtarget_altitude = (
+        np.ones(npoint) * dtarget_tas_dtarget_altitude / takeoff_time
+    )
+    dacceleration_dtarget_velocity = (
+        np.ones(npoint) * dtarget_tas_dtarget_velocity / takeoff_time
+    )
+    equivalent_airspeed = np.zeros(npoint)
+    mach = np.zeros(npoint)
+    density = np.zeros(npoint)
+    deas_daltitude = np.zeros(npoint)
+    deas_dtarget_altitude = np.zeros(npoint)
+    deas_dtarget_velocity = np.zeros(npoint)
+    dmach_daltitude = np.zeros(npoint)
+    dmach_dtarget_altitude = np.zeros(npoint)
+    dmach_dtarget_velocity = np.zeros(npoint)
+    ddensity_daltitude = np.zeros(npoint)
+
+    for index, velocity in enumerate(true_airspeed):
+        condition = flight_condition_values(altitude, 0.0, "TAS", velocity)
+        equivalent_airspeed[index] = condition["eas"]
+        mach[index] = condition["mach"]
+        density[index] = condition["density"]
+        deas_daltitude[index] = condition["deas_daltitude"]
+        deas_dtarget_altitude[index] = (
+            condition["deas_dvelocity"] * dtrue_airspeed_dtarget_altitude[index]
+        )
+        deas_dtarget_velocity[index] = (
+            condition["deas_dvelocity"] * dtrue_airspeed_dtarget_velocity[index]
+        )
+        dmach_daltitude[index] = condition["dmach_daltitude"]
+        dmach_dtarget_altitude[index] = (
+            condition["dmach_dvelocity"] * dtrue_airspeed_dtarget_altitude[index]
+        )
+        dmach_dtarget_velocity[index] = (
+            condition["dmach_dvelocity"] * dtrue_airspeed_dtarget_velocity[index]
+        )
+        ddensity_daltitude[index] = condition["ddensity_daltitude"]
+
+    rate_of_climb = np.zeros(npoint)
+    flight_path_angle = np.zeros(npoint)
+    specific_excess_power = np.zeros(npoint)
+    potential_energy = np.ones(npoint) * mass * gravity * altitude
+    kinetic_energy = 0.5 * mass * true_airspeed ** 2
+    zeros = np.zeros(npoint)
+    values = {
+        "time": time,
+        "distance": distance,
+        "true_airspeed": true_airspeed,
+        "equivalent_airspeed": equivalent_airspeed,
+        "mach": mach,
+        "density": density,
+        "rate_of_climb": rate_of_climb,
+        "acceleration": acceleration,
+        "flight_path_angle": flight_path_angle,
+        "specific_excess_power": specific_excess_power,
+        "potential_energy": potential_energy,
+        "kinetic_energy": kinetic_energy,
+    }
+
+    for output_name in takeoff_segment_kinematics_output_names():
+        for input_name in takeoff_segment_kinematics_input_names():
+            values["d%s_d%s" % (output_name, input_name)] = np.zeros((npoint, 1))
+
+    values["ddistance_dtarget_altitude"][:, 0] = ddistance_dtarget_altitude
+    values["ddistance_dtarget_velocity"][:, 0] = ddistance_dtarget_velocity
+    values["dtrue_airspeed_dtarget_altitude"][:, 0] = (
+        dtrue_airspeed_dtarget_altitude
+    )
+    values["dtrue_airspeed_dtarget_velocity"][:, 0] = (
+        dtrue_airspeed_dtarget_velocity
+    )
+    values["dequivalent_airspeed_daltitude"][:, 0] = deas_daltitude
+    values["dequivalent_airspeed_dtarget_altitude"][:, 0] = deas_dtarget_altitude
+    values["dequivalent_airspeed_dtarget_velocity"][:, 0] = deas_dtarget_velocity
+    values["dmach_daltitude"][:, 0] = dmach_daltitude
+    values["dmach_dtarget_altitude"][:, 0] = dmach_dtarget_altitude
+    values["dmach_dtarget_velocity"][:, 0] = dmach_dtarget_velocity
+    values["ddensity_daltitude"][:, 0] = ddensity_daltitude
+    values["dacceleration_dtarget_altitude"][:, 0] = dacceleration_dtarget_altitude
+    values["dacceleration_dtarget_velocity"][:, 0] = dacceleration_dtarget_velocity
+    values["dpotential_energy_daltitude"][:, 0] = np.ones(npoint) * mass * gravity
+    values["dpotential_energy_dmass"][:, 0] = np.ones(npoint) * gravity * altitude
+    values["dkinetic_energy_dmass"][:, 0] = 0.5 * true_airspeed ** 2
+    values["dkinetic_energy_dtarget_altitude"][:, 0] = (
+        mass * true_airspeed * dtrue_airspeed_dtarget_altitude
+    )
+    values["dkinetic_energy_dtarget_velocity"][:, 0] = (
+        mass * true_airspeed * dtrue_airspeed_dtarget_velocity
+    )
+    values["dtime_daltitude"][:, 0] = zeros
+
+    return values
+
+
+def landing_segment_kinematics_power_input_names():
+    """Return landing segment kernel input names."""
+
+    return (
+        "initial_distance",
+        "initial_time",
+        "altitude",
+        "landing_velocity",
+        "mass",
+        "available_power",
+    )
+
+
+def landing_segment_kinematics_power_output_names():
+    """Return landing segment kernel output names."""
+
+    return (
+        "time",
+        "distance",
+        "true_airspeed",
+        "equivalent_airspeed",
+        "mach",
+        "density",
+        "rate_of_climb",
+        "acceleration",
+        "flight_path_angle",
+        "required_power",
+        "specific_excess_power",
+        "potential_energy",
+        "kinetic_energy",
+    )
+
+
+def landing_segment_kinematics_power_inputs(inputs):
+    """Return numeric inputs for the landing segment kernel."""
+
+    return {
+        "initial_distance": inputs["initial_distance"][0],
+        "initial_time": inputs["initial_time"][0],
+        "altitude": inputs["altitude"][0],
+        "landing_velocity": inputs["landing_velocity"][0],
+        "mass": inputs["mass"][0],
+        "available_power": np.asarray(inputs["available_power"], dtype=float).reshape(2),
+    }
+
+
+def landing_segment_kinematics_power_values(
+    velocity_type,
+    landing_time,
+    gravity,
+    data,
+):
+    """Return landing segment outputs and dense derivatives."""
+
+    initial_distance = data["initial_distance"]
+    initial_time = data["initial_time"]
+    altitude = data["altitude"]
+    landing_velocity = data["landing_velocity"]
+    mass = data["mass"]
+    available_power = data["available_power"]
+    converted = flight_condition_values(altitude, 0.0, velocity_type, landing_velocity)
+    landing_tas = converted["tas"]
+    dlanding_tas_daltitude = converted["dtas_daltitude"]
+    dlanding_tas_dlanding_velocity = converted["dtas_dvelocity"]
+    time = np.asarray([initial_time, initial_time + landing_time])
+    distance = np.asarray([initial_distance, initial_distance])
+    true_airspeed = np.asarray([landing_tas, 0.0])
+    dtrue_airspeed_daltitude = np.asarray([dlanding_tas_daltitude, 0.0])
+    dtrue_airspeed_dlanding_velocity = np.asarray(
+        [dlanding_tas_dlanding_velocity, 0.0]
+    )
+    acceleration = np.asarray([-landing_tas / landing_time, 0.0])
+    dacceleration_daltitude = np.asarray(
+        [-dlanding_tas_daltitude / landing_time, 0.0]
+    )
+    dacceleration_dlanding_velocity = np.asarray(
+        [-dlanding_tas_dlanding_velocity / landing_time, 0.0]
+    )
+    equivalent_airspeed = np.zeros(2)
+    mach = np.zeros(2)
+    density = np.zeros(2)
+    deas_daltitude = np.zeros(2)
+    deas_dlanding_velocity = np.zeros(2)
+    dmach_daltitude = np.zeros(2)
+    dmach_dlanding_velocity = np.zeros(2)
+    ddensity_daltitude = np.zeros(2)
+
+    for index, velocity in enumerate(true_airspeed):
+        condition = flight_condition_values(altitude, 0.0, "TAS", velocity)
+        equivalent_airspeed[index] = condition["eas"]
+        mach[index] = condition["mach"]
+        density[index] = condition["density"]
+        deas_daltitude[index] = (
+            condition["deas_daltitude"]
+            + condition["deas_dvelocity"] * dtrue_airspeed_daltitude[index]
+        )
+        deas_dlanding_velocity[index] = (
+            condition["deas_dvelocity"] * dtrue_airspeed_dlanding_velocity[index]
+        )
+        dmach_daltitude[index] = (
+            condition["dmach_daltitude"]
+            + condition["dmach_dvelocity"] * dtrue_airspeed_daltitude[index]
+        )
+        dmach_dlanding_velocity[index] = (
+            condition["dmach_dvelocity"] * dtrue_airspeed_dlanding_velocity[index]
+        )
+        ddensity_daltitude[index] = condition["ddensity_daltitude"]
+
+    rate_of_climb = np.zeros(2)
+    flight_path_angle = np.zeros(2)
+    required_power = 0.3 * available_power.copy()
+    required_power[-1] = 0.0
+    specific_excess_power = np.zeros(2)
+    potential_energy = np.ones(2) * mass * gravity * altitude
+    kinetic_energy = 0.5 * mass * true_airspeed ** 2
+    values = {
+        "time": time,
+        "distance": distance,
+        "true_airspeed": true_airspeed,
+        "equivalent_airspeed": equivalent_airspeed,
+        "mach": mach,
+        "density": density,
+        "rate_of_climb": rate_of_climb,
+        "acceleration": acceleration,
+        "flight_path_angle": flight_path_angle,
+        "required_power": required_power,
+        "specific_excess_power": specific_excess_power,
+        "potential_energy": potential_energy,
+        "kinetic_energy": kinetic_energy,
+    }
+    input_sizes = {
+        "initial_distance": 1,
+        "initial_time": 1,
+        "altitude": 1,
+        "landing_velocity": 1,
+        "mass": 1,
+        "available_power": 2,
+    }
+
+    for output_name in landing_segment_kinematics_power_output_names():
+        for input_name in landing_segment_kinematics_power_input_names():
+            values["d%s_d%s" % (output_name, input_name)] = np.zeros(
+                (2, input_sizes[input_name])
+            )
+
+    values["dtime_dinitial_time"][:, 0] = 1.0
+    values["ddistance_dinitial_distance"][:, 0] = 1.0
+    values["dtrue_airspeed_daltitude"][:, 0] = dtrue_airspeed_daltitude
+    values["dtrue_airspeed_dlanding_velocity"][:, 0] = (
+        dtrue_airspeed_dlanding_velocity
+    )
+    values["dequivalent_airspeed_daltitude"][:, 0] = deas_daltitude
+    values["dequivalent_airspeed_dlanding_velocity"][:, 0] = deas_dlanding_velocity
+    values["dmach_daltitude"][:, 0] = dmach_daltitude
+    values["dmach_dlanding_velocity"][:, 0] = dmach_dlanding_velocity
+    values["ddensity_daltitude"][:, 0] = ddensity_daltitude
+    values["dacceleration_daltitude"][:, 0] = dacceleration_daltitude
+    values["dacceleration_dlanding_velocity"][:, 0] = dacceleration_dlanding_velocity
+    values["drequired_power_davailable_power"][0, 0] = 0.3
+    values["dpotential_energy_daltitude"][:, 0] = np.ones(2) * mass * gravity
+    values["dpotential_energy_dmass"][:, 0] = np.ones(2) * gravity * altitude
+    values["dkinetic_energy_dmass"][:, 0] = 0.5 * true_airspeed ** 2
+    values["dkinetic_energy_daltitude"][:, 0] = (
+        mass * true_airspeed * dtrue_airspeed_daltitude
+    )
+    values["dkinetic_energy_dlanding_velocity"][:, 0] = (
+        mass * true_airspeed * dtrue_airspeed_dlanding_velocity
+    )
+
     return values
 
 
@@ -2567,14 +3044,18 @@ def speed_derivatives(
             - mach * dsound_speed_ddisa / sound_speed
         )
 
-    deas_daltitude = eas * (
-        dtas_daltitude / tas
-        + 0.5 * ddensity_daltitude / density
-    )
-    deas_ddisa = eas * (
-        dtas_ddisa / tas
-        + 0.5 * ddensity_ddisa / density
-    )
+    if tas == 0.0:
+        deas_daltitude = 0.0
+        deas_ddisa = 0.0
+    else:
+        deas_daltitude = eas * (
+            dtas_daltitude / tas
+            + 0.5 * ddensity_daltitude / density
+        )
+        deas_ddisa = eas * (
+            dtas_ddisa / tas
+            + 0.5 * ddensity_ddisa / density
+        )
 
     return {
         "eas": eas,

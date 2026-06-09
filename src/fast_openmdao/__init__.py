@@ -69,7 +69,9 @@ from fast_openmdao.mission import (
     CruiseTimeTargetDistance,
     FlightConditions,
     InitialEnergyRemaining,
+    LandingSegmentKinematicsPower,
     PrescribedRateSegmentKinematicsPower,
+    TakeoffSegmentKinematics,
 )
 from fast_openmdao.oew import NumericSum, TurbofanAirframeWeight, TurbopropAirframeWeight
 from fast_openmdao.optimization import (
@@ -165,6 +167,7 @@ __all__ = [
     "JetLandingFieldLengthConstraint",
     "JetTakeoffFieldLengthConstraint",
     "KPPProjection",
+    "LandingSegmentKinematicsPower",
     "LocalEfficiency",
     "LocalReynolds",
     "MassFlowParameter",
@@ -194,6 +197,7 @@ __all__ = [
     "StandardAtmosphere",
     "SquaredExponentialKernel",
     "ThermalPerfectGamma",
+    "TakeoffSegmentKinematics",
     "TotalPressure",
     "TotalTemperature",
     "TurbineStageFlow",
