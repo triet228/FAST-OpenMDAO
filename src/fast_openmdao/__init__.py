@@ -2,7 +2,12 @@
 
 """OpenMDAO integration layer for FAST-Python."""
 
-from fast_openmdao.analysis import ConvergenceError, SourceWeightVector, WeightSum
+from fast_openmdao.analysis import (
+    AnalysisWeightUpdate,
+    ConvergenceError,
+    SourceWeightVector,
+    WeightSum,
+)
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.battery import (
     AvailableCellCapacity,
@@ -134,6 +139,7 @@ __all__ = [
     "AirSpecificHeatVolume",
     "AirTemperatureFromHeatAdded",
     "AirTemperatureFromHeatRemoved",
+    "AnalysisWeightUpdate",
     "BatteryEnergyAvailable",
     "BatteryEnergyHistory",
     "BatteryChargeOCV",

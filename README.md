@@ -121,7 +121,8 @@ derivative-native FAST equation components:
 The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
-- Analysis: `ConvergenceError`, `SourceWeightVector`, `WeightSum`
+- Analysis: `AnalysisWeightUpdate`, `ConvergenceError`, `SourceWeightVector`,
+  `WeightSum`
 - Battery: `AvailableCellCapacity`, `BatteryChargeOCV`, `BatteryCyclingAging`,
   `BatteryCurrent`, `DetailedBatterySizing`, `BatteryPowerHistory`,
   `BatteryPowerStep`, `BatteryWeightFromEnergy`
