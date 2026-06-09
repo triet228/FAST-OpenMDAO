@@ -52,8 +52,8 @@ derivative-native FAST equation components:
   derivatives and optimization validation against FAST-Python residual roots.
 - Generic FAR 25 climb residual component with analytical partial derivatives.
 - Battery scalar primitives for effective cell capacity, selected current root,
-  and simple energy-based battery source weight with analytical partial
-  derivatives.
+  one-step equivalent-circuit power dynamics, and simple energy-based battery
+  source weight with analytical partial derivatives.
 - Analysis source-weight vectorization plus analysis and OEW summation helpers
   for scalar/vector weight values with analytical partial derivatives.
 - Optimization helper primitives for available electric motor power and
@@ -85,7 +85,8 @@ The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
 - Analysis: `ConvergenceError`, `SourceWeightVector`, `WeightSum`
-- Battery: `AvailableCellCapacity`, `BatteryCurrent`, `BatteryWeightFromEnergy`
+- Battery: `AvailableCellCapacity`, `BatteryCurrent`, `BatteryPowerStep`,
+  `BatteryWeightFromEnergy`
 - Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
   `FAR25EngineGradient`, `JetApproachConstraint`, `JetCruiseConstraint`,
   `JetLandingFieldLengthConstraint`, `JetTakeoffFieldLengthConstraint`,
@@ -316,26 +317,28 @@ FAST-Python residual functions.
    derivatives. Done.
 31. Convert simple off-design turbofan fuel-flow helper with analytical
    partial derivatives. Done.
-32. Convert optimization power-limit residual helper with analytical partial
-   derivatives. Done.
-33. Convert optimization operational split bound helper with analytical
+32. Convert one-step battery equivalent-circuit dynamics with analytical
    partial derivatives. Done.
-34. Convert optimization objective selector helpers with analytical partial
+33. Convert optimization power-limit residual helper with analytical partial
    derivatives. Done.
-35. Convert analysis source-weight vectorization helper with analytical partial
+34. Convert optimization operational split bound helper with analytical
+   partial derivatives. Done.
+35. Convert optimization objective selector helpers with analytical partial
    derivatives. Done.
-36. Convert thermally perfect gamma update helper with analytical partial
+36. Convert analysis source-weight vectorization helper with analytical partial
    derivatives. Done.
-37. Convert supplemental transmitter power helper with analytical partial
+37. Convert thermally perfect gamma update helper with analytical partial
    derivatives. Done.
-38. Convert propulsion power-flow propagation with analytical partial
+38. Convert supplemental transmitter power helper with analytical partial
    derivatives. Done.
-39. Convert engine thrust requirement selector with analytical partial
+39. Convert propulsion power-flow propagation with analytical partial
    derivatives. Done.
-40. Convert cable sizing weight helper with analytical partial derivatives.
+40. Convert engine thrust requirement selector with analytical partial
+   derivatives. Done.
+41. Convert cable sizing weight helper with analytical partial derivatives.
    Done.
-41. Add complex-step derivative checks where supported by FAST-Python internals.
-42. Build reusable groups for mission, propulsion, weights, and objective
+42. Add complex-step derivative checks where supported by FAST-Python internals.
+43. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

@@ -9,9 +9,16 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import AvailableCellCapacity, BatteryCurrent, BatteryWeightFromEnergy
+from fast_openmdao import (
+    AvailableCellCapacity,
+    BatteryCurrent,
+    BatteryPowerStep,
+    BatteryWeightFromEnergy,
+)
 from fast_python.battery import (
     available_cell_capacity,
+    charging,
+    discharging,
     resize_battery,
     solve_battery_current,
 )
@@ -89,6 +96,37 @@ def test_battery_weight_from_energy_matches_fast_python_resize_battery():
     )
 
 
+def test_battery_power_step_matches_fast_python_discharge_and_charge():
+    """Check one-step battery equivalent-circuit parity."""
+
+    aircraft = make_power_step_aircraft()
+
+    for is_discharge, requested_power, fast_function in [
+        (True, 1000.0, discharging),
+        (False, -500.0, charging),
+    ]:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "step",
+            BatteryPowerStep(is_discharge=is_discharge),
+            promotes=["*"],
+        )
+        problem.setup()
+        set_power_step_values(problem, requested_power)
+        problem.run_model()
+        expected = fast_function(aircraft, requested_power, 60.0, 80.0, 10, 100)
+
+        for output, expected_index in [
+            ("voltage", 0),
+            ("current", 1),
+            ("output_power", 2),
+            ("capacity", 3),
+            ("soc_end", 4),
+            ("c_rate", 5),
+        ]:
+            assert np.isclose(problem.get_val(output)[0], expected[expected_index][-1])
+
+
 def test_battery_primitives_declare_analytic_partials():
     """Check battery primitive derivatives against finite difference."""
 
@@ -129,6 +167,16 @@ def test_battery_primitives_declare_analytic_partials():
                 "requested_cell_power": -5.0,
             },
         ),
+        (
+            "power_step",
+            BatteryPowerStep(is_discharge=True),
+            power_step_values(1000.0),
+        ),
+        (
+            "charge_step",
+            BatteryPowerStep(is_discharge=False),
+            power_step_values(-500.0),
+        ),
     ]
 
     for name, component, values in cases:
@@ -148,7 +196,8 @@ def test_battery_primitives_declare_analytic_partials():
         )
 
         for partial_data in partials[name].values():
-            assert partial_data["abs error"].forward < 1.0e-6
+            tolerance = 1.0e-4 if "step" in name else 1.0e-6
+            assert partial_data["abs error"].forward < tolerance
 
 
 def make_battery_aircraft(cap_cell, state_of_health):
@@ -201,3 +250,44 @@ def make_resize_battery_aircraft(src_type, source_energy, specific_energy):
             "DetailedBatt": 0,
         },
     }
+
+
+def make_power_step_aircraft():
+    """Return minimal aircraft dictionary for FAST-Python battery dynamics."""
+
+    return {
+        "Specs": {
+            "Battery": {
+                "MaxExtVolCell": 4.2,
+                "IntResist": 0.01,
+                "ExpVol": 0.1,
+                "ExpCap": 1.0,
+                "CapCell": 2.4,
+            },
+        },
+    }
+
+
+def power_step_values(requested_power):
+    """Return OpenMDAO inputs for one battery power step."""
+
+    return {
+        "requested_power": requested_power,
+        "time": 60.0,
+        "soc_begin": 80.0,
+        "parallel_cells": 10.0,
+        "series_cells": 100.0,
+        "max_cell_voltage": 4.2,
+        "internal_resistance": 0.01,
+        "exponential_voltage": 0.1,
+        "exponential_capacity": 1.0,
+        "cap_cell": 2.4,
+        "state_of_health": 100.0,
+    }
+
+
+def set_power_step_values(problem, requested_power):
+    """Set scalar OpenMDAO battery power-step inputs."""
+
+    for variable, value in power_step_values(requested_power).items():
+        problem.set_val(variable, value)

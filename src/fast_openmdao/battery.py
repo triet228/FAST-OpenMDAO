@@ -119,6 +119,80 @@ class BatteryWeightFromEnergy(om.ExplicitComponent):
         ]
 
 
+class BatteryPowerStep(om.ExplicitComponent):
+    """Run one FAST battery equivalent-circuit discharge or charge interval."""
+
+    def initialize(self):
+        self.options.declare("is_discharge", default=True)
+        self.options.declare("analysis_type", default=0)
+        self.options.declare("degradation", default=0)
+
+    def setup(self):
+        self.add_input("requested_power", val=1000.0, units="W")
+        self.add_input("time", val=60.0, units="s")
+        self.add_input("soc_begin", val=80.0)
+        self.add_input("parallel_cells", val=10.0)
+        self.add_input("series_cells", val=100.0)
+        self.add_input("max_cell_voltage", val=4.2)
+        self.add_input("internal_resistance", val=0.01)
+        self.add_input("exponential_voltage", val=0.1)
+        self.add_input("exponential_capacity", val=1.0)
+        self.add_input("cap_cell", val=2.4)
+        self.add_input("state_of_health", val=100.0)
+        self.add_output("voltage", val=400.0, units="V")
+        self.add_output("current", val=2.5, units="A")
+        self.add_output("output_power", val=1000.0, units="W")
+        self.add_output("capacity", val=20.0)
+        self.add_output("soc_end", val=79.0)
+        self.add_output("c_rate", val=0.1)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = battery_power_step_values(
+            inputs["requested_power"][0],
+            inputs["time"][0],
+            inputs["soc_begin"][0],
+            inputs["parallel_cells"][0],
+            inputs["series_cells"][0],
+            inputs["max_cell_voltage"][0],
+            inputs["internal_resistance"][0],
+            inputs["exponential_voltage"][0],
+            inputs["exponential_capacity"][0],
+            inputs["cap_cell"][0],
+            inputs["state_of_health"][0],
+            self.options["is_discharge"],
+            self.options["analysis_type"],
+            self.options["degradation"],
+        )
+
+        for output in battery_power_step_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_power_step_values(
+            inputs["requested_power"][0],
+            inputs["time"][0],
+            inputs["soc_begin"][0],
+            inputs["parallel_cells"][0],
+            inputs["series_cells"][0],
+            inputs["max_cell_voltage"][0],
+            inputs["internal_resistance"][0],
+            inputs["exponential_voltage"][0],
+            inputs["exponential_capacity"][0],
+            inputs["cap_cell"][0],
+            inputs["state_of_health"][0],
+            self.options["is_discharge"],
+            self.options["analysis_type"],
+            self.options["degradation"],
+        )
+
+        for output in battery_power_step_output_names():
+            for variable in battery_power_step_input_names():
+                partials[output, variable] = values[
+                    "d%s_d%s" % (output, variable)
+                ]
+
+
 def available_cell_capacity_value(cap_cell, state_of_health, analysis_type, degradation):
     """Return FAST effective cell capacity scalar value."""
 
@@ -180,6 +254,248 @@ def battery_current_derivatives(
         "dcurrent_dcold_voltage": -current / denominator,
         "dcurrent_drequested_cell_power": 1.0 / denominator,
     }
+
+
+def battery_power_step_input_names():
+    """Return scalar input names for BatteryPowerStep derivatives."""
+
+    return (
+        "requested_power",
+        "time",
+        "soc_begin",
+        "parallel_cells",
+        "series_cells",
+        "max_cell_voltage",
+        "internal_resistance",
+        "exponential_voltage",
+        "exponential_capacity",
+        "cap_cell",
+        "state_of_health",
+    )
+
+
+def battery_power_step_output_names():
+    """Return scalar output names for BatteryPowerStep."""
+
+    return (
+        "voltage",
+        "current",
+        "output_power",
+        "capacity",
+        "soc_end",
+        "c_rate",
+    )
+
+
+def battery_power_step_values(
+    requested_power,
+    time,
+    soc_begin,
+    parallel_cells,
+    series_cells,
+    max_cell_voltage,
+    internal_resistance,
+    exponential_voltage,
+    exponential_capacity,
+    cap_cell,
+    state_of_health,
+    is_discharge,
+    analysis_type,
+    degradation,
+):
+    """Return one FAST battery equivalent-circuit step and derivatives."""
+
+    variables = battery_power_step_input_names()
+    derivatives = {}
+
+    def seed(name):
+        return {variable: 1.0 if variable == name else 0.0 for variable in variables}
+
+    def constant():
+        return {variable: 0.0 for variable in variables}
+
+    def combine(*terms):
+        result = constant()
+
+        for scale, derivative in terms:
+            for variable in variables:
+                result[variable] += scale * derivative[variable]
+
+        return result
+
+    drequested = seed("requested_power")
+    dtime = seed("time")
+    dsoc = seed("soc_begin")
+    dparallel = seed("parallel_cells")
+    dseries = seed("series_cells")
+    dmax_voltage = seed("max_cell_voltage")
+    dinternal_resistance = seed("internal_resistance")
+    dexp_voltage = seed("exponential_voltage")
+    dexp_capacity = seed("exponential_capacity")
+    dcap_cell = seed("cap_cell")
+    dstate_of_health = seed("state_of_health")
+
+    q_cell = available_cell_capacity_value(
+        cap_cell,
+        state_of_health,
+        analysis_type,
+        degradation,
+    )
+
+    if analysis_type < 0 and degradation == 1:
+        dq_cell = combine(
+            (state_of_health / 100.0, dcap_cell),
+            (cap_cell / 100.0, dstate_of_health),
+        )
+    else:
+        dq_cell = dcap_cell
+
+    ncell = series_cells * parallel_cells
+    dncell = combine((parallel_cells, dseries), (series_cells, dparallel))
+    requested_cell_power = requested_power / ncell
+    drequested_cell_power = combine(
+        (1.0 / ncell, drequested),
+        (-requested_power / ncell ** 2, dncell),
+    )
+    soc_fraction = soc_begin / 100.0
+    dsoc_fraction = combine((0.01, dsoc))
+    discharged_start = (1.0 - soc_fraction) * q_cell
+    ddischarged_start = combine(
+        (1.0 - soc_fraction, dq_cell),
+        (-q_cell, dsoc_fraction),
+    )
+    polarized_voltage = 0.0011
+    discharge_curve_slope = 0.29732
+
+    if is_discharge:
+        hot_voltage = -(polarized_voltage / soc_fraction + internal_resistance)
+        dhot_voltage = combine(
+            (polarized_voltage / soc_fraction ** 2, dsoc_fraction),
+            (-1.0, dinternal_resistance),
+        )
+    else:
+        charge_denominator = 1.1 - soc_fraction
+        hot_voltage = polarized_voltage / charge_denominator + internal_resistance
+        dhot_voltage = combine(
+            (polarized_voltage / charge_denominator ** 2, dsoc_fraction),
+            (1.0, dinternal_resistance),
+        )
+
+    exp_term = math.exp(-exponential_capacity * discharged_start)
+    cold_voltage = (
+        max_cell_voltage
+        + exponential_voltage * exp_term
+        - polarized_voltage * discharged_start / soc_fraction
+        - discharge_curve_slope * discharged_start
+    )
+    dcold_voltage = combine(
+        (1.0, dmax_voltage),
+        (exp_term, dexp_voltage),
+        (
+            -exponential_voltage * exp_term * discharged_start,
+            dexp_capacity,
+        ),
+        (
+            -exponential_voltage * exp_term * exponential_capacity
+            - polarized_voltage / soc_fraction
+            - discharge_curve_slope,
+            ddischarged_start,
+        ),
+        (
+            polarized_voltage * discharged_start / soc_fraction ** 2,
+            dsoc_fraction,
+        ),
+    )
+    cell_current = battery_current_value(
+        hot_voltage,
+        cold_voltage,
+        requested_cell_power,
+        is_discharge,
+    )
+    current_partials = battery_current_derivatives(
+        hot_voltage,
+        cold_voltage,
+        requested_cell_power,
+        is_discharge,
+    )
+    dcell_current = combine(
+        (current_partials["dcurrent_dhot_voltage"], dhot_voltage),
+        (current_partials["dcurrent_dcold_voltage"], dcold_voltage),
+        (
+            current_partials["dcurrent_drequested_cell_power"],
+            drequested_cell_power,
+        ),
+    )
+    current = cell_current * parallel_cells
+    dcurrent = combine((parallel_cells, dcell_current), (cell_current, dparallel))
+    cell_voltage = cold_voltage + hot_voltage * cell_current
+    dcell_voltage = combine(
+        (1.0, dcold_voltage),
+        (cell_current, dhot_voltage),
+        (hot_voltage, dcell_current),
+    )
+    voltage = cell_voltage * series_cells
+    dvoltage = combine((series_cells, dcell_voltage), (cell_voltage, dseries))
+    time_hours = time / 3600.0
+    dtime_hours = combine((1.0 / 3600.0, dtime))
+    discharged_capacity = cell_current * time_hours
+    ddischarged_capacity = combine(
+        (time_hours, dcell_current),
+        (cell_current, dtime_hours),
+    )
+    soc_end = soc_begin - 100.0 * discharged_capacity / q_cell
+    dsoc_end = combine(
+        (1.0, dsoc),
+        (-100.0 / q_cell, ddischarged_capacity),
+        (100.0 * discharged_capacity / q_cell ** 2, dq_cell),
+    )
+    capacity_unclipped = q_cell * soc_begin / 100.0 * parallel_cells
+    capacity_max = q_cell * parallel_cells
+
+    if capacity_unclipped <= capacity_max:
+        capacity = capacity_unclipped
+        dcapacity = combine(
+            (soc_begin * parallel_cells / 100.0, dq_cell),
+            (q_cell * parallel_cells / 100.0, dsoc),
+            (q_cell * soc_begin / 100.0, dparallel),
+        )
+    else:
+        capacity = capacity_max
+        dcapacity = combine((parallel_cells, dq_cell), (q_cell, dparallel))
+
+    output_power = voltage * current
+    doutput_power = combine((current, dvoltage), (voltage, dcurrent))
+    c_rate = current / (q_cell * parallel_cells)
+    dc_rate = combine(
+        (1.0 / (q_cell * parallel_cells), dcurrent),
+        (-current / (q_cell ** 2 * parallel_cells), dq_cell),
+        (-current / (q_cell * parallel_cells ** 2), dparallel),
+    )
+
+    values = {
+        "voltage": voltage,
+        "current": current,
+        "output_power": output_power,
+        "capacity": capacity,
+        "soc_end": soc_end,
+        "c_rate": c_rate,
+    }
+    output_derivatives = {
+        "voltage": dvoltage,
+        "current": dcurrent,
+        "output_power": doutput_power,
+        "capacity": dcapacity,
+        "soc_end": dsoc_end,
+        "c_rate": dc_rate,
+    }
+
+    for output in battery_power_step_output_names():
+        for variable in variables:
+            values["d%s_d%s" % (output, variable)] = output_derivatives[output][
+                variable
+            ]
+
+    return values
 
 
 def battery_weight_from_energy_values(

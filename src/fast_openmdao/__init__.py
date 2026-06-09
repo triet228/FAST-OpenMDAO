@@ -7,6 +7,7 @@ from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.battery import (
     AvailableCellCapacity,
     BatteryCurrent,
+    BatteryPowerStep,
     BatteryWeightFromEnergy,
 )
 from fast_openmdao.components import FastPythonComponent
@@ -91,6 +92,7 @@ __all__ = [
     "BatterySpecificEnergyProjection",
     "AvailableCellCapacity",
     "BatteryCurrent",
+    "BatteryPowerStep",
     "BatteryWeightFromEnergy",
     "ChokedArea",
     "CableWeightForSizing",
