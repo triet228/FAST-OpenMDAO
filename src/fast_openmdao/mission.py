@@ -301,6 +301,83 @@ class LandingSegmentKinematicsPower(om.ExplicitComponent):
                 ]
 
 
+class DetailedTakeoffSegmentKinematicsPower(om.ExplicitComponent):
+    """Compute FAST detailed EvalTakeoff ground-roll physics.
+
+    Inputs:
+        altitude: Segment ground-roll altitude in m.
+        target_altitude: Altitude used to convert terminal takeoff speed in m.
+        target_velocity: Terminal takeoff speed in the selected FAST speed type.
+        mass: Takeoff mass in kg.
+        wing_loading: Sea-level-static wing loading in kg/m**2.
+        available_power: Total available power history in W.
+
+    Outputs:
+        FAST detailed-takeoff velocity, density, lift-drag ratio, acceleration,
+        time, distance, drag power, specific excess power, and mechanical
+        energy histories.
+
+    Assumptions:
+        This ports the differentiable physics kernel before prop-analysis
+        mutation. The first thrust and required-power entries are infinite in
+        FAST bookkeeping; this component reports finite drag power instead.
+    """
+
+    def initialize(self):
+        self.options.declare("npoint", default=3)
+        self.options.declare("target_velocity_type", default="TAS")
+        self.options.declare("gravity", default=9.81)
+
+    def setup(self):
+        npoint = self.options["npoint"]
+        self.add_input("altitude", val=0.0, units="m")
+        self.add_input("target_altitude", val=0.0, units="m")
+        self.add_input("target_velocity", val=100.0)
+        self.add_input("mass", val=1000.0, units="kg")
+        self.add_input("wing_loading", val=100.0, units="kg/m**2")
+        self.add_input("available_power", val=np.ones(npoint), units="W")
+        self.add_output("time", val=np.zeros(npoint), units="s")
+        self.add_output("distance", val=np.zeros(npoint), units="m")
+        self.add_output("true_airspeed", val=np.zeros(npoint), units="m/s")
+        self.add_output("equivalent_airspeed", val=np.zeros(npoint), units="m/s")
+        self.add_output("mach", val=np.zeros(npoint))
+        self.add_output("density", val=np.zeros(npoint), units="kg/m**3")
+        self.add_output("lift_drag", val=np.zeros(npoint))
+        self.add_output("drag_power", val=np.zeros(npoint), units="W")
+        self.add_output("rate_of_climb", val=np.zeros(npoint), units="m/s")
+        self.add_output("acceleration", val=np.zeros(npoint), units="m/s**2")
+        self.add_output("flight_path_angle", val=np.zeros(npoint))
+        self.add_output("specific_excess_power", val=np.zeros(npoint), units="m/s")
+        self.add_output("potential_energy", val=np.zeros(npoint), units="J")
+        self.add_output("kinetic_energy", val=np.zeros(npoint), units="J")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = detailed_takeoff_segment_kinematics_power_values(
+            self.options["npoint"],
+            self.options["target_velocity_type"],
+            self.options["gravity"],
+            detailed_takeoff_segment_kinematics_power_inputs(inputs),
+        )
+
+        for output_name in detailed_takeoff_segment_kinematics_power_output_names():
+            outputs[output_name] = values[output_name]
+
+    def compute_partials(self, inputs, partials):
+        values = detailed_takeoff_segment_kinematics_power_values(
+            self.options["npoint"],
+            self.options["target_velocity_type"],
+            self.options["gravity"],
+            detailed_takeoff_segment_kinematics_power_inputs(inputs),
+        )
+
+        for output_name in detailed_takeoff_segment_kinematics_power_output_names():
+            for input_name in detailed_takeoff_segment_kinematics_power_input_names():
+                partials[output_name, input_name] = values[
+                    "d%s_d%s" % (output_name, input_name)
+                ]
+
+
 class CruiseBreguetEfficiencyTriplet(om.ExplicitComponent):
     """Compute FAST CruiseBRE eta1, eta2, and eta3 coefficients.
 
@@ -1160,6 +1237,347 @@ def landing_segment_kinematics_power_values(
     )
 
     return values
+
+
+def detailed_takeoff_segment_kinematics_power_input_names():
+    """Return detailed takeoff segment kernel input names."""
+
+    return (
+        "altitude",
+        "target_altitude",
+        "target_velocity",
+        "mass",
+        "wing_loading",
+        "available_power",
+    )
+
+
+def detailed_takeoff_segment_kinematics_power_output_names():
+    """Return detailed takeoff segment kernel output names."""
+
+    return (
+        "time",
+        "distance",
+        "true_airspeed",
+        "equivalent_airspeed",
+        "mach",
+        "density",
+        "lift_drag",
+        "drag_power",
+        "rate_of_climb",
+        "acceleration",
+        "flight_path_angle",
+        "specific_excess_power",
+        "potential_energy",
+        "kinetic_energy",
+    )
+
+
+def detailed_takeoff_segment_kinematics_power_inputs(inputs):
+    """Return numeric inputs for the detailed takeoff segment kernel."""
+
+    return {
+        "altitude": inputs["altitude"][0],
+        "target_altitude": inputs["target_altitude"][0],
+        "target_velocity": inputs["target_velocity"][0],
+        "mass": inputs["mass"][0],
+        "wing_loading": inputs["wing_loading"][0],
+        "available_power": np.asarray(inputs["available_power"], dtype=float).reshape(-1),
+    }
+
+
+def detailed_takeoff_segment_kinematics_power_values(
+    npoint,
+    target_velocity_type,
+    gravity,
+    data,
+):
+    """Return detailed takeoff segment outputs and dense derivatives."""
+
+    values = detailed_takeoff_segment_kinematics_power_seed_values(
+        npoint,
+        target_velocity_type,
+        gravity,
+        data,
+        zero_detailed_takeoff_segment_kinematics_power_seeds(npoint),
+    )
+    input_sizes = detailed_takeoff_segment_kinematics_power_input_sizes(npoint)
+
+    for output_name in detailed_takeoff_segment_kinematics_power_output_names():
+        for input_name in detailed_takeoff_segment_kinematics_power_input_names():
+            values["d%s_d%s" % (output_name, input_name)] = np.zeros(
+                (npoint, input_sizes[input_name])
+            )
+
+    for input_name in detailed_takeoff_segment_kinematics_power_input_names():
+        for column in range(input_sizes[input_name]):
+            seeds = zero_detailed_takeoff_segment_kinematics_power_seeds(npoint)
+            seeds[input_name].reshape(-1)[column] = 1.0
+            derivative_values = detailed_takeoff_segment_kinematics_power_seed_values(
+                npoint,
+                target_velocity_type,
+                gravity,
+                data,
+                seeds,
+            )
+
+            for output_name in detailed_takeoff_segment_kinematics_power_output_names():
+                values["d%s_d%s" % (output_name, input_name)][:, column] = (
+                    derivative_values["d%s" % output_name].reshape(-1)
+                )
+
+    return values
+
+
+def detailed_takeoff_segment_kinematics_power_input_sizes(npoint):
+    """Return input sizes for detailed takeoff derivative blocks."""
+
+    return {
+        "altitude": 1,
+        "target_altitude": 1,
+        "target_velocity": 1,
+        "mass": 1,
+        "wing_loading": 1,
+        "available_power": npoint,
+    }
+
+
+def zero_detailed_takeoff_segment_kinematics_power_seeds(npoint):
+    """Return zero derivative seeds for detailed takeoff."""
+
+    return {
+        "altitude": np.zeros(1),
+        "target_altitude": np.zeros(1),
+        "target_velocity": np.zeros(1),
+        "mass": np.zeros(1),
+        "wing_loading": np.zeros(1),
+        "available_power": np.zeros(npoint),
+    }
+
+
+def detailed_takeoff_segment_kinematics_power_seed_values(
+    npoint,
+    target_velocity_type,
+    gravity,
+    data,
+    seeds,
+):
+    """Return detailed takeoff values and one seeded derivative direction."""
+
+    altitude = data["altitude"]
+    target_altitude = data["target_altitude"]
+    target_velocity = data["target_velocity"]
+    mass = data["mass"]
+    wing_loading = data["wing_loading"]
+    available_power = data["available_power"]
+    daltitude = seeds["altitude"][0]
+    dtarget_altitude = seeds["target_altitude"][0]
+    dtarget_velocity = seeds["target_velocity"][0]
+    dmass = seeds["mass"][0]
+    dwing_loading = seeds["wing_loading"][0]
+    davailable_power = seeds["available_power"]
+    target = flight_condition_values(
+        target_altitude,
+        0.0,
+        target_velocity_type,
+        target_velocity,
+    )
+    terminal_speed = target["tas"]
+    dterminal_speed = (
+        target["dtas_daltitude"] * dtarget_altitude
+        + target["dtas_dvelocity"] * dtarget_velocity
+    )
+    takeoff_density = target["density"]
+    dtakeoff_density = target["ddensity_daltitude"] * dtarget_altitude
+    fraction = np.linspace(0.0, 1.0, npoint)
+    true_airspeed = terminal_speed * fraction
+    dtrue_airspeed = dterminal_speed * fraction
+    wing_area = mass / wing_loading
+    dwing_area = (
+        dmass * wing_loading
+        - mass * dwing_loading
+    ) / wing_loading ** 2
+    cl_denominator = takeoff_density * (terminal_speed / 1.1) ** 2 * wing_area
+    dcl_denominator = (
+        dtakeoff_density * (terminal_speed / 1.1) ** 2 * wing_area
+        + takeoff_density * 2.0 * terminal_speed * dterminal_speed / 1.1 ** 2 * wing_area
+        + takeoff_density * (terminal_speed / 1.1) ** 2 * dwing_area
+    )
+    cl_max = 2.0 * mass * gravity / cl_denominator
+    dcl_max = (
+        2.0 * gravity * dmass * cl_denominator
+        - 2.0 * mass * gravity * dcl_denominator
+    ) / cl_denominator ** 2
+    cd0 = 0.0017
+    k_uc = 3.16e-5
+    delta_cd0 = wing_loading * k_uc * mass ** -0.215
+    ddelta_cd0 = (
+        dwing_loading * k_uc * mass ** -0.215
+        - 0.215 * wing_loading * k_uc * mass ** -1.215 * dmass
+    )
+    k1 = 0.02
+    k3 = 1.0 / (np.pi * 0.9 * 10.0)
+    ground_effect = 0.6
+    induced_factor = k1 + ground_effect * k3
+    cd = cd0 + delta_cd0 + induced_factor * cl_max ** 2
+    dcd = ddelta_cd0 + 2.0 * induced_factor * cl_max * dcl_max
+    lift_drag_scalar = cl_max / cd
+    dlift_drag_scalar = (dcl_max * cd - cl_max * dcd) / cd ** 2
+    lift_drag = np.ones(npoint) * lift_drag_scalar
+    dlift_drag = np.ones(npoint) * dlift_drag_scalar
+    drag = np.zeros(npoint)
+    ddrag = np.zeros(npoint)
+    lift = np.zeros(npoint)
+    dlift = np.zeros(npoint)
+    friction = np.zeros(npoint)
+    dfriction = np.zeros(npoint)
+    acceleration = np.zeros(npoint)
+    dacceleration = np.zeros(npoint)
+    thrust = np.zeros(npoint)
+    dthrust = np.zeros(npoint)
+
+    for point in range(1, npoint):
+        velocity = true_airspeed[point]
+        dvelocity = dtrue_airspeed[point]
+        thrust[point] = available_power[point] / velocity
+        dthrust[point] = (
+            davailable_power[point] * velocity
+            - available_power[point] * dvelocity
+        ) / velocity ** 2
+        lift[point] = 0.5 * takeoff_density * velocity ** 2 * cl_max * wing_area
+        dlift[point] = 0.5 * (
+            dtakeoff_density * velocity ** 2 * cl_max * wing_area
+            + takeoff_density * 2.0 * velocity * dvelocity * cl_max * wing_area
+            + takeoff_density * velocity ** 2 * dcl_max * wing_area
+            + takeoff_density * velocity ** 2 * cl_max * dwing_area
+        )
+        friction[point] = 0.02 * (mass * gravity - lift[point])
+        dfriction[point] = 0.02 * (dmass * gravity - dlift[point])
+
+        if friction[point] < 0.0:
+            friction[point] = 0.0
+            dfriction[point] = 0.0
+
+        drag[point] = 0.5 * takeoff_density * velocity ** 2 * cd * wing_area
+        ddrag[point] = 0.5 * (
+            dtakeoff_density * velocity ** 2 * cd * wing_area
+            + takeoff_density * 2.0 * velocity * dvelocity * cd * wing_area
+            + takeoff_density * velocity ** 2 * dcd * wing_area
+            + takeoff_density * velocity ** 2 * cd * dwing_area
+        )
+        acceleration[point] = (
+            thrust[point] - drag[point] - friction[point]
+        ) / mass
+        dacceleration[point] = (
+            (dthrust[point] - ddrag[point] - dfriction[point]) * mass
+            - (thrust[point] - drag[point] - friction[point]) * dmass
+        ) / mass ** 2
+
+    time_step = np.zeros(npoint)
+    dtime_step = np.zeros(npoint)
+    distance_step = np.zeros(npoint)
+    ddistance_step = np.zeros(npoint)
+
+    for point in range(1, npoint):
+        speed_delta = true_airspeed[point] - true_airspeed[point - 1]
+        dspeed_delta = dtrue_airspeed[point] - dtrue_airspeed[point - 1]
+        speed_square_delta = (
+            true_airspeed[point] ** 2
+            - true_airspeed[point - 1] ** 2
+        )
+        dspeed_square_delta = (
+            2.0 * true_airspeed[point] * dtrue_airspeed[point]
+            - 2.0 * true_airspeed[point - 1] * dtrue_airspeed[point - 1]
+        )
+        time_step[point] = speed_delta / acceleration[point]
+        dtime_step[point] = (
+            dspeed_delta * acceleration[point]
+            - speed_delta * dacceleration[point]
+        ) / acceleration[point] ** 2
+        distance_step[point] = speed_square_delta / (2.0 * acceleration[point])
+        ddistance_step[point] = (
+            dspeed_square_delta * 2.0 * acceleration[point]
+            - speed_square_delta * 2.0 * dacceleration[point]
+        ) / (2.0 * acceleration[point]) ** 2
+
+    time = np.cumsum(time_step)
+    dtime = np.cumsum(dtime_step)
+    distance = np.cumsum(distance_step)
+    ddistance = np.cumsum(ddistance_step)
+    drag_power = drag * true_airspeed
+    ddrag_power = ddrag * true_airspeed + drag * dtrue_airspeed
+    specific_excess_power = (available_power - drag_power) / (mass * gravity)
+    dspecific_excess_power = (
+        (davailable_power - ddrag_power) * mass * gravity
+        - (available_power - drag_power) * dmass * gravity
+    ) / (mass * gravity) ** 2
+    equivalent_airspeed = np.zeros(npoint)
+    dequivalent_airspeed = np.zeros(npoint)
+    mach = np.zeros(npoint)
+    dmach = np.zeros(npoint)
+    density = np.zeros(npoint)
+    ddensity = np.zeros(npoint)
+
+    for point, velocity in enumerate(true_airspeed):
+        condition = flight_condition_values(altitude, 0.0, "TAS", velocity)
+        equivalent_airspeed[point] = condition["eas"]
+        mach[point] = condition["mach"]
+        density[point] = condition["density"]
+        dequivalent_airspeed[point] = (
+            condition["deas_daltitude"] * daltitude
+            + condition["deas_dvelocity"] * dtrue_airspeed[point]
+        )
+        dmach[point] = (
+            condition["dmach_daltitude"] * daltitude
+            + condition["dmach_dvelocity"] * dtrue_airspeed[point]
+        )
+        ddensity[point] = condition["ddensity_daltitude"] * daltitude
+
+    rate_of_climb = np.zeros(npoint)
+    drate_of_climb = np.zeros(npoint)
+    flight_path_angle = np.zeros(npoint)
+    dflight_path_angle = np.zeros(npoint)
+    potential_energy = np.ones(npoint) * mass * gravity * altitude
+    dpotential_energy = np.ones(npoint) * gravity * (
+        dmass * altitude
+        + mass * daltitude
+    )
+    kinetic_energy = 0.5 * mass * true_airspeed ** 2
+    dkinetic_energy = (
+        0.5 * dmass * true_airspeed ** 2
+        + mass * true_airspeed * dtrue_airspeed
+    )
+
+    return {
+        "time": time,
+        "distance": distance,
+        "true_airspeed": true_airspeed,
+        "equivalent_airspeed": equivalent_airspeed,
+        "mach": mach,
+        "density": density,
+        "lift_drag": lift_drag,
+        "drag_power": drag_power,
+        "rate_of_climb": rate_of_climb,
+        "acceleration": acceleration,
+        "flight_path_angle": flight_path_angle,
+        "specific_excess_power": specific_excess_power,
+        "potential_energy": potential_energy,
+        "kinetic_energy": kinetic_energy,
+        "dtime": dtime,
+        "ddistance": ddistance,
+        "dtrue_airspeed": dtrue_airspeed,
+        "dequivalent_airspeed": dequivalent_airspeed,
+        "dmach": dmach,
+        "ddensity": ddensity,
+        "dlift_drag": dlift_drag,
+        "ddrag_power": ddrag_power,
+        "drate_of_climb": drate_of_climb,
+        "dacceleration": dacceleration,
+        "dflight_path_angle": dflight_path_angle,
+        "dspecific_excess_power": dspecific_excess_power,
+        "dpotential_energy": dpotential_energy,
+        "dkinetic_energy": dkinetic_energy,
+    }
 
 
 def initial_energy_remaining_values(

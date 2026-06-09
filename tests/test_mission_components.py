@@ -18,6 +18,7 @@ from fast_openmdao import (
     CruiseBreguetSourceEnergy,
     CruiseSegmentKinematicsPower,
     CruiseTimeTargetDistance,
+    DetailedTakeoffSegmentKinematicsPower,
     FlightConditions,
     InitialEnergyRemaining,
     LandingSegmentKinematicsPower,
@@ -37,6 +38,7 @@ from fast_python.mission import (
     eval_climb,
     eval_cruise,
     eval_descent,
+    eval_detailed_takeoff,
     eval_landing,
     eval_takeoff,
     initial_energy_remaining,
@@ -218,6 +220,41 @@ def test_landing_segment_kinematics_power_matches_fast_python_eval_landing():
     assert np.allclose(problem.get_val("kinetic_energy", units="J"), history["Energy"]["KE"])
 
 
+def test_detailed_takeoff_segment_kinematics_power_matches_fast_python():
+    """Check detailed EvalTakeoff physics kernel parity with FAST-Python."""
+
+    result = eval_detailed_takeoff(init_mission_history(make_detailed_takeoff_aircraft()))
+    history = result["Mission"]["History"]["SI"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "takeoff",
+        DetailedTakeoffSegmentKinematicsPower(npoint=3, target_velocity_type="TAS"),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("altitude", 0.0, units="m")
+    problem.set_val("target_altitude", 0.0, units="m")
+    problem.set_val("target_velocity", 100.0)
+    problem.set_val("mass", 1000.0, units="kg")
+    problem.set_val("wing_loading", 100.0, units="kg/m**2")
+    problem.set_val("available_power", [1000000.0, 1000000.0, 1000000.0], units="W")
+    problem.run_model()
+
+    assert np.allclose(problem.get_val("time", units="s"), history["Performance"]["Time"])
+    assert np.allclose(problem.get_val("distance", units="m"), history["Performance"]["Dist"])
+    assert np.allclose(problem.get_val("true_airspeed", units="m/s"), history["Performance"]["TAS"])
+    assert np.allclose(problem.get_val("equivalent_airspeed", units="m/s"), history["Performance"]["EAS"])
+    assert np.allclose(problem.get_val("mach"), history["Performance"]["Mach"])
+    assert np.allclose(problem.get_val("density", units="kg/m**3"), history["Performance"]["Rho"])
+    assert np.allclose(problem.get_val("lift_drag"), history["Performance"]["LD"])
+    assert np.allclose(problem.get_val("rate_of_climb", units="m/s"), history["Performance"]["RC"])
+    assert np.allclose(problem.get_val("acceleration", units="m/s**2"), history["Performance"]["Acc"])
+    assert np.allclose(problem.get_val("flight_path_angle"), history["Performance"]["FPA"])
+    assert np.allclose(problem.get_val("specific_excess_power", units="m/s"), history["Performance"]["Ps"])
+    assert np.allclose(problem.get_val("potential_energy", units="J"), history["Energy"]["PE"])
+    assert np.allclose(problem.get_val("kinetic_energy", units="J"), history["Energy"]["KE"])
+
+
 def test_ground_segment_kernels_declare_analytic_partials():
     """Check takeoff and landing ground-segment derivatives."""
 
@@ -248,8 +285,30 @@ def test_ground_segment_kernels_declare_analytic_partials():
     landing.set_val("mass", 970.0, units="kg")
     landing.set_val("available_power", [1400.0, 900.0], units="W")
     landing.run_model()
+    detailed = om.Problem()
+    detailed.model.add_subsystem(
+        "detailed",
+        DetailedTakeoffSegmentKinematicsPower(npoint=4, target_velocity_type="EAS"),
+        promotes=["*"],
+    )
+    detailed.setup()
+    detailed.set_val("altitude", 90.0, units="m")
+    detailed.set_val("target_altitude", 110.0, units="m")
+    detailed.set_val("target_velocity", 88.0)
+    detailed.set_val("mass", 980.0, units="kg")
+    detailed.set_val("wing_loading", 95.0, units="kg/m**2")
+    detailed.set_val(
+        "available_power",
+        [1000000.0, 980000.0, 960000.0, 940000.0],
+        units="W",
+    )
+    detailed.run_model()
 
-    for problem, subsystem in ((takeoff, "takeoff"), (landing, "landing")):
+    for problem, subsystem in (
+        (takeoff, "takeoff"),
+        (landing, "landing"),
+        (detailed, "detailed"),
+    ):
         partials = problem.check_partials(
             out_stream=None,
             method="fd",
@@ -1020,6 +1079,19 @@ def make_landing_aircraft():
         "VelBeg": [100],
         "TypeBeg": ["TAS"],
     }
+    return aircraft
+
+
+def make_detailed_takeoff_aircraft():
+    """Return a minimal all-electric aircraft for detailed EvalTakeoff parity."""
+
+    aircraft = make_takeoff_aircraft()
+    aircraft["Specs"]["Aero"] = {
+        "W_S": {
+            "SLS": 100,
+        },
+    }
+    aircraft["Specs"]["Propulsion"]["SLSPower"] = [1000000]
     return aircraft
 
 
