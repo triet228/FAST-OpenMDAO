@@ -17,6 +17,7 @@ M_TO_FT = convert_length(1.0, "m", "ft")
 KG_M2_TO_LBM_FT2 = convert_mass(1.0, "kg", "lbm") / M_TO_FT ** 2
 N_M2_TO_LBF_FT2 = 9.81 * convert_force(1.0, "N", "lbf") / M_TO_FT ** 2
 RHO_SI_TO_ENGLISH = KG_TO_SLUG / M_TO_FT ** 3
+RHO_SL_ENGLISH = RHO_SL_STD * RHO_SI_TO_ENGLISH
 
 
 class JetApproachConstraint(om.ExplicitComponent):
@@ -594,6 +595,17 @@ class CruiseDynamicPressure(om.ExplicitComponent):
                 partials[output_name, input_name] = values[
                     f"d{output_name}_d{input_name}"
                 ]
+
+
+class SeaLevelDensityEnglish(om.ExplicitComponent):
+    """Expose FAST's sea-level density constant in slug/ft^3."""
+
+    def setup(self):
+        self.add_output("sea_level_density", val=RHO_SL_ENGLISH, units="slug/ft**3")
+
+    def compute(self, inputs, outputs):
+        _ = inputs
+        outputs["sea_level_density"] = RHO_SL_ENGLISH
 
 
 def ps_loss_sigmoid_value(ps_loss, a, b, c, d):

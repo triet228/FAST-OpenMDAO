@@ -43,6 +43,7 @@ from fast_openmdao.constraint import (
     JetTakeoffFieldLengthConstraint,
     OEIMultiplier,
     PsLossSigmoid,
+    SeaLevelDensityEnglish,
 )
 from fast_openmdao.cost import (
     BMSCostFraction,
@@ -341,6 +342,7 @@ __all__ = [
     "PropulsionTwoDimensionalArray",
     "PropulsionVector",
     "PsLossSigmoid",
+    "SeaLevelDensityEnglish",
     "RegressionInverseTerm",
     "RegressionNumericColumn",
     "RegressionNumericScalar",

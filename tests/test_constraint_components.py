@@ -22,6 +22,7 @@ from fast_openmdao import (
     JetTakeoffFieldLengthConstraint,
     OEIMultiplier,
     PsLossSigmoid,
+    SeaLevelDensityEnglish,
 )
 from fast_python.constraint import (
     cruise_dynamic_pressure,
@@ -40,6 +41,7 @@ from fast_python.constraint import (
     jet_lfl,
     jet_tofl,
     oei_multiplier,
+    sea_level_density_english,
     sigmoid,
 )
 
@@ -137,6 +139,24 @@ def test_cruise_dynamic_pressure_matches_fast_python():
     assert np.isclose(problem.get_val("dynamic_pressure")[0], expected[0])
     assert np.isclose(problem.get_val("density_ratio")[0], expected[1])
     assert np.isclose(problem.get_val("velocity", units="ft/s")[0], expected[2])
+
+
+def test_sea_level_density_english_matches_fast_python():
+    """Check sea-level English density parity with FAST-Python."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "density",
+        SeaLevelDensityEnglish(),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("sea_level_density", units="slug/ft**3")[0],
+        sea_level_density_english(),
+    )
 
 
 def test_jet_field_residual_components_match_fast_python():

@@ -24,6 +24,12 @@ SUPPORT_STATUSES = {
 COVERAGE_ALIASES = {
     "aea_architecture_matrices": {"AEACustomArchitecture"},
     "a_astar": {"FlowArea"},
+    "apply_scalar": {
+        "Gravity",
+        "StandardAtmosphere",
+        "UnitArrayConversion",
+        "UnitConversion",
+    },
     "as_2d": {"PropulsionTwoDimensionalArray", "RegressionTwoDimensionalArray"},
     "as_history_matrix": {"BatteryHistoryColumnMatrix"},
     "as_gradient_block": {"GradientBlock"},
@@ -228,6 +234,7 @@ COVERAGE_ALIASES = {
     "solve_battery_current": {"BatteryCurrent"},
     "set_aircraft_design_group": {"DatabaseDesignGroupPercent"},
     "set_split_history": {"MissionSplitHistory"},
+    "sea_level_density_english": {"SeaLevelDensityEnglish"},
     "sigmoid": {"PsLossSigmoid"},
     "square_exp_kernel": {"SquaredExponentialKernel"},
     "split_scalar": {"SplitScalar"},
