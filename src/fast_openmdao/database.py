@@ -92,6 +92,75 @@ class TurbopropCruiseLiftDragEstimate(om.ExplicitComponent):
         partials["lift_drag", "cruise_mach"] = values["dlift_drag_dcruise_mach"]
 
 
+class DatabaseWeightFractions(om.ExplicitComponent):
+    """Compute FAST database weight fractions and wing loading.
+
+    Inputs:
+        mtow: Maximum takeoff weight in kg.
+        oew: Operating empty weight in kg.
+        fuel_weight: Fuel weight in kg.
+        engine_dry_weight: Dry weight per engine in kg.
+        wing_area: Wing area in m**2.
+
+    Outputs:
+        airframe_weight: OEW minus installed engine dry weight in kg.
+        oew_mtow: OEW to MTOW ratio.
+        engine_fraction: Installed engine dry weight to MTOW ratio.
+        fuel_fraction: Fuel weight to MTOW ratio.
+        wing_loading: MTOW divided by wing area in kg/m**2.
+
+    Assumptions:
+        ``num_engines`` is discrete database metadata and is therefore an
+        option. These equations appear in FAST ``CalcFanVals`` and
+        ``CalcPropVals`` preprocessing.
+    """
+
+    def initialize(self):
+        self.options.declare("num_engines", default=1)
+
+    def setup(self):
+        self.add_input("mtow", val=10000.0, units="kg")
+        self.add_input("oew", val=6000.0, units="kg")
+        self.add_input("fuel_weight", val=2000.0, units="kg")
+        self.add_input("engine_dry_weight", val=500.0, units="kg")
+        self.add_input("wing_area", val=50.0, units="m**2")
+        self.add_output("airframe_weight", val=5000.0, units="kg")
+        self.add_output("oew_mtow", val=0.6)
+        self.add_output("engine_fraction", val=0.05)
+        self.add_output("fuel_fraction", val=0.2)
+        self.add_output("wing_loading", val=200.0, units="kg/m**2")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = database_weight_fraction_values(
+            inputs["mtow"][0],
+            inputs["oew"][0],
+            inputs["fuel_weight"][0],
+            inputs["engine_dry_weight"][0],
+            inputs["wing_area"][0],
+            self.options["num_engines"],
+        )
+
+        for name in database_weight_fraction_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = database_weight_fraction_values(
+            inputs["mtow"][0],
+            inputs["oew"][0],
+            inputs["fuel_weight"][0],
+            inputs["engine_dry_weight"][0],
+            inputs["wing_area"][0],
+            self.options["num_engines"],
+        )
+
+        for output_name in database_weight_fraction_output_names():
+            for input_name in database_weight_fraction_input_names():
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
 def mac_lift_drag_values(aspect_ratio, reynolds):
     """Return FAST MAC L/D estimate and analytical derivatives."""
 
@@ -129,3 +198,69 @@ def turboprop_cruise_lift_drag_values(mtow, cruise_power, cruise_mach, temperatu
         "dlift_drag_dcruise_power": -lift_drag / cruise_power,
         "dlift_drag_dcruise_mach": lift_drag / cruise_mach,
     }
+
+
+def database_weight_fraction_input_names():
+    """Return database weight-fraction component input names."""
+
+    return [
+        "mtow",
+        "oew",
+        "fuel_weight",
+        "engine_dry_weight",
+        "wing_area",
+    ]
+
+
+def database_weight_fraction_output_names():
+    """Return database weight-fraction component output names."""
+
+    return [
+        "airframe_weight",
+        "oew_mtow",
+        "engine_fraction",
+        "fuel_fraction",
+        "wing_loading",
+    ]
+
+
+def database_weight_fraction_values(
+    mtow,
+    oew,
+    fuel_weight,
+    engine_dry_weight,
+    wing_area,
+    num_engines,
+):
+    """Return FAST database weight-derived values and derivatives."""
+
+    mtow = float(mtow)
+    oew = float(oew)
+    fuel_weight = float(fuel_weight)
+    engine_dry_weight = float(engine_dry_weight)
+    wing_area = float(wing_area)
+    num_engines = float(num_engines)
+    installed_engine_weight = engine_dry_weight * num_engines
+    values = {
+        "airframe_weight": oew - installed_engine_weight,
+        "oew_mtow": oew / mtow,
+        "engine_fraction": installed_engine_weight / mtow,
+        "fuel_fraction": fuel_weight / mtow,
+        "wing_loading": mtow / wing_area,
+    }
+
+    for output_name in database_weight_fraction_output_names():
+        for input_name in database_weight_fraction_input_names():
+            values[f"d{output_name}_d{input_name}"] = 0.0
+
+    values["dairframe_weight_doew"] = 1.0
+    values["dairframe_weight_dengine_dry_weight"] = -num_engines
+    values["doew_mtow_doew"] = 1.0 / mtow
+    values["doew_mtow_dmtow"] = -oew / mtow ** 2
+    values["dengine_fraction_dengine_dry_weight"] = num_engines / mtow
+    values["dengine_fraction_dmtow"] = -installed_engine_weight / mtow ** 2
+    values["dfuel_fraction_dfuel_weight"] = 1.0 / mtow
+    values["dfuel_fraction_dmtow"] = -fuel_weight / mtow ** 2
+    values["dwing_loading_dmtow"] = 1.0 / wing_area
+    values["dwing_loading_dwing_area"] = -mtow / wing_area ** 2
+    return values

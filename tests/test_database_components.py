@@ -9,7 +9,11 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import MacLiftDragEstimate, TurbopropCruiseLiftDragEstimate
+from fast_openmdao import (
+    DatabaseWeightFractions,
+    MacLiftDragEstimate,
+    TurbopropCruiseLiftDragEstimate,
+)
 from fast_python.atmosphere import standard_atmosphere
 from fast_python.database import calc_prop_vals, mac_ld
 
@@ -110,6 +114,87 @@ def test_turboprop_cruise_lift_drag_estimate_declares_analytic_partials():
             partial_data["abs error"].forward < 1.0e-6
             or partial_data["rel error"].forward < 1.0e-6
         )
+
+
+def test_database_weight_fractions_match_fast_python_calc_prop_vals():
+    """Check FAST database weight-derived value parity."""
+
+    plane = make_prop_plane()
+    expected = calc_prop_vals(plane, "Vals")["Specs"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "weights",
+        DatabaseWeightFractions(
+            num_engines=plane["Specs"]["Propulsion"]["NumEngines"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_database_weight_fraction_values(problem, plane)
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("airframe_weight", units="kg")[0],
+        expected["Weight"]["Airframe"],
+    )
+    assert np.isclose(problem.get_val("oew_mtow")[0], expected["Weight"]["OEW_MTOW"])
+    assert np.isclose(
+        problem.get_val("engine_fraction")[0],
+        expected["Weight"]["EngineFrac"],
+    )
+    assert np.isclose(
+        problem.get_val("fuel_fraction")[0],
+        expected["Weight"]["FuelFrac"],
+    )
+    assert np.isclose(
+        problem.get_val("wing_loading", units="kg/m**2")[0],
+        expected["Aero"]["W_S"]["SLS"],
+    )
+
+
+def test_database_weight_fractions_declares_analytic_partials():
+    """Check database weight-fraction derivatives against finite difference."""
+
+    plane = make_prop_plane()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "weights",
+        DatabaseWeightFractions(
+            num_engines=plane["Specs"]["Propulsion"]["NumEngines"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_database_weight_fraction_values(problem, plane)
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-4,
+    )
+
+    for partial_data in partials["weights"].values():
+        assert (
+            partial_data["abs error"].forward < 1.0e-6
+            or partial_data["rel error"].forward < 1.0e-6
+        )
+
+
+def set_database_weight_fraction_values(problem, plane):
+    """Set OpenMDAO inputs from the shared turboprop database fixture."""
+
+    specs = plane["Specs"]
+    problem.set_val("mtow", specs["Weight"]["MTOW"], units="kg")
+    problem.set_val("oew", specs["Weight"]["OEW"], units="kg")
+    problem.set_val("fuel_weight", specs["Weight"]["Fuel"], units="kg")
+    problem.set_val(
+        "engine_dry_weight",
+        specs["Propulsion"]["Engine"]["DryWeight"],
+        units="kg",
+    )
+    problem.set_val("wing_area", specs["Aero"]["S"], units="m**2")
 
 
 def make_prop_plane():

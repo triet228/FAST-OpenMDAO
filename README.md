@@ -103,6 +103,8 @@ derivative-native FAST equation components:
   helpers with analytical partial derivatives.
 - Database-derived MAC and turboprop cruise lift-to-drag estimates with
   analytical partial derivatives.
+- Database-derived airframe weight, weight fractions, and wing loading with
+  analytical partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
   design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
@@ -129,7 +131,8 @@ The public `fast_openmdao` package currently exports:
   `JetLandingFieldLengthConstraint`, `JetTakeoffFieldLengthConstraint`,
   `OEIMultiplier`, `PsLossSigmoid`
 - Cost: `BatteryReplacementCost`
-- Database: `MacLiftDragEstimate`, `TurbopropCruiseLiftDragEstimate`
+- Database: `DatabaseWeightFractions`, `MacLiftDragEstimate`,
+  `TurbopropCruiseLiftDragEstimate`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
   `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FlowArea`,
