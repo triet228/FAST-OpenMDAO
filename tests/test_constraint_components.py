@@ -15,6 +15,7 @@ from fast_openmdao import (
     FAR25EngineGradient,
     JetAEOClimbConstraint,
     JetApproachConstraint,
+    JetCeilingConstraint,
     JetCruiseConstraint,
     JetFAR25NamedClimbConstraint,
     JetLandingFieldLengthConstraint,
@@ -33,6 +34,7 @@ from fast_python.constraint import (
     jet25_121c,
     jet25_121d,
     jet_aeo_climb,
+    jet_ceil,
     jet_crs,
     jet_div,
     jet_lfl,
@@ -258,6 +260,27 @@ def test_jet_cruise_residual_components_match_fast_python():
         )
 
 
+def test_jet_ceiling_component_matches_fast_python():
+    """Check service-ceiling residual parity."""
+
+    aircraft = make_full_constraint_aircraft()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "constraint",
+        make_ceiling_component(aircraft),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("wing_loading", 400.0, units="kg/m**2")
+    problem.set_val("thrust_loading", 0.3)
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("ceiling_residual")[0],
+        jet_ceil(400.0, 0.3, aircraft),
+    )
+
+
 def test_far25_climb_component_matches_fast_python_jet25_111():
     """Check shared FAR 25 climb residual parity through Jet25_111."""
 
@@ -394,6 +417,11 @@ def test_constraint_primitives_declare_analytic_partials():
                 lapse_exp=0.6,
                 devries_exp=0.1,
             ),
+            {"wing_loading": 400.0, "thrust_loading": 0.3},
+        ),
+        (
+            "ceiling",
+            make_ceiling_component(make_full_constraint_aircraft()),
             {"wing_loading": 400.0, "thrust_loading": 0.3},
         ),
         (
@@ -629,6 +657,23 @@ def make_aeo_climb_component(aircraft):
         constraint_type=aircraft["Settings"]["ConstraintType"],
         num_engines=specs["Propulsion"]["NumEngines"],
         ps_loss=performance["PsLoss"],
+    )
+
+
+def make_ceiling_component(aircraft):
+    """Return a JetCeiling OpenMDAO component from FAST aircraft fields."""
+
+    specs = aircraft["Specs"]
+    performance = specs["Performance"]
+    aero = specs["Aero"]
+    return JetCeilingConstraint(
+        aircraft_class=specs["TLAR"]["Class"],
+        req_type=specs["TLAR"]["ReqType"],
+        cd0=aero["CD0"]["Crs"],
+        aspect_ratio=aero["AR"],
+        oswald=aero["e"]["Crs"],
+        altitude=performance["Alts"]["Srv"],
+        mach=performance["Vels"]["Crs"],
     )
 
 

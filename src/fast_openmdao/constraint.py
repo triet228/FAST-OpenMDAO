@@ -181,6 +181,57 @@ class JetCruiseConstraint(om.ExplicitComponent):
         ]
 
 
+class JetCeilingConstraint(om.ExplicitComponent):
+    """Compute FAST service-ceiling constraint residual."""
+
+    def initialize(self):
+        self.options.declare("aircraft_class", default="Turbofan")
+        self.options.declare("req_type", default=1)
+        self.options.declare("cd0", default=0.02)
+        self.options.declare("aspect_ratio", default=9.0)
+        self.options.declare("oswald", default=0.8)
+        self.options.declare("altitude", default=11000.0)
+        self.options.declare("mach", default=0.78)
+
+    def setup(self):
+        self.add_input("wing_loading", val=400.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_output("ceiling_residual", val=0.0)
+        self.declare_partials(of="ceiling_residual", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["ceiling_residual"] = jet_ceiling_residual(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            self.options["cd0"],
+            self.options["aspect_ratio"],
+            self.options["oswald"],
+            self.options["altitude"],
+            self.options["mach"],
+        )
+
+    def compute_partials(self, inputs, partials):
+        derivatives = jet_ceiling_derivatives(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            self.options["cd0"],
+            self.options["aspect_ratio"],
+            self.options["oswald"],
+            self.options["altitude"],
+            self.options["mach"],
+        )
+        partials["ceiling_residual", "wing_loading"] = derivatives[
+            "dresidual_dwing_loading"
+        ]
+        partials["ceiling_residual", "thrust_loading"] = derivatives[
+            "dresidual_dthrust_loading"
+        ]
+
+
 class FAR25ClimbConstraint(om.ExplicitComponent):
     """Compute FAST shared FAR 25 climb residual."""
 
@@ -906,6 +957,109 @@ def jet_cruise_derivatives(
         "dresidual_dwing_loading": dbase_dwing_loading / scale,
         "dresidual_dthrust_loading": -1.0,
     }
+
+
+def jet_ceiling_residual(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    req_type,
+    cd0,
+    aspect_ratio,
+    oswald,
+    altitude,
+    mach,
+):
+    """Return FAST JetCeil residual for one scalar design point."""
+
+    q, rho_ratio, velocity = ceiling_dynamic_quantities(altitude, mach)
+    gradient = 0.001
+
+    if req_type == 0:
+        residual = 2.0 * math.sqrt(cd0 / math.pi / oswald / aspect_ratio)
+        residual += gradient
+        return residual / rho_ratio ** 0.6 - thrust_loading
+
+    if req_type == 1:
+        converted_wing_loading = wing_loading * N_M2_TO_LBF_FT2
+        effective_thrust_loading = thrust_loading
+
+        if aircraft_class.lower() in ("turboprop", "piston"):
+            velocity_mps = convert_velocity(velocity, "ft/s", "m/s")
+            effective_thrust_loading = 1.0 / (velocity_mps * thrust_loading)
+
+        residual = cruise_drag_residual_base(
+            converted_wing_loading,
+            q,
+            cd0,
+            aspect_ratio,
+            oswald,
+        )
+        return (residual + gradient) / rho_ratio ** 0.6 - effective_thrust_loading
+
+    raise ValueError("JetCeil ReqType must be 0 or 1.")
+
+
+def jet_ceiling_derivatives(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    req_type,
+    cd0,
+    aspect_ratio,
+    oswald,
+    altitude,
+    mach,
+):
+    """Return scalar FAST JetCeil derivatives."""
+
+    q, rho_ratio, velocity = ceiling_dynamic_quantities(altitude, mach)
+
+    if req_type == 0:
+        return {
+            "dresidual_dwing_loading": 0.0,
+            "dresidual_dthrust_loading": -1.0,
+        }
+
+    if req_type == 1:
+        converted_wing_loading = wing_loading * N_M2_TO_LBF_FT2
+        dbase_dwing_loading = (
+            cruise_drag_residual_base_derivative(
+                converted_wing_loading,
+                q,
+                cd0,
+                aspect_ratio,
+                oswald,
+            )
+            * N_M2_TO_LBF_FT2
+        )
+        dresidual_dthrust_loading = -1.0
+
+        if aircraft_class.lower() in ("turboprop", "piston"):
+            velocity_mps = convert_velocity(velocity, "ft/s", "m/s")
+            dresidual_dthrust_loading = 1.0 / (
+                velocity_mps * thrust_loading ** 2
+            )
+
+        return {
+            "dresidual_dwing_loading": dbase_dwing_loading / rho_ratio ** 0.6,
+            "dresidual_dthrust_loading": dresidual_dthrust_loading,
+        }
+
+    raise ValueError("JetCeil ReqType must be 0 or 1.")
+
+
+def ceiling_dynamic_quantities(altitude, mach):
+    """Return FAST JetCeil q, density ratio, and velocity in English units."""
+
+    sea_level = atmosphere_layer(0.0)
+    service = atmosphere_layer(altitude)
+    sound_speed = math.sqrt(1.4 * 287.0 * service["temperature"])
+    velocity = convert_velocity(sound_speed * mach, "m/s", "ft/s")
+    rho_sls = sea_level["density"] * RHO_SI_TO_ENGLISH
+    rho_ratio = service["density"] / sea_level["density"]
+    q = 0.5 * rho_sls * velocity ** 2
+    return q, rho_ratio, velocity
 
 
 def jet_aeo_climb_residual(
