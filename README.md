@@ -49,9 +49,10 @@ derivative-native FAST equation components:
 - Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
   engine-gradient selection, and cruise dynamic pressure with analytical
   partial derivatives.
-- Constraint residual components for approach speed, takeoff field length, and
-  landing field length plus cruise/diversion with analytical partial
-  derivatives and optimization validation against FAST-Python residual roots.
+- Constraint residual components for approach speed, takeoff field length,
+  landing field length, all-engines-operative climb, and cruise/diversion with
+  analytical partial derivatives and optimization validation against
+  FAST-Python residual roots.
 - Generic and named FAR 25 climb residual components with analytical partial
   derivatives.
 - Battery scalar primitives for effective cell capacity, selected current root,
@@ -91,9 +92,10 @@ The public `fast_openmdao` package currently exports:
 - Battery: `AvailableCellCapacity`, `BatteryCurrent`, `BatteryPowerStep`,
   `BatteryWeightFromEnergy`
 - Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
-  `FAR25EngineGradient`, `JetApproachConstraint`, `JetCruiseConstraint`,
-  `JetFAR25NamedClimbConstraint`, `JetLandingFieldLengthConstraint`,
-  `JetTakeoffFieldLengthConstraint`, `OEIMultiplier`, `PsLossSigmoid`
+  `FAR25EngineGradient`, `JetAEOClimbConstraint`, `JetApproachConstraint`,
+  `JetCruiseConstraint`, `JetFAR25NamedClimbConstraint`,
+  `JetLandingFieldLengthConstraint`, `JetTakeoffFieldLengthConstraint`,
+  `OEIMultiplier`, `PsLossSigmoid`
 - Cost: `BatteryReplacementCost`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `ChokedArea`,
@@ -327,26 +329,28 @@ FAST-Python residual functions.
    derivatives. Done.
 34. Convert named FAR 25 climb wrappers with analytical partial derivatives.
    Done.
-35. Convert optimization power-limit residual helper with analytical partial
+35. Convert all-engines-operative climb residual with analytical partial
    derivatives. Done.
-36. Convert optimization operational split bound helper with analytical
+36. Convert optimization power-limit residual helper with analytical partial
+   derivatives. Done.
+37. Convert optimization operational split bound helper with analytical
    partial derivatives. Done.
-37. Convert optimization objective selector helpers with analytical partial
+38. Convert optimization objective selector helpers with analytical partial
    derivatives. Done.
-38. Convert analysis source-weight vectorization helper with analytical partial
+39. Convert analysis source-weight vectorization helper with analytical partial
    derivatives. Done.
-39. Convert thermally perfect gamma update helper with analytical partial
+40. Convert thermally perfect gamma update helper with analytical partial
    derivatives. Done.
-40. Convert supplemental transmitter power helper with analytical partial
+41. Convert supplemental transmitter power helper with analytical partial
    derivatives. Done.
-41. Convert propulsion power-flow propagation with analytical partial
+42. Convert propulsion power-flow propagation with analytical partial
    derivatives. Done.
-42. Convert engine thrust requirement selector with analytical partial
+43. Convert engine thrust requirement selector with analytical partial
    derivatives. Done.
-43. Convert cable sizing weight helper with analytical partial derivatives.
+44. Convert cable sizing weight helper with analytical partial derivatives.
    Done.
-44. Add complex-step derivative checks where supported by FAST-Python internals.
-45. Build reusable groups for mission, propulsion, weights, and objective
+45. Add complex-step derivative checks where supported by FAST-Python internals.
+46. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

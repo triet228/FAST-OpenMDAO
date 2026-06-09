@@ -345,6 +345,72 @@ class JetFAR25NamedClimbConstraint(om.ExplicitComponent):
         ]
 
 
+class JetAEOClimbConstraint(om.ExplicitComponent):
+    """Compute FAST all-engines-operative climb residual."""
+
+    def initialize(self):
+        self.options.declare("aircraft_class", default="Turbofan")
+        self.options.declare("req_type", default=1)
+        self.options.declare("cl_cruise", default=1.5)
+        self.options.declare("cd0_cruise", default=0.02)
+        self.options.declare("aspect_ratio", default=9.0)
+        self.options.declare("oswald_takeoff", default=0.75)
+        self.options.declare("stall_velocity", default=60.0)
+        self.options.declare("extra_gradient", default=0.018)
+        self.options.declare("constraint_type", default=0)
+        self.options.declare("num_engines", default=2)
+        self.options.declare("ps_loss", default=0.2)
+
+    def setup(self):
+        self.add_input("wing_loading", val=400.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_output("aeo_climb_residual", val=0.0)
+        self.declare_partials(of="aeo_climb_residual", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["aeo_climb_residual"] = jet_aeo_climb_residual(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            self.options["cl_cruise"],
+            self.options["cd0_cruise"],
+            self.options["aspect_ratio"],
+            self.options["oswald_takeoff"],
+            self.options["stall_velocity"],
+            self.options["extra_gradient"],
+            oei_multiplier_value(
+                self.options["constraint_type"],
+                self.options["num_engines"],
+                self.options["ps_loss"],
+            ),
+        )
+
+    def compute_partials(self, inputs, partials):
+        derivatives = jet_aeo_climb_derivatives(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            self.options["cl_cruise"],
+            self.options["cd0_cruise"],
+            self.options["aspect_ratio"],
+            self.options["oswald_takeoff"],
+            self.options["stall_velocity"],
+            oei_multiplier_value(
+                self.options["constraint_type"],
+                self.options["num_engines"],
+                self.options["ps_loss"],
+            ),
+        )
+        partials["aeo_climb_residual", "wing_loading"] = derivatives[
+            "dresidual_dwing_loading"
+        ]
+        partials["aeo_climb_residual", "thrust_loading"] = derivatives[
+            "dresidual_dthrust_loading"
+        ]
+
+
 class PsLossSigmoid(om.ExplicitComponent):
     """Evaluate FAST PsLoss sigmoid climb-gradient helper."""
 
@@ -840,6 +906,160 @@ def jet_cruise_derivatives(
         "dresidual_dwing_loading": dbase_dwing_loading / scale,
         "dresidual_dthrust_loading": -1.0,
     }
+
+
+def jet_aeo_climb_residual(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    req_type,
+    cl_cruise,
+    cd0_cruise,
+    aspect_ratio,
+    oswald_takeoff,
+    stall_velocity,
+    extra_gradient,
+    correction,
+):
+    """Return FAST JetAEOClimb residual for one scalar design point."""
+
+    aircraft_class = aircraft_class.lower()
+    ks = 1.2
+
+    if req_type == 0:
+        effective_thrust_loading = thrust_loading
+
+        if aircraft_class in ("turboprop", "piston"):
+            effective_thrust_loading = 1.0 / (ks * stall_velocity * thrust_loading)
+
+        base = (
+            ks ** 2 * cd0_cruise / cl_cruise
+            + cl_cruise / ks ** 2 / math.pi / aspect_ratio / oswald_takeoff
+        )
+        return correction * (base + extra_gradient) - effective_thrust_loading
+
+    converted_wing_loading = wing_loading * N_M2_TO_LBF_FT2
+
+    if req_type == 1:
+        vstall_ft_s = stall_velocity * convert_velocity(1.0, "m/s", "ft/s")
+        q = 0.5 * RHO_SL_STD * RHO_SI_TO_ENGLISH * (vstall_ft_s * ks) ** 2
+        effective_thrust_loading = thrust_loading
+
+        if aircraft_class in ("turboprop", "piston"):
+            velocity = convert_velocity(vstall_ft_s * ks, "ft/s", "m/s")
+            effective_thrust_loading = 1.0 / (velocity * thrust_loading)
+
+        base = cruise_drag_residual_base(
+            converted_wing_loading,
+            q,
+            cd0_cruise,
+            aspect_ratio,
+            oswald_takeoff,
+        )
+        return correction * (base + extra_gradient) - effective_thrust_loading
+
+    if req_type == 2:
+        cl_eff = cl_cruise / ks ** 2
+        qinf = converted_wing_loading / cl_eff
+        vinf = (2.0 * qinf / (RHO_SL_STD * RHO_SI_TO_ENGLISH)) ** 0.5
+        effective_thrust_loading = thrust_loading
+
+        if aircraft_class in ("turboprop", "piston"):
+            velocity = convert_velocity(vinf, "ft/s", "m/s")
+            effective_thrust_loading = 1.0 / (velocity * thrust_loading)
+
+        base = qinf / converted_wing_loading * (
+            cd0_cruise + cl_eff ** 2 / (math.pi * aspect_ratio * oswald_takeoff)
+        )
+        return base + extra_gradient - effective_thrust_loading
+
+    raise ValueError("JetAEOClimb ReqType must be 0, 1, or 2.")
+
+
+def jet_aeo_climb_derivatives(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    req_type,
+    cl_cruise,
+    cd0_cruise,
+    aspect_ratio,
+    oswald_takeoff,
+    stall_velocity,
+    correction,
+):
+    """Return scalar FAST JetAEOClimb derivatives."""
+
+    aircraft_class = aircraft_class.lower()
+    ks = 1.2
+
+    if req_type == 0:
+        dresidual_dthrust_loading = -1.0
+
+        if aircraft_class in ("turboprop", "piston"):
+            dresidual_dthrust_loading = 1.0 / (
+                ks * stall_velocity * thrust_loading ** 2
+            )
+
+        return {
+            "dresidual_dwing_loading": 0.0,
+            "dresidual_dthrust_loading": dresidual_dthrust_loading,
+        }
+
+    converted_wing_loading = wing_loading * N_M2_TO_LBF_FT2
+
+    if req_type == 1:
+        vstall_ft_s = stall_velocity * convert_velocity(1.0, "m/s", "ft/s")
+        q = 0.5 * RHO_SL_STD * RHO_SI_TO_ENGLISH * (vstall_ft_s * ks) ** 2
+        dbase_dwing_loading = (
+            cruise_drag_residual_base_derivative(
+                converted_wing_loading,
+                q,
+                cd0_cruise,
+                aspect_ratio,
+                oswald_takeoff,
+            )
+            * N_M2_TO_LBF_FT2
+        )
+        dresidual_dthrust_loading = -1.0
+
+        if aircraft_class in ("turboprop", "piston"):
+            velocity = convert_velocity(vstall_ft_s * ks, "ft/s", "m/s")
+            dresidual_dthrust_loading = 1.0 / (
+                velocity * thrust_loading ** 2
+            )
+
+        return {
+            "dresidual_dwing_loading": correction * dbase_dwing_loading,
+            "dresidual_dthrust_loading": dresidual_dthrust_loading,
+        }
+
+    if req_type == 2:
+        dresidual_dthrust_loading = -1.0
+
+        if aircraft_class in ("turboprop", "piston"):
+            cl_eff = cl_cruise / ks ** 2
+            qinf = converted_wing_loading / cl_eff
+            vinf = (2.0 * qinf / (RHO_SL_STD * RHO_SI_TO_ENGLISH)) ** 0.5
+            velocity = convert_velocity(vinf, "ft/s", "m/s")
+            dvelocity_dwing_loading = 0.5 * velocity / wing_loading
+            dresidual_dthrust_loading = 1.0 / (
+                velocity * thrust_loading ** 2
+            )
+            dresidual_dwing_loading = (
+                dvelocity_dwing_loading / (velocity ** 2 * thrust_loading)
+            )
+            return {
+                "dresidual_dwing_loading": dresidual_dwing_loading,
+                "dresidual_dthrust_loading": dresidual_dthrust_loading,
+            }
+
+        return {
+            "dresidual_dwing_loading": 0.0,
+            "dresidual_dthrust_loading": dresidual_dthrust_loading,
+        }
+
+    raise ValueError("JetAEOClimb ReqType must be 0, 1, or 2.")
 
 
 def cruise_dynamic_pressure_base(altitude, mach):

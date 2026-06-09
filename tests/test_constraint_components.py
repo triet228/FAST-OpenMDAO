@@ -13,6 +13,7 @@ from fast_openmdao import (
     CruiseDynamicPressure,
     FAR25ClimbConstraint,
     FAR25EngineGradient,
+    JetAEOClimbConstraint,
     JetApproachConstraint,
     JetCruiseConstraint,
     JetFAR25NamedClimbConstraint,
@@ -31,6 +32,7 @@ from fast_python.constraint import (
     jet25_121b,
     jet25_121c,
     jet25_121d,
+    jet_aeo_climb,
     jet_crs,
     jet_div,
     jet_lfl,
@@ -319,6 +321,27 @@ def test_named_far25_climb_components_match_fast_python():
         )
 
 
+def test_jet_aeo_climb_component_matches_fast_python():
+    """Check all-engines-operative climb residual parity."""
+
+    aircraft = make_full_constraint_aircraft()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "constraint",
+        make_aeo_climb_component(aircraft),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("wing_loading", 400.0, units="kg/m**2")
+    problem.set_val("thrust_loading", 0.3)
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("aeo_climb_residual")[0],
+        jet_aeo_climb(400.0, 0.3, aircraft),
+    )
+
+
 def test_constraint_primitives_declare_analytic_partials():
     """Check constraint primitive derivatives against finite difference."""
 
@@ -392,6 +415,11 @@ def test_constraint_primitives_declare_analytic_partials():
         (
             "named_far25",
             make_named_far25_component("jet25_121d", make_full_constraint_aircraft()),
+            {"wing_loading": 400.0, "thrust_loading": 0.3},
+        ),
+        (
+            "aeo_climb",
+            make_aeo_climb_component(make_full_constraint_aircraft()),
             {"wing_loading": 400.0, "thrust_loading": 0.3},
         ),
     ]
@@ -580,6 +608,27 @@ def make_named_far25_component(name, aircraft):
         wland_mtow=performance["Wland_MTOW"],
         max_continuous=performance["MaxCont"],
         stall_velocity=performance["Vels"]["Stl"],
+    )
+
+
+def make_aeo_climb_component(aircraft):
+    """Return a JetAEOClimb OpenMDAO component from FAST aircraft fields."""
+
+    specs = aircraft["Specs"]
+    performance = specs["Performance"]
+    aero = specs["Aero"]
+    return JetAEOClimbConstraint(
+        aircraft_class=specs["TLAR"]["Class"],
+        req_type=specs["TLAR"]["ReqType"],
+        cl_cruise=aero["CL"]["Crs"],
+        cd0_cruise=aero["CD0"]["Crs"],
+        aspect_ratio=aero["AR"],
+        oswald_takeoff=aero["e"]["Tko"],
+        stall_velocity=performance["Vels"]["Stl"],
+        extra_gradient=performance["ExtraGrad"],
+        constraint_type=aircraft["Settings"]["ConstraintType"],
+        num_engines=specs["Propulsion"]["NumEngines"],
+        ps_loss=performance["PsLoss"],
     )
 
 

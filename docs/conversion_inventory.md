@@ -25,7 +25,7 @@ closed-form derivatives are practical.
 | `battery.py` | candidate | Effective cell capacity, selected current root, one-step equivalent-circuit discharge/charge dynamics, and simple energy-based battery source weight converted; full discharge/charge histories, aging, and detailed cell sizing components remain. |
 | `cases.py` | support | Case factories, not derivative components. |
 | `compare.py` | support | Regression comparison utilities. |
-| `constraint.py` | candidate | PsLoss sigmoid, OEI multiplier, FAR 25 engine-gradient selector, cruise dynamic pressure, JetApp, JetTOFL, JetLFL, JetCrs, JetDiv, shared FAR 25 climb residual, and named Jet25 climb wrappers converted; full constraint diagram and remaining non-FAR jet residual wrappers remain. |
+| `constraint.py` | candidate | PsLoss sigmoid, OEI multiplier, FAR 25 engine-gradient selector, cruise dynamic pressure, JetApp, JetTOFL, JetLFL, JetCrs, JetDiv, JetAEOClimb, shared FAR 25 climb residual, and named Jet25 climb wrappers converted; full constraint diagram and JetCeil wrapper remain. |
 | `core.py` | bridge | Existing `FastPythonComponent` wrapper preserves end-to-end execution. |
 | `cost.py` | converted | `fast_openmdao.cost.BatteryReplacementCost` for replacement cost; add more cost components if FAST-Python grows. |
 | `data_struct.py` | support | Defaults and schema preparation; may later feed OpenMDAO options. |
