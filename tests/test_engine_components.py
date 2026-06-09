@@ -19,6 +19,7 @@ from fast_openmdao import (
     ChokedArea,
     CompressorStageFlow,
     DiffuserFlow,
+    EngineVector,
     FanFlowSplit,
     FlowArea,
     JetAIntegratedHeat,
@@ -40,6 +41,7 @@ from fast_openmdao import (
 )
 from fast_python.engine import (
     a_astar,
+    as_vector,
     astar_a,
     burner,
     comp_stage,
@@ -301,6 +303,23 @@ def test_engine_local_efficiency_and_reynolds_match_fast_python():
         reynolds.get_val("local_reynolds")[0],
         local_reynolds(flow_state),
     )
+
+
+def test_engine_vector_matches_fast_python():
+    """Check engine vector normalization against FAST-Python."""
+
+    values = np.asarray([[1.2, 2.3], [3.4, 4.5]])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "vector",
+        EngineVector(input_shape=values.shape),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("values", values)
+    problem.run_model()
+
+    assert np.allclose(problem.get_val("vector"), as_vector(values))
 
 
 def test_burner_flow_matches_fast_python():
@@ -632,6 +651,11 @@ def test_engine_primitives_declare_analytic_partials():
                 "mach": 0.45,
                 "gamma": 1.36,
             },
+        ),
+        (
+            "engine_vector",
+            EngineVector(input_shape=(2, 2)),
+            {"values": np.asarray([[1.2, 2.3], [3.4, 4.5]])},
         ),
         (
             "simple_off_design",

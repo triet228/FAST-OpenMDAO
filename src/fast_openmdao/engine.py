@@ -4,6 +4,7 @@
 
 import math
 
+import numpy as np
 import openmdao.api as om
 
 from fast_openmdao.atmosphere import atmosphere_layer
@@ -934,6 +935,38 @@ class LocalReynolds(om.ExplicitComponent):
         partials["local_reynolds", "gamma"] = values["dreynolds_dgamma"]
 
 
+class EngineVector(om.ExplicitComponent):
+    """Normalize FAST engine values to a one-dimensional vector.
+
+    Inputs:
+        values: Fixed-shape scalar, vector, or matrix engine data.
+
+    Outputs:
+        vector: Flattened values matching ``fast_python.engine.as_vector`` for
+            numeric inputs.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = engine_shape_tuple(self.options["input_shape"])
+        output_size = int(np.prod(input_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("vector", val=np.zeros(output_size))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="vector",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["vector"] = engine_vector_values(inputs["values"])["vector"]
+
+
 class SimpleOffDesignTurbofan(om.ExplicitComponent):
     """Evaluate FAST's BADA-style simple off-design turbofan fuel model."""
 
@@ -1118,6 +1151,26 @@ class TurbofanLinearSizing(om.ExplicitComponent):
         for output in turbofan_linear_sizing_output_names():
             for variable in turbofan_linear_sizing_input_names():
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
+def engine_shape_tuple(shape):
+    """Return an OpenMDAO option shape as a tuple of integers."""
+
+    if isinstance(shape, tuple) and len(shape) == 0:
+        return ()
+
+    array = np.asarray(shape).reshape(-1)
+
+    if array.size == 0:
+        return (1,)
+
+    return tuple(int(value) for value in array)
+
+
+def engine_vector_values(values):
+    """Return FAST engine values as a one-dimensional vector."""
+
+    return {"vector": np.asarray(values, dtype=float).reshape(-1)}
 
 
 def simple_off_design_input_names():

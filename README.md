@@ -62,6 +62,8 @@ derivative-native FAST equation components:
   partial derivatives.
 - Engine low-fidelity turbofan linear sizing component with analytical partial
   derivatives.
+- Engine fixed-shape vector normalization helper with analytical partial
+  derivatives.
 - Propulsion primitives for cable sizing weight, engine lapse, engine thrust
   requirement, turboprop/piston engine sizing weight, power-flow propagation,
   power-available propagation, safe component weight, efficiency selection, and
@@ -155,8 +157,8 @@ The public `fast_openmdao` package currently exports:
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
   `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FanFlowSplit`,
   `FlowArea`,
-  `JetAIntegratedHeat`, `LocalEfficiency`, `LocalReynolds`, `MassFlowParameter`,
-  `OffDesignNozzleMach`, `PerfectExpansionNozzleFlow`,
+  `EngineVector`, `JetAIntegratedHeat`, `LocalEfficiency`, `LocalReynolds`,
+  `MassFlowParameter`, `OffDesignNozzleMach`, `PerfectExpansionNozzleFlow`,
   `SimpleOffDesignTurbofan`, `StaticDensity`, `StaticPressure`,
   `StaticTemperature`, `ThermalPerfectGamma`, `TotalPressure`,
   `TotalTemperature`, `TurbineStageFlow`, `TurbofanLinearSizing`,
