@@ -22,6 +22,7 @@ from fast_openmdao import (
     StaticDensity,
     StaticPressure,
     StaticTemperature,
+    ThermalPerfectGamma,
     TotalPressure,
     TotalTemperature,
 )
@@ -34,6 +35,7 @@ from fast_python.engine import (
     local_efficiency,
     local_reynolds,
     mass_flow_parameter,
+    new_gamma,
     ps_pt,
     pt_ps,
     rhos_rhot,
@@ -166,6 +168,21 @@ def test_engine_specific_heat_components_match_fast_python():
 
     assert np.isclose(cv_problem.get_val("cv_air")[0], cv_air(300.0))
 
+    gamma_problem = om.Problem()
+    gamma_problem.model.add_subsystem("gamma", ThermalPerfectGamma(), promotes=["*"])
+    gamma_problem.setup()
+    gamma_problem.set_val("total_temperature", 800.0, units="K")
+    gamma_problem.set_val("mach", 0.55)
+    gamma_problem.set_val("gamma", 1.37)
+    gamma_problem.run_model()
+
+    ts, cp, cv, gamma = new_gamma(800.0, 0.55, 1.37)
+
+    assert np.isclose(gamma_problem.get_val("static_temperature", units="K")[0], ts)
+    assert np.isclose(gamma_problem.get_val("cp_air")[0], cp)
+    assert np.isclose(gamma_problem.get_val("cv_air")[0], cv)
+    assert np.isclose(gamma_problem.get_val("updated_gamma")[0], gamma)
+
     air_heat = om.Problem()
     air_heat.model.add_subsystem("heat", AirIntegratedHeat(), promotes=["*"])
     air_heat.setup()
@@ -238,6 +255,11 @@ def test_engine_primitives_declare_analytic_partials():
         ("static_density", StaticDensity(), {"total_density": 1.3, "mach": 0.65, "gamma": 1.4}),
         ("cp", AirSpecificHeat(), {"temperature": 300.0}),
         ("cv", AirSpecificHeatVolume(), {"temperature": 300.0}),
+        (
+            "gamma",
+            ThermalPerfectGamma(),
+            {"total_temperature": 800.0, "mach": 0.55, "gamma": 1.37},
+        ),
         ("air_heat", AirIntegratedHeat(), {"temperature_low": 300.0, "temperature_high": 1200.0}),
         ("jeta_heat", JetAIntegratedHeat(), {"temperature_low": 300.0, "temperature_high": 1200.0}),
         ("efficiency", LocalEfficiency(), {"reynolds": 2.5e7}),

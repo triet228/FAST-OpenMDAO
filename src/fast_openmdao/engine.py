@@ -259,6 +259,42 @@ class AirSpecificHeatVolume(om.ExplicitComponent):
         )
 
 
+class ThermalPerfectGamma(om.ExplicitComponent):
+    """Iterate FAST thermally perfect static temperature and gamma update."""
+
+    def setup(self):
+        self.add_input("total_temperature", val=800.0, units="K")
+        self.add_input("mach", val=0.5)
+        self.add_input("gamma", val=1.4)
+        self.add_output("static_temperature", val=760.0, units="K")
+        self.add_output("cp_air", val=1100.0)
+        self.add_output("cv_air", val=813.0)
+        self.add_output("updated_gamma", val=1.35)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = thermal_perfect_gamma_values(
+            inputs["total_temperature"][0],
+            inputs["mach"][0],
+            inputs["gamma"][0],
+        )
+        outputs["static_temperature"] = values["static_temperature"]
+        outputs["cp_air"] = values["cp_air"]
+        outputs["cv_air"] = values["cv_air"]
+        outputs["updated_gamma"] = values["updated_gamma"]
+
+    def compute_partials(self, inputs, partials):
+        values = thermal_perfect_gamma_values(
+            inputs["total_temperature"][0],
+            inputs["mach"][0],
+            inputs["gamma"][0],
+        )
+
+        for output in ("static_temperature", "cp_air", "cv_air", "updated_gamma"):
+            for variable in ("total_temperature", "mach", "gamma"):
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class AirIntegratedHeat(om.ExplicitComponent):
     """Compute FAST integrated air specific heat between two temperatures."""
 
@@ -478,6 +514,91 @@ def density_ratio_values(mach, gamma):
         "dratio_dmach": ratio * dlogratio_dmach,
         "dratio_dgamma": ratio * dlogratio_dgamma,
     }
+
+
+def thermal_perfect_gamma_values(total_temperature, mach, gamma):
+    """Return FAST new_gamma outputs and loop-propagated derivatives."""
+
+    gamma_new = gamma
+    gamma_derivatives = {
+        "total_temperature": 0.0,
+        "mach": 0.0,
+        "gamma": 1.0,
+    }
+    delta_gamma = 1.0
+    iteration = 0
+    static_temperature = total_temperature / isentropic_q(mach, gamma_new)
+    cp = None
+    cv = None
+    output_derivatives = None
+
+    while delta_gamma > 1.0e-3 and iteration < 10:
+        q = isentropic_q(mach, gamma_new)
+        dq_dmach = (gamma_new - 1.0) * mach
+        dq_dgamma = 0.5 * mach ** 2
+        static_temperature = total_temperature / q
+        static_derivatives = {}
+
+        for variable in ("total_temperature", "mach", "gamma"):
+            dtotal = 1.0 if variable == "total_temperature" else 0.0
+            dmach = 1.0 if variable == "mach" else 0.0
+            dgamma = gamma_derivatives[variable]
+            dq = dq_dmach * dmach + dq_dgamma * dgamma
+            static_derivatives[variable] = dtotal / q - total_temperature * dq / q ** 2
+
+        cp = sigmoid_heat_value(static_temperature, 233.0, 1.0 / 210.0, 875.0, 993.0)
+        cv = sigmoid_heat_value(
+            static_temperature,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0 - GAS_CONSTANT_AIR,
+        )
+        dcp_dtemperature = sigmoid_heat_derivative(
+            static_temperature,
+            233.0,
+            1.0 / 210.0,
+            875.0,
+        )
+        dcv_dtemperature = dcp_dtemperature
+        gamma_next = cp / cv
+        next_gamma_derivatives = {}
+
+        for variable in ("total_temperature", "mach", "gamma"):
+            dstatic = static_derivatives[variable]
+            dcp = dcp_dtemperature * dstatic
+            dcv = dcv_dtemperature * dstatic
+            next_gamma_derivatives[variable] = (dcp * cv - cp * dcv) / cv ** 2
+
+        delta_gamma = abs(gamma_next - gamma_new) / gamma_new
+        gamma_new = gamma_next
+        gamma_derivatives = next_gamma_derivatives
+        output_derivatives = {
+            "static_temperature": static_derivatives,
+            "cp_air": {
+                variable: dcp_dtemperature * static_derivatives[variable]
+                for variable in ("total_temperature", "mach", "gamma")
+            },
+            "cv_air": {
+                variable: dcv_dtemperature * static_derivatives[variable]
+                for variable in ("total_temperature", "mach", "gamma")
+            },
+            "updated_gamma": gamma_derivatives,
+        }
+        iteration += 1
+
+    values = {
+        "static_temperature": static_temperature,
+        "cp_air": cp,
+        "cv_air": cv,
+        "updated_gamma": gamma_new,
+    }
+
+    for output, output_partials in output_derivatives.items():
+        for variable, derivative in output_partials.items():
+            values["d%s_d%s" % (output, variable)] = derivative
+
+    return values
 
 
 def sigmoid_heat_value(temperature, length, rate, midpoint, offset):

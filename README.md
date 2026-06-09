@@ -31,8 +31,9 @@ derivative-native FAST equation components:
 - Engine primitives for isentropic pressure, temperature, area-Mach,
   mass-flow parameter, and static-density equations with analytical partial
   derivatives.
-- Engine specific-heat components for air Cp, air Cv, integrated air heat, and
-  integrated Jet-A heat with analytical partial derivatives.
+- Engine specific-heat components for air Cp, air Cv, thermally perfect gamma
+  update, integrated air heat, and integrated Jet-A heat with analytical
+  partial derivatives.
 - Engine local Reynolds and local efficiency components with analytical
   partial derivatives.
 - Propulsion scalar primitives for engine lapse, safe component weight, and
@@ -82,7 +83,8 @@ The public `fast_openmdao` package currently exports:
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `ChokedArea`, `FlowArea`, `JetAIntegratedHeat`, `LocalEfficiency`,
   `LocalReynolds`, `MassFlowParameter`, `StaticDensity`, `StaticPressure`,
-  `StaticTemperature`, `TotalPressure`, `TotalTemperature`
+  `StaticTemperature`, `ThermalPerfectGamma`, `TotalPressure`,
+  `TotalTemperature`
 - Mission: `CruiseBreguetEfficiencyTriplet`, `CruiseBreguetSourceEnergy`,
   `CruiseTimeTargetDistance`, `FlightConditions`
 - OEW: `NumericSum`, `TurbopropAirframeWeight`
@@ -295,8 +297,10 @@ FAST-Python residual functions.
    derivatives. Done.
 28. Convert analysis source-weight vectorization helper with analytical partial
    derivatives. Done.
-29. Add complex-step derivative checks where supported by FAST-Python internals.
-30. Build reusable groups for mission, propulsion, weights, and objective
+29. Convert thermally perfect gamma update helper with analytical partial
+   derivatives. Done.
+30. Add complex-step derivative checks where supported by FAST-Python internals.
+31. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

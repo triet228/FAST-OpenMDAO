@@ -31,6 +31,7 @@ from fast_openmdao.engine import (
     StaticDensity,
     StaticPressure,
     StaticTemperature,
+    ThermalPerfectGamma,
     TotalPressure,
     TotalTemperature,
 )
@@ -113,6 +114,7 @@ __all__ = [
     "StaticTemperature",
     "StandardAtmosphere",
     "SquaredExponentialKernel",
+    "ThermalPerfectGamma",
     "TotalPressure",
     "TotalTemperature",
     "ThrustSinkEfficiency",
