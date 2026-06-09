@@ -19,6 +19,7 @@ from fast_openmdao import (
     PowerFlow,
     PowerSupplementCheck,
     SafeComponentWeight,
+    SeriesHybridArchitecture,
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
     TurbopropEngineWeightForSizing,
@@ -35,6 +36,7 @@ from fast_python.propulsion import (
     power_flow,
     power_supplement_check,
     safe_component_weight,
+    series_hybrid_architecture,
     transmitter_fan_efficiency,
 )
 
@@ -131,6 +133,47 @@ def test_parallel_hybrid_architecture_matches_fast_python():
     expected = parallel_hybrid_architecture(
         values["num_engines"],
         values["electric_motor_efficiency"],
+        values["thrust_sink_efficiency"],
+    )
+    assert np.allclose(problem.get_val("architecture"), expected[0])
+    assert np.allclose(
+        problem.get_val("upstream_split"),
+        expected[1](values["power_split"]),
+    )
+    assert np.allclose(
+        problem.get_val("downstream_split"),
+        expected[2](values["power_split"]),
+    )
+    assert np.allclose(problem.get_val("upstream_efficiency"), expected[3])
+    assert np.allclose(problem.get_val("downstream_efficiency"), expected[4])
+    assert np.allclose(problem.get_val("source_type"), expected[5])
+    assert np.allclose(problem.get_val("transmitter_type"), expected[6])
+
+
+def test_series_hybrid_architecture_matches_fast_python():
+    """Check SHE architecture matrix builder parity with FAST-Python."""
+
+    values = make_series_hybrid_architecture_values()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "architecture",
+        SeriesHybridArchitecture(num_engines=values["num_engines"]),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("power_split", values["power_split"])
+    problem.set_val("electric_motor_efficiency", values["electric_motor_efficiency"])
+    problem.set_val(
+        "electric_generator_efficiency",
+        values["electric_generator_efficiency"],
+    )
+    problem.set_val("thrust_sink_efficiency", values["thrust_sink_efficiency"])
+    problem.run_model()
+
+    expected = series_hybrid_architecture(
+        values["num_engines"],
+        values["electric_motor_efficiency"],
+        values["electric_generator_efficiency"],
         values["thrust_sink_efficiency"],
     )
     assert np.allclose(problem.get_val("architecture"), expected[0])
@@ -429,6 +472,7 @@ def test_propulsion_primitives_declare_analytic_partials():
     fuel_derivative_case["initial_fuel_energy"] = 5.0
     fuel_derivative_case["initial_fuel_energy_left"] = 1000.0
     architecture_values = make_parallel_hybrid_architecture_values()
+    series_architecture_values = make_series_hybrid_architecture_values()
     cases = [
         (
             "parallel_hybrid",
@@ -441,6 +485,24 @@ def test_propulsion_primitives_declare_analytic_partials():
                     "electric_motor_efficiency"
                 ],
                 "thrust_sink_efficiency": architecture_values[
+                    "thrust_sink_efficiency"
+                ],
+            },
+        ),
+        (
+            "series_hybrid",
+            SeriesHybridArchitecture(
+                num_engines=series_architecture_values["num_engines"],
+            ),
+            {
+                "power_split": series_architecture_values["power_split"],
+                "electric_motor_efficiency": series_architecture_values[
+                    "electric_motor_efficiency"
+                ],
+                "electric_generator_efficiency": series_architecture_values[
+                    "electric_generator_efficiency"
+                ],
+                "thrust_sink_efficiency": series_architecture_values[
                     "thrust_sink_efficiency"
                 ],
             },
@@ -637,6 +699,18 @@ def make_parallel_hybrid_architecture_values():
         "power_split": 0.37,
         "electric_motor_efficiency": 0.94,
         "thrust_sink_efficiency": 0.86,
+    }
+
+
+def make_series_hybrid_architecture_values():
+    """Return scalar inputs for FAST series-hybrid architecture construction."""
+
+    return {
+        "num_engines": 2,
+        "power_split": 0.42,
+        "electric_motor_efficiency": 0.93,
+        "electric_generator_efficiency": 0.91,
+        "thrust_sink_efficiency": 0.84,
     }
 
 

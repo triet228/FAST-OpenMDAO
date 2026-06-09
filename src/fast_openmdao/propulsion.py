@@ -208,6 +208,65 @@ class ParallelHybridArchitecture(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class SeriesHybridArchitecture(om.ExplicitComponent):
+    """Build FAST's built-in series-hybrid propulsion architecture matrices."""
+
+    def initialize(self):
+        self.options.declare("num_engines", default=2)
+
+    def setup(self):
+        num_engines = self.options["num_engines"]
+        num_components = 5 * num_engines + 3
+        num_transmitters = 5 * num_engines
+
+        self.add_input("power_split", val=0.5)
+        self.add_input("electric_motor_efficiency", val=0.95)
+        self.add_input("electric_generator_efficiency", val=0.95)
+        self.add_input("thrust_sink_efficiency", val=0.85)
+        self.add_output("architecture", val=np.zeros((num_components, num_components)))
+        self.add_output("upstream_split", val=np.zeros((num_components, num_components)))
+        self.add_output(
+            "downstream_split",
+            val=np.zeros((num_components, num_components)),
+        )
+        self.add_output(
+            "upstream_efficiency",
+            val=np.ones((num_components, num_components)),
+        )
+        self.add_output(
+            "downstream_efficiency",
+            val=np.ones((num_components, num_components)),
+        )
+        self.add_output("source_type", val=np.zeros(2))
+        self.add_output("transmitter_type", val=np.zeros(num_transmitters))
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = series_hybrid_architecture_values(
+            self.options["num_engines"],
+            inputs["power_split"][0],
+            inputs["electric_motor_efficiency"][0],
+            inputs["electric_generator_efficiency"][0],
+            inputs["thrust_sink_efficiency"][0],
+        )
+
+        for output in architecture_builder_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = series_hybrid_architecture_values(
+            self.options["num_engines"],
+            inputs["power_split"][0],
+            inputs["electric_motor_efficiency"][0],
+            inputs["electric_generator_efficiency"][0],
+            inputs["thrust_sink_efficiency"][0],
+        )
+
+        for output in architecture_builder_output_names():
+            for variable in series_hybrid_architecture_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class PowerSupplementCheck(om.ExplicitComponent):
     """Compute FAST supplemental transmitter power for fixed architecture topology.
 
@@ -753,8 +812,8 @@ def parallel_hybrid_architecture_input_names():
     )
 
 
-def parallel_hybrid_architecture_output_names():
-    """Return outputs for ParallelHybridArchitecture."""
+def architecture_builder_output_names():
+    """Return common outputs for built-in architecture builder components."""
 
     return (
         "architecture",
@@ -764,6 +823,23 @@ def parallel_hybrid_architecture_output_names():
         "downstream_efficiency",
         "source_type",
         "transmitter_type",
+    )
+
+
+def parallel_hybrid_architecture_output_names():
+    """Return outputs for ParallelHybridArchitecture."""
+
+    return architecture_builder_output_names()
+
+
+def series_hybrid_architecture_input_names():
+    """Return inputs for SeriesHybridArchitecture derivatives."""
+
+    return (
+        "power_split",
+        "electric_motor_efficiency",
+        "electric_generator_efficiency",
+        "thrust_sink_efficiency",
     )
 
 
@@ -859,6 +935,140 @@ def parallel_hybrid_architecture_values(
     for output_name, value in output_values.items():
         output_size = np.asarray(value).size
         for input_name in parallel_hybrid_architecture_input_names():
+            derivative = derivative_maps.get(input_name, {}).get(output_name)
+
+            if derivative is None:
+                derivative = np.zeros(output_size)
+
+            result["d%s_d%s" % (output_name, input_name)] = np.asarray(
+                derivative,
+                dtype=float,
+            ).reshape(output_size, 1)
+
+    return result
+
+
+def series_hybrid_architecture_values(
+    num_engines,
+    power_split,
+    electric_motor_efficiency,
+    electric_generator_efficiency,
+    thrust_sink_efficiency,
+):
+    """Return FAST series-hybrid matrices and dense analytical derivatives."""
+
+    num_components = 5 * num_engines + 3
+    architecture = np.zeros((num_components, num_components))
+    upstream_split = np.zeros_like(architecture)
+    downstream_split = np.zeros_like(architecture)
+    upstream_efficiency = np.ones_like(architecture)
+    downstream_efficiency = np.ones_like(architecture)
+    fuel = 0
+    battery = 1
+    engine_index = np.arange(2, 2 + num_engines)
+    generator_index = np.arange(2 + num_engines, 2 + 2 * num_engines)
+    cable_index = np.arange(2 + 2 * num_engines, 2 + 3 * num_engines)
+    motor_index = np.arange(2 + 3 * num_engines, 2 + 4 * num_engines)
+    sink_index = np.arange(2 + 4 * num_engines, 2 + 5 * num_engines)
+    final_sink = num_components - 1
+    architecture[fuel, engine_index] = 1.0
+    architecture[battery, cable_index] = 1.0
+    upstream_split[fuel, engine_index] = 1.0 / num_engines
+    upstream_split[battery, cable_index] = 1.0 / num_engines
+    downstream_split[engine_index, fuel] = 1.0
+    downstream_split[cable_index, battery] = 1.0
+
+    dupstream_split_dsplit = np.zeros_like(architecture)
+    ddownstream_split_dsplit = np.zeros_like(architecture)
+    dupstream_efficiency_dem = np.zeros_like(architecture)
+    ddownstream_efficiency_dem = np.zeros_like(architecture)
+    dupstream_efficiency_deg = np.zeros_like(architecture)
+    ddownstream_efficiency_deg = np.zeros_like(architecture)
+    dupstream_efficiency_dts = np.zeros_like(architecture)
+    ddownstream_efficiency_dts = np.zeros_like(architecture)
+
+    for engine, generator, cable, motor, sink in zip(
+        engine_index,
+        generator_index,
+        cable_index,
+        motor_index,
+        sink_index,
+    ):
+        architecture[engine, generator] = 1.0
+        architecture[generator, motor] = 1.0
+        architecture[cable, motor] = 1.0
+        architecture[motor, sink] = 1.0
+        architecture[sink, final_sink] = 1.0
+        upstream_split[engine, generator] = 1.0
+        upstream_split[generator, motor] = 1.0
+        upstream_split[cable, motor] = power_split
+        upstream_split[motor, sink] = 1.0
+        upstream_split[sink, final_sink] = 1.0
+        downstream_split[generator, engine] = 1.0
+        downstream_split[motor, generator] = 1.0 - power_split
+        downstream_split[motor, cable] = power_split
+        downstream_split[sink, motor] = 1.0
+        upstream_efficiency[engine, generator] = electric_generator_efficiency
+        upstream_efficiency[generator, motor] = electric_motor_efficiency
+        upstream_efficiency[cable, motor] = electric_motor_efficiency
+        upstream_efficiency[motor, sink] = thrust_sink_efficiency
+        downstream_efficiency[generator, engine] = electric_generator_efficiency
+        downstream_efficiency[motor, generator] = electric_motor_efficiency
+        downstream_efficiency[motor, cable] = electric_motor_efficiency
+        downstream_efficiency[sink, motor] = thrust_sink_efficiency
+        dupstream_split_dsplit[cable, motor] = 1.0
+        ddownstream_split_dsplit[motor, generator] = -1.0
+        ddownstream_split_dsplit[motor, cable] = 1.0
+        dupstream_efficiency_deg[engine, generator] = 1.0
+        ddownstream_efficiency_deg[generator, engine] = 1.0
+        dupstream_efficiency_dem[generator, motor] = 1.0
+        dupstream_efficiency_dem[cable, motor] = 1.0
+        ddownstream_efficiency_dem[motor, generator] = 1.0
+        ddownstream_efficiency_dem[motor, cable] = 1.0
+        dupstream_efficiency_dts[motor, sink] = 1.0
+        ddownstream_efficiency_dts[sink, motor] = 1.0
+
+    downstream_split[final_sink, sink_index] = 1.0 / num_engines
+    source_type = np.asarray([1.0, 0.0])
+    transmitter_type = np.asarray(
+        [1.0] * num_engines
+        + [3.0] * num_engines
+        + [4.0] * num_engines
+        + [0.0] * num_engines
+        + [2.0] * num_engines
+    )
+    output_values = {
+        "architecture": architecture,
+        "upstream_split": upstream_split,
+        "downstream_split": downstream_split,
+        "upstream_efficiency": upstream_efficiency,
+        "downstream_efficiency": downstream_efficiency,
+        "source_type": source_type,
+        "transmitter_type": transmitter_type,
+    }
+    derivative_maps = {
+        "power_split": {
+            "upstream_split": dupstream_split_dsplit,
+            "downstream_split": ddownstream_split_dsplit,
+        },
+        "electric_motor_efficiency": {
+            "upstream_efficiency": dupstream_efficiency_dem,
+            "downstream_efficiency": ddownstream_efficiency_dem,
+        },
+        "electric_generator_efficiency": {
+            "upstream_efficiency": dupstream_efficiency_deg,
+            "downstream_efficiency": ddownstream_efficiency_deg,
+        },
+        "thrust_sink_efficiency": {
+            "upstream_efficiency": dupstream_efficiency_dts,
+            "downstream_efficiency": ddownstream_efficiency_dts,
+        },
+    }
+    result = dict(output_values)
+
+    for output_name, value in output_values.items():
+        output_size = np.asarray(value).size
+        for input_name in series_hybrid_architecture_input_names():
             derivative = derivative_maps.get(input_name, {}).get(output_name)
 
             if derivative is None:
