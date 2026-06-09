@@ -15,6 +15,7 @@ from fast_openmdao import (
     CruiseBreguetPowerHistory,
     CruiseBreguetPowerSplit,
     CruiseBreguetPropulsiveEfficiency,
+    CruiseBreguetSourceDelta,
     CruiseBreguetSourceEnergy,
     CruiseSegmentKinematicsPower,
     CruiseTimeTargetDistance,
@@ -23,11 +24,13 @@ from fast_openmdao import (
     InitialEnergyRemaining,
     LandingSegmentKinematicsPower,
     PrescribedRateSegmentKinematicsPower,
+    RowMatrix,
     TakeoffSegmentKinematics,
 )
 from fast_python.data_struct import init_mission_history
 from fast_python.mission import (
     compute_flight_conditions,
+    cruise_breguet_apply_source_delta,
     cruise_breguet_discharge_battery,
     cruise_breguet_efficiency_triplet,
     cruise_breguet_power_history,
@@ -42,6 +45,7 @@ from fast_python.mission import (
     eval_landing,
     eval_takeoff,
     initial_energy_remaining,
+    row_matrix,
 )
 
 
@@ -867,6 +871,86 @@ def test_cruise_breguet_source_energy_declares_analytic_partials():
         assert partial_data["abs error"].forward < 1.0e-5
 
 
+def test_cruise_breguet_source_delta_matches_fast_python():
+    """Check aggregate source-energy delta parity with FAST-Python."""
+
+    source_energy = np.asarray(
+        [
+            [100.0, 20.0, 40.0],
+            [105.0, 25.0, 45.0],
+            [110.0, 30.0, 50.0],
+            [115.0, 35.0, 55.0],
+        ],
+    )
+    source_energy_left = np.asarray(
+        [
+            [900.0, 500.0, 700.0],
+            [895.0, 495.0, 695.0],
+            [890.0, 490.0, 690.0],
+            [885.0, 485.0, 685.0],
+        ],
+    )
+    delta = np.asarray([0.0, 60.0, 120.0, 180.0])
+    expected_energy = source_energy.copy()
+    expected_left = source_energy_left.copy()
+    cruise_breguet_apply_source_delta(expected_energy, expected_left, [1, 2], delta)
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "delta",
+        CruiseBreguetSourceDelta(columns=(1, 2), npoint=4, nsrc=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("source_energy", source_energy, units="J")
+    problem.set_val("source_energy_left", source_energy_left, units="J")
+    problem.set_val("delta", delta, units="J")
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("updated_source_energy", units="J"),
+        expected_energy,
+    )
+    assert np.allclose(
+        problem.get_val("updated_source_energy_left", units="J"),
+        expected_left,
+    )
+
+
+def test_cruise_breguet_source_delta_declares_analytic_partials():
+    """Check aggregate source-energy delta derivatives."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "delta",
+        CruiseBreguetSourceDelta(columns=(1, 2), npoint=4, nsrc=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val(
+        "source_energy",
+        np.arange(12.0).reshape(4, 3) + 100.0,
+        units="J",
+    )
+    problem.set_val(
+        "source_energy_left",
+        np.arange(12.0).reshape(4, 3) + 500.0,
+        units="J",
+    )
+    problem.set_val("delta", np.asarray([0.0, 60.0, 120.0, 180.0]), units="J")
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-3,
+    )
+
+    for partial_data in partials["delta"].values():
+        assert partial_data["abs error"].forward < 1.0e-5
+
+
 def test_initial_energy_remaining_matches_fast_python():
     """Check first-segment source energy initialization parity."""
 
@@ -937,6 +1021,47 @@ def test_initial_energy_remaining_declares_analytic_partials():
 
     for partial_data in partials["initial_energy"].values():
         assert partial_data["abs error"].forward < 1.0e-5
+
+
+def test_row_matrix_matches_fast_python():
+    """Check row-wise history expansion parity with FAST-Python."""
+
+    value = np.asarray([0.25, 0.5, 0.75])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "row_matrix",
+        RowMatrix(rows=4, value_size=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("value", value)
+    problem.run_model()
+
+    assert np.allclose(problem.get_val("matrix"), row_matrix(value, 4))
+
+
+def test_row_matrix_declares_analytic_partials():
+    """Check row-wise history expansion derivatives."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "row_matrix",
+        RowMatrix(rows=4, value_size=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("value", np.asarray([0.25, 0.5, 0.75]))
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["row_matrix"].values():
+        assert partial_data["abs error"].forward < 1.0e-8
 
 
 def output_names():

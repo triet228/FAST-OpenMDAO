@@ -86,6 +86,7 @@ from fast_openmdao.mission import (
     CruiseBreguetPowerHistory,
     CruiseBreguetPowerSplit,
     CruiseBreguetPropulsiveEfficiency,
+    CruiseBreguetSourceDelta,
     CruiseBreguetSourceEnergy,
     CruiseSegmentKinematicsPower,
     CruiseTimeTargetDistance,
@@ -94,6 +95,7 @@ from fast_openmdao.mission import (
     InitialEnergyRemaining,
     LandingSegmentKinematicsPower,
     PrescribedRateSegmentKinematicsPower,
+    RowMatrix,
     TakeoffSegmentKinematics,
 )
 from fast_openmdao.oew import (
@@ -208,6 +210,7 @@ __all__ = [
     "CruiseBreguetPowerHistory",
     "CruiseBreguetPowerSplit",
     "CruiseBreguetPropulsiveEfficiency",
+    "CruiseBreguetSourceDelta",
     "CruiseBreguetSourceEnergy",
     "CruisePowerAvailableConstraint",
     "CruiseSegmentKinematicsPower",
@@ -280,6 +283,7 @@ __all__ = [
     "RegressionTargetMatrix",
     "RegressionTwoDimensionalArray",
     "RegressionVector",
+    "RowMatrix",
     "SafeComponentWeight",
     "SeriesHybridArchitecture",
     "SimpleOffDesignTurbofan",

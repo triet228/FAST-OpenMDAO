@@ -34,8 +34,12 @@ derivative-native FAST equation components:
   analytical partial derivatives for fixed active branches.
 - Mission Breguet source-energy allocation helper with analytical partial
   derivatives for fixed source layouts.
+- Mission Breguet aggregate source-delta application helper with analytical
+  partial derivatives for fixed source columns.
 - Mission initial source-energy remaining helper with analytical partial
   derivatives for fixed source layouts.
+- Mission fixed-shape row-matrix history expansion helper with analytical
+  partial derivatives.
 - Mission simple and detailed EvalTakeoff, EvalLanding, smooth EvalCruise, and
   prescribed-rate EvalClimb/EvalDescent kinematics and required-power kernels
   with analytical partial derivatives.
@@ -167,11 +171,12 @@ The public `fast_openmdao` package currently exports:
   `TurbopropLinearSizing`
 - Mission: `CruiseBreguetDetailedBattery`, `CruiseBreguetEfficiencyTriplet`,
   `CruiseBreguetPowerHistory`, `CruiseBreguetPowerSplit`,
-  `CruiseBreguetPropulsiveEfficiency`, `CruiseBreguetSourceEnergy`,
+  `CruiseBreguetPropulsiveEfficiency`, `CruiseBreguetSourceDelta`,
+  `CruiseBreguetSourceEnergy`,
   `CruiseSegmentKinematicsPower`, `CruiseTimeTargetDistance`,
   `DetailedTakeoffSegmentKinematicsPower`, `FlightConditions`, `InitialEnergyRemaining`,
   `LandingSegmentKinematicsPower`, `PrescribedRateSegmentKinematicsPower`,
-  `TakeoffSegmentKinematics`
+  `RowMatrix`, `TakeoffSegmentKinematics`
 - OEW: `NumericSum`, `TurbofanAirframeWeight`, `TurbofanOEWIterationStep`,
   `TurbopropAirframeWeight`, `TurbopropOEWIterationStep`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,

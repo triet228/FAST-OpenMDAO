@@ -517,6 +517,77 @@ class CruiseBreguetSourceEnergy(om.ExplicitComponent):
                 ]
 
 
+class CruiseBreguetSourceDelta(om.ExplicitComponent):
+    """Apply FAST CruiseBRE aggregate source-energy deltas to source columns.
+
+    Inputs:
+        source_energy: Current per-source used-energy matrix in J.
+        source_energy_left: Current per-source remaining-energy matrix in J.
+        delta: Aggregate energy delta history in J.
+
+    Outputs:
+        updated_source_energy: Source used-energy matrix after the delta.
+        updated_source_energy_left: Source remaining-energy matrix after the
+            delta.
+
+    Assumptions:
+        ``columns`` is a fixed set of source columns selected by source type.
+        The aggregate delta is shared evenly across those columns, matching
+        FAST-Python ``cruise_breguet_apply_source_delta``.
+    """
+
+    def initialize(self):
+        self.options.declare("columns", default=(0,))
+        self.options.declare("npoint", default=3)
+        self.options.declare("nsrc", default=1)
+
+    def setup(self):
+        npoint = self.options["npoint"]
+        nsrc = self.options["nsrc"]
+        self.add_input("source_energy", val=np.zeros((npoint, nsrc)), units="J")
+        self.add_input(
+            "source_energy_left",
+            val=np.zeros((npoint, nsrc)),
+            units="J",
+        )
+        self.add_input("delta", val=np.zeros(npoint), units="J")
+        self.add_output(
+            "updated_source_energy",
+            val=np.zeros((npoint, nsrc)),
+            units="J",
+        )
+        self.add_output(
+            "updated_source_energy_left",
+            val=np.zeros((npoint, nsrc)),
+            units="J",
+        )
+        self.declare_partials(of="updated_source_energy", wrt="*")
+        self.declare_partials(of="updated_source_energy_left", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = breguet_source_delta_values(
+            inputs["source_energy"],
+            inputs["source_energy_left"],
+            self.options["columns"],
+            inputs["delta"],
+        )
+        outputs["updated_source_energy"] = values["updated_source_energy"]
+        outputs["updated_source_energy_left"] = values["updated_source_energy_left"]
+
+    def compute_partials(self, inputs, partials):
+        values = breguet_source_delta_values(
+            inputs["source_energy"],
+            inputs["source_energy_left"],
+            self.options["columns"],
+            inputs["delta"],
+        )
+        for output_name in ("updated_source_energy", "updated_source_energy_left"):
+            for input_name in ("source_energy", "source_energy_left", "delta"):
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
 class CruiseBreguetPropulsiveEfficiency(om.ExplicitComponent):
     """Select FAST CruiseBRE propulsive efficiency from fixed storage path."""
 
@@ -855,6 +926,29 @@ class InitialEnergyRemaining(om.ExplicitComponent):
             partials["source_energy_left", input_name] = values[
                 f"dsource_energy_left_d{input_name}"
             ]
+
+
+class RowMatrix(om.ExplicitComponent):
+    """Repeat a fixed-size FAST scalar/vector value across history rows."""
+
+    def initialize(self):
+        self.options.declare("rows", default=1)
+        self.options.declare("value_size", default=1)
+
+    def setup(self):
+        rows = self.options["rows"]
+        value_size = self.options["value_size"]
+        self.add_input("value", val=np.zeros(value_size))
+        self.add_output("matrix", val=np.zeros((rows, value_size)))
+        self.declare_partials(of="matrix", wrt="value")
+
+    def compute(self, inputs, outputs):
+        values = row_matrix_values(inputs["value"], self.options["rows"])
+        outputs["matrix"] = values["matrix"]
+
+    def compute_partials(self, inputs, partials):
+        values = row_matrix_values(inputs["value"], self.options["rows"])
+        partials["matrix", "value"] = values["dmatrix_dvalue"]
 
 
 def flight_condition_values(altitude, disa, velocity_type, velocity):
@@ -1632,6 +1726,29 @@ def initial_energy_remaining_values(
     }
 
 
+def row_matrix_values(value, rows):
+    """Return FAST row-matrix expansion and derivative block."""
+
+    value = np.asarray(value, dtype=float)
+
+    if value.ndim == 0:
+        value = value.reshape(1)
+
+    value = value.reshape(-1)
+    value_size = value.size
+    matrix = np.tile(value.reshape(1, -1), (rows, 1))
+    derivative = np.zeros((rows * value_size, value_size))
+
+    for row in range(rows):
+        for column in range(value_size):
+            derivative[row * value_size + column, column] = 1.0
+
+    return {
+        "matrix": matrix,
+        "dmatrix_dvalue": derivative,
+    }
+
+
 def cruise_breguet_power_history_inputs(inputs):
     """Return scalar/vector input mapping for CruiseBRE power history."""
 
@@ -2293,6 +2410,57 @@ def apply_breguet_source_delta(source_energy, source_energy_left, columns, delta
     for column in columns:
         source_energy[:, column] = source_energy[0, column] + share
         source_energy_left[:, column] = source_energy_left[0, column] - share
+
+
+def breguet_source_delta_values(source_energy, source_energy_left, columns, delta):
+    """Return Breguet source-delta outputs and derivative blocks."""
+
+    source_energy = np.asarray(source_energy, dtype=float)
+    source_energy_left = np.asarray(source_energy_left, dtype=float)
+    delta = np.asarray(delta, dtype=float).reshape(-1)
+    npoint, nsrc = source_energy.shape
+    updated_source_energy = source_energy.copy()
+    updated_source_energy_left = source_energy_left.copy()
+    columns = tuple(int(column) for column in columns)
+
+    apply_breguet_source_delta(
+        updated_source_energy,
+        updated_source_energy_left,
+        columns,
+        delta,
+    )
+
+    source_size = npoint * nsrc
+    denergy_denergy = np.eye(source_size)
+    denergy_dleft = np.zeros((source_size, source_size))
+    denergy_ddelta = np.zeros((source_size, npoint))
+    dleft_denergy = np.zeros((source_size, source_size))
+    dleft_dleft = np.eye(source_size)
+    dleft_ddelta = np.zeros((source_size, npoint))
+
+    if len(columns) > 0:
+        scale = 1.0 / len(columns)
+        for row in range(npoint):
+            for column in columns:
+                output_index = row * nsrc + column
+                first_row_index = column
+                denergy_denergy[output_index, :] = 0.0
+                denergy_denergy[output_index, first_row_index] = 1.0
+                dleft_dleft[output_index, :] = 0.0
+                dleft_dleft[output_index, first_row_index] = 1.0
+                denergy_ddelta[output_index, row] = scale
+                dleft_ddelta[output_index, row] = -scale
+
+    return {
+        "updated_source_energy": updated_source_energy,
+        "updated_source_energy_left": updated_source_energy_left,
+        "dupdated_source_energy_dsource_energy": denergy_denergy,
+        "dupdated_source_energy_dsource_energy_left": denergy_dleft,
+        "dupdated_source_energy_ddelta": denergy_ddelta,
+        "dupdated_source_energy_left_dsource_energy": dleft_denergy,
+        "dupdated_source_energy_left_dsource_energy_left": dleft_dleft,
+        "dupdated_source_energy_left_ddelta": dleft_ddelta,
+    }
 
 
 def cruise_breguet_source_energy_partials(src_type, npoint, nsrc):
