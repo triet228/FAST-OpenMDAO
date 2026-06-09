@@ -73,6 +73,8 @@ derivative-native FAST equation components:
   derivatives.
 - Engine fixed-shape vector normalization helper with analytical partial
   derivatives.
+- Engine fixed-shape scalar/list restoration helper with analytical partial
+  derivatives.
 - Propulsion primitives for cable sizing weight, engine lapse, engine thrust
   requirement, turboprop/piston engine sizing weight, power-flow propagation,
   power-available propagation, safe component weight, efficiency selection, and
@@ -179,7 +181,8 @@ The public `fast_openmdao` package currently exports:
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
   `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FanFlowSplit`,
   `FlowArea`,
-  `EngineVector`, `JetAIntegratedHeat`, `LocalEfficiency`, `LocalReynolds`,
+  `EngineScalarOrListRestore`, `EngineVector`, `JetAIntegratedHeat`,
+  `LocalEfficiency`, `LocalReynolds`,
   `MassFlowParameter`, `OffDesignNozzleMach`, `PerfectExpansionNozzleFlow`,
   `SimpleOffDesignTurbofan`, `StaticDensity`, `StaticPressure`,
   `StaticTemperature`, `ThermalPerfectGamma`, `TotalPressure`,

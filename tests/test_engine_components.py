@@ -19,6 +19,7 @@ from fast_openmdao import (
     ChokedArea,
     CompressorStageFlow,
     DiffuserFlow,
+    EngineScalarOrListRestore,
     EngineVector,
     FanFlowSplit,
     FlowArea,
@@ -60,6 +61,7 @@ from fast_python.engine import (
     perf_ex_nozzle,
     ps_pt,
     pt_ps,
+    restore_scalar_or_list,
     rhos_rhot,
     simple_off_design,
     ts_tt,
@@ -320,6 +322,41 @@ def test_engine_vector_matches_fast_python():
     problem.run_model()
 
     assert np.allclose(problem.get_val("vector"), as_vector(values))
+
+
+def test_engine_scalar_or_list_restore_matches_fast_python():
+    """Check FAST engine scalar/list restoration parity."""
+
+    scalar_problem = om.Problem()
+    scalar_problem.model.add_subsystem(
+        "restore",
+        EngineScalarOrListRestore(value_size=1),
+        promotes=["*"],
+    )
+    scalar_problem.setup()
+    scalar_problem.set_val("values", [11.0])
+    scalar_problem.run_model()
+
+    assert np.isclose(
+        scalar_problem.get_val("restored_values")[0],
+        restore_scalar_or_list([11.0]),
+    )
+
+    vector = np.asarray([11.0, 3.0, 4.0])
+    vector_problem = om.Problem()
+    vector_problem.model.add_subsystem(
+        "restore",
+        EngineScalarOrListRestore(value_size=3),
+        promotes=["*"],
+    )
+    vector_problem.setup()
+    vector_problem.set_val("values", vector)
+    vector_problem.run_model()
+
+    assert np.allclose(
+        vector_problem.get_val("restored_values"),
+        restore_scalar_or_list(vector),
+    )
 
 
 def test_burner_flow_matches_fast_python():
@@ -656,6 +693,11 @@ def test_engine_primitives_declare_analytic_partials():
             "engine_vector",
             EngineVector(input_shape=(2, 2)),
             {"values": np.asarray([[1.2, 2.3], [3.4, 4.5]])},
+        ),
+        (
+            "engine_restore",
+            EngineScalarOrListRestore(value_size=3),
+            {"values": np.asarray([11.0, 3.0, 4.0])},
         ),
         (
             "simple_off_design",
