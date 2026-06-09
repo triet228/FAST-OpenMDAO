@@ -242,6 +242,37 @@ class RegressionSampleVariance(om.ExplicitComponent):
         partials["sample_variance", "values"] = values["dsample_variance_dvalues"]
 
 
+class RegressionPriorMean(om.ExplicitComponent):
+    """Compute FAST regression prior mean from fixed numeric output data.
+
+    Inputs:
+        values: Output column after FAST database path lookup and numeric
+            conversion. NaN entries represent missing database values.
+
+    Outputs:
+        prior_mean: Mean of the finite entries, or NaN when no finite data are
+            available.
+    """
+
+    def initialize(self):
+        self.options.declare("vec_size", default=1)
+
+    def setup(self):
+        vec_size = self.options["vec_size"]
+        self.add_input("values", val=np.ones(vec_size))
+        self.add_output("prior_mean", val=0.0)
+        self.declare_partials(of="prior_mean", wrt="values")
+
+    def compute(self, inputs, outputs):
+        outputs["prior_mean"] = regression_prior_mean_values(
+            inputs["values"],
+        )["prior_mean"]
+
+    def compute_partials(self, inputs, partials):
+        values = regression_prior_mean_values(inputs["values"])
+        partials["prior_mean", "values"] = values["dprior_mean_dvalues"]
+
+
 class RegressionNumericScalar(om.ExplicitComponent):
     """Select FAST regression's first numeric scalar from fixed-shape data."""
 
@@ -475,6 +506,27 @@ def regression_sample_variance_values(values):
     return {
         "sample_variance": variance,
         "dsample_variance_dvalues": derivative,
+    }
+
+
+def regression_prior_mean_values(values):
+    """Return FAST regression prior mean and fixed-mask derivatives."""
+
+    array = np.asarray(values, dtype=float).reshape(-1)
+    finite = ~np.isnan(array)
+    count = np.count_nonzero(finite)
+    derivative = np.zeros(array.size)
+
+    if count == 0:
+        return {
+            "prior_mean": np.nan,
+            "dprior_mean_dvalues": derivative,
+        }
+
+    derivative[finite] = 1.0 / count
+    return {
+        "prior_mean": np.mean(array[finite]),
+        "dprior_mean_dvalues": derivative,
     }
 
 

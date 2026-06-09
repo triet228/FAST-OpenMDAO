@@ -13,6 +13,7 @@ from fast_openmdao import (
     GaussianProcessPrediction,
     RegressionNumericColumn,
     RegressionNumericScalar,
+    RegressionPriorMean,
     RegressionSampleVariance,
     RegressionTargetMatrix,
     RegressionTwoDimensionalArray,
@@ -25,6 +26,7 @@ from fast_python.regression import (
     nlgpr,
     numeric_column,
     numeric_scalar,
+    prior_calculation,
     sample_variance,
     square_exp_kernel,
     target_matrix,
@@ -156,6 +158,22 @@ def test_regression_shape_and_variance_helpers_match_fast_python():
         sample_variance(variance_values),
     )
 
+    prior_values = np.asarray([10.0, 20.0, np.nan])
+    prior_problem = om.Problem()
+    prior_problem.model.add_subsystem(
+        "prior",
+        RegressionPriorMean(vec_size=prior_values.size),
+        promotes=["*"],
+    )
+    prior_problem.setup()
+    prior_problem.set_val("values", prior_values)
+    prior_problem.run_model()
+
+    assert np.isclose(
+        prior_problem.get_val("prior_mean")[0],
+        prior_calculation(make_regression_database(), make_regression_io_space()),
+    )
+
     scalar_values = np.asarray([[12.0, 13.0], [14.0, 15.0]])
     scalar_problem = om.Problem()
     scalar_problem.model.add_subsystem(
@@ -271,6 +289,11 @@ def test_regression_shape_and_variance_helpers_declare_analytic_partials():
             {"values": np.asarray([2.0, 4.0, 7.0, 11.0])},
         ),
         (
+            "prior",
+            RegressionPriorMean(vec_size=3),
+            {"values": np.asarray([10.0, 20.0, 30.0])},
+        ),
+        (
             "scalar",
             RegressionNumericScalar(input_shape=(2, 2)),
             {"values": np.asarray([[12.0, 13.0], [14.0, 15.0]])},
@@ -325,3 +348,19 @@ def make_gp_prediction_data():
 
     inverse_term = np.linalg.inv(kbarbar + 0.25 * np.eye(data_matrix.shape[0]))
     return data_matrix, hyperparams, inverse_term
+
+
+def make_regression_database():
+    """Return small FAST-style regression database with one missing output."""
+
+    return {
+        "AC1": {"Specs": {"Weight": {"Fuel": 10.0}}},
+        "AC2": {"Specs": {"Weight": {"Fuel": 20.0}}},
+        "AC3": {"Specs": {"Weight": {"Fuel": np.nan}}},
+    }
+
+
+def make_regression_io_space():
+    """Return FAST regression input/output path list for prior tests."""
+
+    return [["Specs", "Weight", "Fuel"]]
