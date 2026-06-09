@@ -90,7 +90,12 @@ from fast_openmdao.mission import (
     PrescribedRateSegmentKinematicsPower,
     TakeoffSegmentKinematics,
 )
-from fast_openmdao.oew import NumericSum, TurbofanAirframeWeight, TurbopropAirframeWeight
+from fast_openmdao.oew import (
+    NumericSum,
+    TurbofanAirframeWeight,
+    TurbopropAirframeWeight,
+    TurbopropOEWIterationStep,
+)
 from fast_openmdao.optimization import (
     BatteryEnergyAvailable,
     CruisePowerAvailableConstraint,
@@ -245,6 +250,7 @@ __all__ = [
     "TurbopropEngineWeightForSizing",
     "TurbopropCruiseLiftDragEstimate",
     "TurbopropAirframeWeight",
+    "TurbopropOEWIterationStep",
     "TurbofanAirframeWeight",
     "UnitConversion",
     "WeightSum",
