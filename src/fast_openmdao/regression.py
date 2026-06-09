@@ -142,6 +142,106 @@ class GaussianProcessPrediction(om.ExplicitComponent):
         ]
 
 
+class RegressionVector(om.ExplicitComponent):
+    """Normalize FAST regression values to a one-dimensional vector."""
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = regression_shape_tuple(self.options["input_shape"])
+        output_size = int(np.prod(input_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("vector", val=np.zeros(output_size))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="vector",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["vector"] = regression_vector_values(inputs["values"])["vector"]
+
+
+class RegressionTwoDimensionalArray(om.ExplicitComponent):
+    """Normalize FAST regression values to a two-dimensional array."""
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = regression_shape_tuple(self.options["input_shape"])
+        output_shape = regression_two_dimensional_output_shape(input_shape)
+        output_size = int(np.prod(output_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("two_dimensional_values", val=np.zeros(output_shape))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="two_dimensional_values",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["two_dimensional_values"] = regression_two_dimensional_values(
+            inputs["values"],
+        )["two_dimensional_values"]
+
+
+class RegressionTargetMatrix(om.ExplicitComponent):
+    """Normalize FAST NLGPR target values to a two-dimensional matrix."""
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = regression_shape_tuple(self.options["input_shape"])
+        output_shape = regression_target_matrix_output_shape(input_shape)
+        output_size = int(np.prod(output_shape))
+        self.add_input("target_values", val=np.zeros(input_shape))
+        self.add_output("target_matrix", val=np.zeros(output_shape))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="target_matrix",
+            wrt="target_values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["target_matrix"] = regression_target_matrix_values(
+            inputs["target_values"],
+        )["target_matrix"]
+
+
+class RegressionSampleVariance(om.ExplicitComponent):
+    """Compute FAST regression sample variance for a fixed numeric vector."""
+
+    def initialize(self):
+        self.options.declare("vec_size", default=2)
+
+    def setup(self):
+        vec_size = self.options["vec_size"]
+        self.add_input("values", val=np.ones(vec_size))
+        self.add_output("sample_variance", val=0.0)
+        self.declare_partials(of="sample_variance", wrt="values")
+
+    def compute(self, inputs, outputs):
+        outputs["sample_variance"] = regression_sample_variance_values(
+            inputs["values"],
+        )["sample_variance"]
+
+    def compute_partials(self, inputs, partials):
+        values = regression_sample_variance_values(inputs["values"])
+        partials["sample_variance", "values"] = values["dsample_variance_dvalues"]
+
+
 def squared_exponential_kernel_value(x_value, y_value, length_scales, signal_variance):
     """Return FAST squared-exponential kernel value."""
 
@@ -221,4 +321,94 @@ def gaussian_process_prediction_values(
         "dposterior_mean_dtarget": dmean_dtarget,
         "dposterior_mean_dprior": dmean_dprior,
         "dposterior_variance_dtarget": dvariance_dtarget,
+    }
+
+
+def regression_shape_tuple(shape):
+    """Return an OpenMDAO option shape as a tuple of integers."""
+
+    if isinstance(shape, tuple) and len(shape) == 0:
+        return ()
+
+    array = np.asarray(shape).reshape(-1)
+
+    if array.size == 0:
+        return (1,)
+
+    return tuple(int(value) for value in array)
+
+
+def regression_vector_values(values):
+    """Return FAST regression values as a one-dimensional vector."""
+
+    return {"vector": np.asarray(values, dtype=float).reshape(-1)}
+
+
+def regression_two_dimensional_output_shape(input_shape):
+    """Return output shape for FAST regression ``as_2d``."""
+
+    if len(input_shape) == 1:
+        return (1, input_shape[0])
+
+    return input_shape
+
+
+def regression_two_dimensional_values(values):
+    """Return FAST regression values as a two-dimensional array."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim == 1:
+        output = array.reshape(1, -1)
+    else:
+        output = array
+
+    return {"two_dimensional_values": output}
+
+
+def regression_target_matrix_output_shape(input_shape):
+    """Return output shape for FAST regression ``target_matrix``."""
+
+    if len(input_shape) == 0:
+        return (1, 1)
+
+    if len(input_shape) == 1:
+        return (1, input_shape[0])
+
+    return input_shape
+
+
+def regression_target_matrix_values(target_values):
+    """Return FAST regression target values as a two-dimensional matrix."""
+
+    array = np.asarray(target_values, dtype=float)
+
+    if array.ndim == 0:
+        matrix = array.reshape(1, 1)
+    elif array.ndim == 1:
+        matrix = array.reshape(1, -1)
+    else:
+        matrix = array
+
+    return {"target_matrix": matrix}
+
+
+def regression_sample_variance_values(values):
+    """Return MATLAB-style sample variance and analytical derivatives."""
+
+    array = np.asarray(values, dtype=float).reshape(-1)
+    size = array.size
+
+    if size < 2:
+        return {
+            "sample_variance": 0.0,
+            "dsample_variance_dvalues": np.zeros(size),
+        }
+
+    mean = np.mean(array)
+    variance = np.sum((array - mean) ** 2) / (size - 1)
+    derivative = 2.0 * (array - mean) / (size - 1)
+    return {
+        "sample_variance": variance,
+        "dsample_variance_dvalues": derivative,
     }

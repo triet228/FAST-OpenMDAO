@@ -43,7 +43,7 @@ closed-form derivatives are practical.
 | `projection.py` | converted | `fast_openmdao.projection.KPPProjection` plus battery and electric motor projection aliases. |
 | `propulsion.py` | candidate | Cable sizing weight, engine lapse, engine thrust requirement, turboprop/piston linear and turbofan GPR engine sizing weight, conventional/electric, parallel-hybrid, series-hybrid, turboelectric, and partial-turboelectric architecture matrix construction, power-flow propagation, power-available propagation, fuel-use accumulation history, smooth battery-source energy accumulation history, fixed-branch non-detailed battery cutoff handling, fixed-shape split/vector/2D/history-matrix normalization, safe component weight, efficiency selectors, and supplemental transmitter power converted; architecture orchestration, detailed-battery cutoff branches, turbofan nonlinear sizing side effects, and full propulsion-history groups remain. |
 | `reference.py` | support | Reference case store and archive access. |
-| `regression.py` | candidate | Squared-exponential kernel and fixed-preprocessing GP posterior prediction converted; database search, data-build preprocessing, and variable input classification remain support/orchestration. |
+| `regression.py` | candidate | Squared-exponential kernel, fixed-preprocessing GP posterior prediction, fixed-shape vector/2D/target normalization, and sample-variance helpers converted; database search, data-build preprocessing, and variable input classification remain support/orchestration. |
 | `retrofit.py` | support | Retrofit option factory placeholder. |
 | `safety.py` | support | Discrete fault-tree logic; not a continuous derivative component. |
 | `specs.py` | support | Aircraft and engine spec factories. |

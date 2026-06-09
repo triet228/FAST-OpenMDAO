@@ -9,8 +9,22 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import GaussianProcessPrediction, SquaredExponentialKernel
-from fast_python.regression import nlgpr, square_exp_kernel
+from fast_openmdao import (
+    GaussianProcessPrediction,
+    RegressionSampleVariance,
+    RegressionTargetMatrix,
+    RegressionTwoDimensionalArray,
+    RegressionVector,
+    SquaredExponentialKernel,
+)
+from fast_python.regression import (
+    as_2d,
+    as_vector,
+    nlgpr,
+    sample_variance,
+    square_exp_kernel,
+    target_matrix,
+)
 
 
 def test_squared_exponential_kernel_matches_fast_python():
@@ -74,6 +88,71 @@ def test_gaussian_process_prediction_matches_fast_python():
     )
 
 
+def test_regression_shape_and_variance_helpers_match_fast_python():
+    """Check regression normalizers and sample variance against FAST-Python."""
+
+    vector_values = np.asarray([[1.0, 2.0], [3.0, 4.0]])
+    vector_problem = om.Problem()
+    vector_problem.model.add_subsystem(
+        "vector",
+        RegressionVector(input_shape=vector_values.shape),
+        promotes=["*"],
+    )
+    vector_problem.setup()
+    vector_problem.set_val("values", vector_values)
+    vector_problem.run_model()
+
+    assert np.allclose(vector_problem.get_val("vector"), as_vector(vector_values))
+
+    two_dimensional_values = np.asarray([5.0, 6.0, 7.0])
+    array_problem = om.Problem()
+    array_problem.model.add_subsystem(
+        "array",
+        RegressionTwoDimensionalArray(input_shape=two_dimensional_values.shape),
+        promotes=["*"],
+    )
+    array_problem.setup()
+    array_problem.set_val("values", two_dimensional_values)
+    array_problem.run_model()
+
+    assert np.allclose(
+        array_problem.get_val("two_dimensional_values"),
+        as_2d(two_dimensional_values),
+    )
+
+    target_values = np.asarray([8.0, 9.0])
+    target_problem = om.Problem()
+    target_problem.model.add_subsystem(
+        "target",
+        RegressionTargetMatrix(input_shape=target_values.shape),
+        promotes=["*"],
+    )
+    target_problem.setup()
+    target_problem.set_val("target_values", target_values)
+    target_problem.run_model()
+
+    assert np.allclose(
+        target_problem.get_val("target_matrix"),
+        target_matrix(target_values),
+    )
+
+    variance_values = np.asarray([2.0, 4.0, 7.0, 11.0])
+    variance_problem = om.Problem()
+    variance_problem.model.add_subsystem(
+        "variance",
+        RegressionSampleVariance(vec_size=variance_values.size),
+        promotes=["*"],
+    )
+    variance_problem.setup()
+    variance_problem.set_val("values", variance_values)
+    variance_problem.run_model()
+
+    assert np.isclose(
+        variance_problem.get_val("sample_variance")[0],
+        sample_variance(variance_values),
+    )
+
+
 def test_squared_exponential_kernel_declares_analytic_partials():
     """Check kernel analytical partials against finite difference."""
 
@@ -129,6 +208,52 @@ def test_gaussian_process_prediction_declares_analytic_partials():
 
     for partial_data in partials["prediction"].values():
         assert partial_data["abs error"].forward < 1.0e-6
+
+
+def test_regression_shape_and_variance_helpers_declare_analytic_partials():
+    """Check regression helper derivatives against finite difference."""
+
+    cases = [
+        (
+            "vector",
+            RegressionVector(input_shape=(2, 2)),
+            {"values": np.asarray([[1.0, 2.0], [3.0, 4.0]])},
+        ),
+        (
+            "array",
+            RegressionTwoDimensionalArray(input_shape=(3,)),
+            {"values": np.asarray([5.0, 6.0, 7.0])},
+        ),
+        (
+            "target",
+            RegressionTargetMatrix(input_shape=(2,)),
+            {"target_values": np.asarray([8.0, 9.0])},
+        ),
+        (
+            "variance",
+            RegressionSampleVariance(vec_size=4),
+            {"values": np.asarray([2.0, 4.0, 7.0, 11.0])},
+        ),
+    ]
+
+    for name, component, values in cases:
+        problem = om.Problem()
+        problem.model.add_subsystem(name, component, promotes=["*"])
+        problem.setup()
+
+        for variable, value in values.items():
+            problem.set_val(variable, value)
+
+        problem.run_model()
+        partials = problem.check_partials(
+            out_stream=None,
+            method="fd",
+            form="central",
+            step=1.0e-6,
+        )
+
+        for partial_data in partials[name].values():
+            assert partial_data["abs error"].forward < 1.0e-6
 
 
 def make_gp_prediction_data():

@@ -131,7 +131,14 @@ from fast_openmdao.projection import (
     ElectricMotorSpecificPowerProjection,
     KPPProjection,
 )
-from fast_openmdao.regression import GaussianProcessPrediction, SquaredExponentialKernel
+from fast_openmdao.regression import (
+    GaussianProcessPrediction,
+    RegressionSampleVariance,
+    RegressionTargetMatrix,
+    RegressionTwoDimensionalArray,
+    RegressionVector,
+    SquaredExponentialKernel,
+)
 from fast_openmdao.propulsion import (
     BatteryEnergyCutoff,
     BatteryEnergyHistory,
@@ -265,6 +272,10 @@ __all__ = [
     "PropulsionTwoDimensionalArray",
     "PropulsionVector",
     "PsLossSigmoid",
+    "RegressionSampleVariance",
+    "RegressionTargetMatrix",
+    "RegressionTwoDimensionalArray",
+    "RegressionVector",
     "SafeComponentWeight",
     "SeriesHybridArchitecture",
     "SimpleOffDesignTurbofan",
