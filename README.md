@@ -32,6 +32,9 @@ derivative-native FAST equation components:
 - Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
   engine-gradient selection, and cruise dynamic pressure with analytical
   partial derivatives.
+- Constraint residual components for approach speed, takeoff field length, and
+  landing field length with analytical partial derivatives and optimization
+  validation against FAST-Python residual roots.
 - Battery scalar primitives for effective cell capacity and selected current
   root with analytical partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
@@ -200,8 +203,10 @@ fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40
    derivatives. Done.
 14. Convert scalar battery primitive equations with analytical partial
    derivatives. Done.
-15. Add complex-step derivative checks where supported by FAST-Python internals.
-16. Build reusable groups for mission, propulsion, weights, and objective
+15. Convert approach, takeoff field length, and landing field length constraint
+   residuals with analytical partial derivatives. Done.
+16. Add complex-step derivative checks where supported by FAST-Python internals.
+17. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

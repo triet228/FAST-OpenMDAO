@@ -8,13 +8,120 @@ import openmdao.api as om
 
 from fast_openmdao.atmosphere import atmosphere_layer
 from fast_python.atmosphere import standard_atmosphere
-from fast_python.units import convert_length, convert_mass
+from fast_python.units import convert_force, convert_length, convert_mass, convert_velocity
 
 
 RHO_SL_STD = standard_atmosphere(0.0)[2]
 KG_TO_SLUG = convert_mass(1.0, "kg", "slug")
 M_TO_FT = convert_length(1.0, "m", "ft")
+KG_M2_TO_LBM_FT2 = convert_mass(1.0, "kg", "lbm") / M_TO_FT ** 2
+N_M2_TO_LBF_FT2 = 9.81 * convert_force(1.0, "N", "lbf") / M_TO_FT ** 2
 RHO_SI_TO_ENGLISH = KG_TO_SLUG / M_TO_FT ** 3
+
+
+class JetApproachConstraint(om.ExplicitComponent):
+    """Compute FAST approach-speed constraint residual."""
+
+    def initialize(self):
+        self.options.declare("req_type", default=1)
+        self.options.declare("cl_landing", default=2.5)
+        self.options.declare("wland_mtow", default=0.85)
+        self.options.declare("approach_velocity", default=70.0)
+
+    def setup(self):
+        self.add_input("wing_loading", val=400.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_output("approach_residual", val=0.0)
+        self.declare_partials(of="approach_residual", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["approach_residual"] = jet_approach_residual(
+            inputs["wing_loading"][0],
+            self.options["req_type"],
+            self.options["cl_landing"],
+            self.options["wland_mtow"],
+            self.options["approach_velocity"],
+        )
+
+    def compute_partials(self, inputs, partials):
+        if self.options["req_type"] == 0:
+            partials["approach_residual", "wing_loading"] = 0.0
+        else:
+            partials["approach_residual", "wing_loading"] = KG_M2_TO_LBM_FT2
+
+        partials["approach_residual", "thrust_loading"] = 0.0
+
+
+class JetTakeoffFieldLengthConstraint(om.ExplicitComponent):
+    """Compute FAST takeoff-field-length constraint residual."""
+
+    def initialize(self):
+        self.options.declare("aircraft_class", default="Turbofan")
+        self.options.declare("cl_takeoff", default=2.0)
+        self.options.declare("balanced_field_length", default=1500.0)
+        self.options.declare("stall_velocity", default=60.0)
+
+    def setup(self):
+        self.add_input("wing_loading", val=400.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_output("takeoff_field_length_residual", val=0.0)
+        self.declare_partials(of="takeoff_field_length_residual", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["takeoff_field_length_residual"] = jet_takeoff_field_length_residual(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["cl_takeoff"],
+            self.options["balanced_field_length"],
+            self.options["stall_velocity"],
+        )
+
+    def compute_partials(self, inputs, partials):
+        derivatives = jet_takeoff_field_length_derivatives(
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["cl_takeoff"],
+            self.options["balanced_field_length"],
+            self.options["stall_velocity"],
+        )
+        partials["takeoff_field_length_residual", "wing_loading"] = derivatives[
+            "dresidual_dwing_loading"
+        ]
+        partials["takeoff_field_length_residual", "thrust_loading"] = derivatives[
+            "dresidual_dthrust_loading"
+        ]
+
+
+class JetLandingFieldLengthConstraint(om.ExplicitComponent):
+    """Compute FAST landing-field-length constraint residual."""
+
+    def initialize(self):
+        self.options.declare("req_type", default=1)
+        self.options.declare("cl_landing", default=2.5)
+        self.options.declare("landing_field_length", default=1200.0)
+        self.options.declare("obstacle_length", default=15.0)
+        self.options.declare("wland_mtow", default=0.85)
+
+    def setup(self):
+        self.add_input("wing_loading", val=400.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_output("landing_field_length_residual", val=0.0)
+        self.declare_partials(of="landing_field_length_residual", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["landing_field_length_residual"] = jet_landing_field_length_residual(
+            inputs["wing_loading"][0],
+            self.options["req_type"],
+            self.options["cl_landing"],
+            self.options["landing_field_length"],
+            self.options["obstacle_length"],
+            self.options["wland_mtow"],
+        )
+
+    def compute_partials(self, inputs, partials):
+        partials["landing_field_length_residual", "wing_loading"] = N_M2_TO_LBF_FT2
+        partials["landing_field_length_residual", "thrust_loading"] = 0.0
 
 
 class PsLossSigmoid(om.ExplicitComponent):
@@ -177,6 +284,94 @@ def selected_engine_gradient(constraint_type, num_engines, two_engine, three_eng
         return three_engine
 
     return four_engine
+
+
+def jet_approach_residual(
+    wing_loading,
+    req_type,
+    cl_landing,
+    wland_mtow,
+    approach_velocity,
+):
+    """Return FAST JetApp residual for one scalar wing loading."""
+
+    if req_type == 0:
+        return 0.0
+
+    vapp_ft_s = convert_velocity(approach_velocity, "m/s", "ft/s")
+    vstall = vapp_ft_s / 1.3
+    required = 0.5 * 0.002377 * vstall ** 2 * cl_landing / wland_mtow
+    return wing_loading * KG_M2_TO_LBM_FT2 - required
+
+
+def jet_takeoff_field_length_residual(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    cl_takeoff,
+    balanced_field_length,
+    stall_velocity,
+):
+    """Return FAST JetTOFL residual for one scalar design point."""
+
+    top25 = balanced_field_length * M_TO_FT / 37.5
+    converted_wing_loading = wing_loading * N_M2_TO_LBF_FT2
+    effective_thrust_loading = thrust_loading
+
+    if aircraft_class.lower() in ("turboprop", "piston"):
+        effective_thrust_loading = 1.0 / (1.1 * stall_velocity * thrust_loading)
+
+    return converted_wing_loading / (cl_takeoff * top25) - effective_thrust_loading
+
+
+def jet_takeoff_field_length_derivatives(
+    thrust_loading,
+    aircraft_class,
+    cl_takeoff,
+    balanced_field_length,
+    stall_velocity,
+):
+    """Return FAST JetTOFL scalar derivatives."""
+
+    top25 = balanced_field_length * M_TO_FT / 37.5
+    dresidual_dwing_loading = N_M2_TO_LBF_FT2 / (cl_takeoff * top25)
+
+    if aircraft_class.lower() in ("turboprop", "piston"):
+        dresidual_dthrust_loading = 1.0 / (
+            1.1 * stall_velocity * thrust_loading ** 2
+        )
+    else:
+        dresidual_dthrust_loading = -1.0
+
+    return {
+        "dresidual_dwing_loading": dresidual_dwing_loading,
+        "dresidual_dthrust_loading": dresidual_dthrust_loading,
+    }
+
+
+def jet_landing_field_length_residual(
+    wing_loading,
+    req_type,
+    cl_landing,
+    landing_field_length,
+    obstacle_length,
+    wland_mtow,
+):
+    """Return FAST JetLFL residual for one scalar wing loading."""
+
+    converted_wing_loading = wing_loading * N_M2_TO_LBF_FT2
+    landing_ft = landing_field_length * M_TO_FT
+    obstacle_ft = obstacle_length * M_TO_FT
+
+    if req_type == 0:
+        distance = 0.6 * landing_ft - obstacle_ft
+        required = 0.95 * cl_landing * distance / 80.0 / wland_mtow
+        return converted_wing_loading - required
+
+    vapp = (landing_ft / 0.3) ** 0.5
+    vstall = vapp / 1.3 * convert_velocity(1.0, "kts", "ft/s")
+    required = 0.5 * 0.002377 * vstall ** 2 * cl_landing / wland_mtow
+    return converted_wing_loading - required
 
 
 def cruise_dynamic_pressure_values(altitude, mach):

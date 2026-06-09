@@ -8,6 +8,9 @@ from fast_openmdao.components import FastPythonComponent
 from fast_openmdao.constraint import (
     CruiseDynamicPressure,
     FAR25EngineGradient,
+    JetApproachConstraint,
+    JetLandingFieldLengthConstraint,
+    JetTakeoffFieldLengthConstraint,
     OEIMultiplier,
     PsLossSigmoid,
 )
@@ -53,6 +56,9 @@ __all__ = [
     "FlightConditions",
     "FlowArea",
     "Gravity",
+    "JetApproachConstraint",
+    "JetLandingFieldLengthConstraint",
+    "JetTakeoffFieldLengthConstraint",
     "KPPProjection",
     "MassFlowParameter",
     "OEIMultiplier",
