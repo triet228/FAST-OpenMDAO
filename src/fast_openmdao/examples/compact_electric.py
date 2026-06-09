@@ -168,6 +168,79 @@ def make_compact_lift_to_drag_problem(
     )
 
 
+def make_compact_hybrid_power_split_problem(
+    split_initial=0.4,
+    split_lower=0.0,
+    split_upper=0.75,
+):
+    """Return a FAST-Python optimization problem for hybrid climb split.
+
+    Inputs:
+        split_initial: Initial climb downstream split.
+        split_lower: Lower split bound.
+        split_upper: Upper split bound.
+
+    Outputs:
+        Unsetup OpenMDAO problem that minimizes battery source energy over
+        climb power split for a compact series-hybrid aircraft.
+
+    Assumptions:
+        The compact hybrid aircraft is a deliberately small smoke model. Its
+        fuel side is not a calibrated aircraft model; the validation objective
+        is battery-source energy, which remains finite and split-sensitive over
+        the tested bounds.
+    """
+
+    aircraft = make_compact_hybrid_aircraft()
+    mission = aircraft.pop("Mission")["Profile"]
+    return make_fast_optimization_problem(
+        aircraft=aircraft,
+        mission=mission,
+        input_specs=[
+            {
+                "name": "climb_power_split",
+                "target": "aircraft",
+                "path": ("Specs", "Power", "LamDwn", "Clb"),
+                "val": split_initial,
+                "desc": "Climb downstream power split.",
+            },
+        ],
+        output_specs=[
+            {
+                "name": "battery_energy_used",
+                "path": (
+                    "aircraft",
+                    "Mission",
+                    "History",
+                    "SI",
+                    "Energy",
+                    "E_ES",
+                    -1,
+                    1,
+                ),
+                "units": "J",
+                "desc": "Final battery-source mission energy.",
+            },
+        ],
+        design_vars=[
+            {
+                "name": "climb_power_split",
+                "lower": split_lower,
+                "upper": split_upper,
+                "scaler": 1.0,
+            },
+        ],
+        objective={
+            "name": "battery_energy_used",
+            "scaler": 1.0e-7,
+        },
+        driver_options={
+            "maxiter": 20,
+            "tol": 1.0e-9,
+        },
+    )
+
+
 def run_demo(range_initial=20000.0, range_lower=10000.0, range_upper=40000.0):
     """Run the compact electric optimization demo.
 
@@ -234,6 +307,30 @@ def run_lift_to_drag_demo(
     }
 
 
+def run_hybrid_power_split_demo(
+    split_initial=0.4,
+    split_lower=0.0,
+    split_upper=0.75,
+):
+    """Run the compact hybrid climb split optimization demo."""
+
+    problem = make_compact_hybrid_power_split_problem(
+        split_initial=split_initial,
+        split_lower=split_lower,
+        split_upper=split_upper,
+    )
+    problem.setup()
+    result = problem.run_driver()
+
+    return {
+        "success": bool(result.success),
+        "climb_power_split": float(problem.get_val("climb_power_split")[0]),
+        "battery_energy_used": float(
+            problem.get_val("battery_energy_used", units="J")[0]
+        ),
+    }
+
+
 def evaluate_fast_python_point(mission_range):
     """Evaluate the compact FAST-Python case at one mission range.
 
@@ -288,6 +385,30 @@ def evaluate_fast_python_lift_to_drag_point(lift_to_drag):
     }
 
 
+def evaluate_fast_python_hybrid_power_split_point(split):
+    """Evaluate the compact hybrid FAST-Python case at one split value.
+
+    Inputs:
+        split: Climb downstream split.
+
+    Outputs:
+        Summary dictionary with split and final battery-source energy.
+    """
+
+    from fast_python import run
+
+    aircraft = make_compact_hybrid_aircraft()
+    aircraft["Specs"]["Power"]["LamDwn"]["Clb"] = split
+    mission = deepcopy(aircraft.pop("Mission")["Profile"])
+    result = run(aircraft, mission)
+    history = result["aircraft"]["Mission"]["History"]["SI"]
+
+    return {
+        "climb_power_split": float(split),
+        "battery_energy_used": float(history["Energy"]["E_ES"][-1][1]),
+    }
+
+
 def sample_fast_python_range_sweep(
     range_lower=10000.0,
     range_upper=40000.0,
@@ -337,6 +458,25 @@ def sample_fast_python_lift_to_drag_sweep(
     return [
         evaluate_fast_python_lift_to_drag_point(
             lift_to_drag_lower + index * step
+        )
+        for index in range(sample_count)
+    ]
+
+
+def sample_fast_python_hybrid_power_split_sweep(
+    split_lower=0.0,
+    split_upper=0.75,
+    sample_count=7,
+):
+    """Evaluate FAST-Python repeatedly across hybrid split design space."""
+
+    if sample_count < 2:
+        raise ValueError("sample_count must be at least 2.")
+
+    step = (split_upper - split_lower) / (sample_count - 1)
+    return [
+        evaluate_fast_python_hybrid_power_split_point(
+            split_lower + index * step
         )
         for index in range(sample_count)
     ]
@@ -396,6 +536,64 @@ def validate_demo_against_fast_python_samples(
         "best_fast_python_sample": best_sample,
         "fast_python_samples": samples,
         "range_error": range_error,
+        "energy_error": energy_error,
+    }
+
+
+def validate_hybrid_power_split_demo_against_fast_python_samples(
+    split_initial=0.4,
+    split_lower=0.0,
+    split_upper=0.75,
+    sample_count=7,
+    split_tolerance=1.0e-4,
+    energy_tolerance=1.0e-4,
+):
+    """Compare hybrid split optimization against FAST-Python samples.
+
+    Inputs:
+        split_initial: Initial OpenMDAO climb split.
+        split_lower: Lower split bound.
+        split_upper: Upper split bound.
+        sample_count: Number of FAST-Python point evaluations.
+        split_tolerance: Allowed optimized-split mismatch.
+        energy_tolerance: Allowed objective mismatch in joules.
+
+    Outputs:
+        Dictionary containing the OpenMDAO optimum, sampled FAST-Python points,
+        best sampled point, and boolean agreement flags.
+    """
+
+    openmdao_summary = run_hybrid_power_split_demo(
+        split_initial=split_initial,
+        split_lower=split_lower,
+        split_upper=split_upper,
+    )
+    samples = sample_fast_python_hybrid_power_split_sweep(
+        split_lower=split_lower,
+        split_upper=split_upper,
+        sample_count=sample_count,
+    )
+    best_sample = min(samples, key=lambda sample: sample["battery_energy_used"])
+    split_error = abs(
+        openmdao_summary["climb_power_split"]
+        - best_sample["climb_power_split"]
+    )
+    energy_error = abs(
+        openmdao_summary["battery_energy_used"]
+        - best_sample["battery_energy_used"]
+    )
+
+    return {
+        "success": openmdao_summary["success"],
+        "agrees_with_samples": (
+            openmdao_summary["success"]
+            and split_error <= split_tolerance
+            and energy_error <= energy_tolerance
+        ),
+        "openmdao": openmdao_summary,
+        "best_fast_python_sample": best_sample,
+        "fast_python_samples": samples,
+        "split_error": split_error,
         "energy_error": energy_error,
     }
 
@@ -583,6 +781,65 @@ def make_compact_aircraft():
         },
         "Mission": {
             "Profile": make_compact_mission(),
+        },
+    }
+
+
+def make_compact_hybrid_aircraft():
+    """Return a compact series-hybrid aircraft for split smoke runs."""
+
+    aircraft = make_compact_aircraft()
+    aircraft["Specs"]["Propulsion"]["PropArch"]["Type"] = "SHE"
+    aircraft["Specs"]["Propulsion"]["NumEngines"] = 2
+    aircraft["Specs"]["Propulsion"]["Engine"] = compact_turboprop_engine_spec()
+    aircraft["Specs"]["Weight"]["Fuel"] = 200.0
+    aircraft["Specs"]["Weight"]["Batt"] = 200.0
+    aircraft["Specs"]["Power"]["Eta"]["GT"] = 0.4
+    aircraft["Specs"]["Power"]["Eta"]["EM"] = 0.95
+    aircraft["Specs"]["Power"]["Eta"]["EG"] = 0.92
+    aircraft["Specs"]["Power"]["Eta"]["Propeller"] = 0.85
+    aircraft["Specs"]["Power"]["LamDwn"]["SLS"] = 0.0
+    aircraft["Specs"]["Power"]["LamDwn"]["Clb"] = 0.0
+    aircraft["Specs"]["Power"]["LamDwn"]["Crs"] = 0.0
+    aircraft["Specs"]["Power"]["LamDwn"]["Des"] = 0.0
+    aircraft["HistData"] = {
+        "Eng": {
+            "E1": {
+                "Power_SLS": 100000.0,
+                "DryWeight": 10.0,
+            },
+            "E2": {
+                "Power_SLS": 500000.0,
+                "DryWeight": 50.0,
+            },
+            "E3": {
+                "Power_SLS": 1000000.0,
+                "DryWeight": 100.0,
+            },
+        },
+    }
+    return aircraft
+
+
+def compact_turboprop_engine_spec():
+    """Return a compact turboprop engine spec for hybrid smoke runs."""
+
+    return {
+        "Mach": 0.05,
+        "Alt": 0,
+        "OPR": 15,
+        "Tt4Max": 1200,
+        "ReqPower": 3.0e6,
+        "NPR": 1.3,
+        "NoSpools": 2,
+        "RPMs": [15000, 12000],
+        "EtaPoly": {
+            "Inlet": 0.99,
+            "Diffusers": 0.99,
+            "Compressors": 0.9,
+            "Combustor": 0.98,
+            "Turbines": 0.9,
+            "Nozzles": 0.985,
         },
     }
 
