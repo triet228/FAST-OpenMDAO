@@ -202,6 +202,40 @@ class BatteryWeightFromEnergy(om.ExplicitComponent):
         ]
 
 
+class BatteryNonzeroMean(om.ExplicitComponent):
+    """Compute FAST's mean of nonzero battery-history values.
+
+    Inputs:
+        values: Battery history vector, such as C-rate.
+
+    Outputs:
+        nonzero_mean: Mean of entries that are nonzero, or zero if no entries
+            are active.
+
+    Assumptions:
+        The nonzero mask is the active branch. Analytical derivatives are exact
+        away from entries crossing zero.
+    """
+
+    def initialize(self):
+        self.options.declare("vec_size", default=1)
+
+    def setup(self):
+        vec_size = self.options["vec_size"]
+        self.add_input("values", val=np.ones(vec_size))
+        self.add_output("nonzero_mean", val=1.0)
+        self.declare_partials(of="nonzero_mean", wrt="values")
+
+    def compute(self, inputs, outputs):
+        outputs["nonzero_mean"] = battery_nonzero_mean_values(inputs["values"])[
+            "nonzero_mean"
+        ]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_nonzero_mean_values(inputs["values"])
+        partials["nonzero_mean", "values"] = values["dnonzero_mean_dvalues"]
+
+
 class DetailedBatterySizing(om.ExplicitComponent):
     """Resize detailed battery parallel-cell counts and mass after a mission."""
 
@@ -588,6 +622,26 @@ def battery_charge_ocv_values(
         result["dopen_circuit_voltage_d%s" % variable] = derivative
 
     return result
+
+
+def battery_nonzero_mean_values(values):
+    """Return FAST nonzero mean and active-mask derivative."""
+
+    array = np.asarray(values, dtype=float).reshape(-1)
+    active = array != 0.0
+    derivative = np.zeros(array.size)
+
+    if not np.any(active):
+        mean = 0.0
+    else:
+        active_count = np.count_nonzero(active)
+        mean = np.mean(array[active])
+        derivative[active] = 1.0 / active_count
+
+    return {
+        "nonzero_mean": mean,
+        "dnonzero_mean_dvalues": derivative,
+    }
 
 
 def battery_power_step_input_names():

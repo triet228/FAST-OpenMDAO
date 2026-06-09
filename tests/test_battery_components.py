@@ -14,6 +14,7 @@ from fast_openmdao import (
     BatteryChargeOCV,
     BatteryCyclingAging,
     BatteryCurrent,
+    BatteryNonzeroMean,
     DetailedBatterySizing,
     BatteryPowerHistory,
     BatteryPowerStep,
@@ -25,6 +26,7 @@ from fast_python.battery import (
     cycling_aging_parameters,
     discharging,
     estimate_charge_ocv,
+    nonzero_mean,
     resize_battery,
     solve_battery_current,
 )
@@ -122,6 +124,35 @@ def test_battery_weight_from_energy_matches_fast_python_resize_battery():
         problem.get_val("battery_weight", units="kg"),
         np.asarray(result["Specs"]["Weight"]["Batt"]),
     )
+
+
+def test_battery_nonzero_mean_matches_fast_python():
+    """Check battery nonzero history mean parity with FAST-Python."""
+
+    values = np.asarray([0.0, 1.5, 0.0, 2.5, 4.0])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "mean",
+        BatteryNonzeroMean(vec_size=values.size),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("values", values)
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("nonzero_mean")[0], nonzero_mean(values))
+
+    zero_problem = om.Problem()
+    zero_problem.model.add_subsystem(
+        "mean",
+        BatteryNonzeroMean(vec_size=3),
+        promotes=["*"],
+    )
+    zero_problem.setup()
+    zero_problem.set_val("values", np.zeros(3))
+    zero_problem.run_model()
+
+    assert np.isclose(zero_problem.get_val("nonzero_mean")[0], 0.0)
 
 
 def test_detailed_battery_sizing_matches_fast_python_resize_battery():
@@ -289,6 +320,11 @@ def test_battery_primitives_declare_analytic_partials():
                 "cold_voltage": 4.0,
                 "requested_cell_power": 10.0,
             },
+        ),
+        (
+            "nonzero_mean",
+            BatteryNonzeroMean(vec_size=3),
+            {"values": np.asarray([1.0, 2.0, 4.0])},
         ),
         (
             "charge_current",
