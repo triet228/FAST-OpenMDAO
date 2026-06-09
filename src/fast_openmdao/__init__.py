@@ -180,6 +180,11 @@ from fast_openmdao.specs import (
     SplitScalar,
     ZeroSegmentSplits,
 )
+from fast_openmdao.split_optimization import (
+    SplitGroupSums,
+    make_fast_split_optimization_problem,
+    split_matrix_design_specs,
+)
 from fast_openmdao.propulsion import (
     BatteryEnergyCutoff,
     BatteryEnergyHistory,
@@ -361,6 +366,8 @@ __all__ = [
     "SeriesHybridArchitecture",
     "SimpleOffDesignTurbofan",
     "SimplexPostSplitHistory",
+    "SplitGroupSums",
+    "split_matrix_design_specs",
     "SimpleSourceTransmitterArchitecture",
     "SplitScalar",
     "SplitValuesVector",
@@ -401,4 +408,5 @@ __all__ = [
     "__version__",
     "make_fast_optimization_problem",
     "make_fast_problem",
+    "make_fast_split_optimization_problem",
 ]

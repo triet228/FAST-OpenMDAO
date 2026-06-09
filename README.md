@@ -146,6 +146,52 @@ problem.setup()
 problem.run_driver()
 ```
 
+## Split Matrix Optimization
+
+Use `make_fast_split_optimization_problem` when a custom propulsion
+architecture stores operational split matrices directly in the FAST aircraft
+dictionary. The helper discovers active branching entries, exposes each entry
+as a scalar OpenMDAO design variable, and adds equality constraints so each
+branching row or column sums to one.
+
+```python
+from fast_openmdao import make_fast_split_optimization_problem
+
+problem = make_fast_split_optimization_problem(
+    aircraft=aircraft,
+    mission=mission,
+    split_specs=[
+        {
+            "label": "downstream",
+            "prefix": "downstream",
+            "target": "aircraft",
+            "matrix_path": ("Specs", "Propulsion", "PropArch", "OperDwn"),
+            "architecture_path": ("Specs", "Propulsion", "PropArch", "Arch"),
+            "axis": "row",
+            "lower": 0.0,
+            "upper": 1.0,
+        },
+    ],
+    output_specs=[
+        {
+            "name": "fuel_burn",
+            "path": ("aircraft", "Mission", "History", "SI", "Weight", "Fburn", -1),
+            "units": "kg",
+        },
+    ],
+    objective={"name": "fuel_burn"},
+)
+
+problem.setup()
+problem.run_driver()
+```
+
+Set `axis` to `"row"` for FAST-style split rows that distribute one upstream
+component to multiple downstream components, or `"column"` for architectures
+that normalize incoming split columns. Single-connection rows or columns remain
+fixed by default; set `include_singletons=True` only when those entries should
+also become design variables.
+
 ## Compact Example
 
 Run the compact electric optimization smoke example:
