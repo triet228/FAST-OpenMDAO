@@ -27,7 +27,7 @@ closed-form derivatives are practical.
 | `compare.py` | support | Regression comparison utilities. |
 | `constraint.py` | candidate | Constraint diagram and FAR/jet performance constraint components. |
 | `core.py` | bridge | Existing `FastPythonComponent` wrapper preserves end-to-end execution. |
-| `cost.py` | candidate | Battery replacement and capacity cost components. |
+| `cost.py` | converted | `fast_openmdao.cost.BatteryReplacementCost` for replacement cost; add more cost components if FAST-Python grows. |
 | `data_struct.py` | support | Defaults and schema preparation; may later feed OpenMDAO options. |
 | `database.py` | support | Database loading and regression source processing. |
 | `engine.py` | candidate | Thermodynamic cycle, nozzle, fan, compressor, turbine, and sizing components. |
@@ -40,14 +40,14 @@ closed-form derivatives are practical.
 | `optimization.py` | candidate | Recast useful objective and constraint functions as OpenMDAO driver setup; avoid porting custom optimizers unless needed. |
 | `plotting.py` | support | Plot preparation and rendering utilities. |
 | `profiles.py` | support | Mission profile factories. |
-| `projection.py` | candidate | Technology projection scalar components. |
+| `projection.py` | converted | `fast_openmdao.projection.KPPProjection` plus battery and electric motor projection aliases. |
 | `propulsion.py` | candidate | Power-flow, architecture, sizing, fuel-use, and history components. |
 | `reference.py` | support | Reference case store and archive access. |
 | `regression.py` | candidate | Regression kernels and GP predictor components where differentiable. |
 | `retrofit.py` | support | Retrofit option factory placeholder. |
 | `safety.py` | support | Discrete fault-tree logic; not a continuous derivative component. |
 | `specs.py` | support | Aircraft and engine spec factories. |
-| `units.py` | candidate | Unit-conversion components only if needed in promoted OpenMDAO models. |
+| `units.py` | converted | `fast_openmdao.units.UnitConversion` for scalar OpenMDAO variables. |
 
 ## Conversion Rules
 
