@@ -51,6 +51,7 @@ from fast_openmdao.engine import (
     TotalPressure,
     TotalTemperature,
     TurbineStageFlow,
+    TurbofanLinearSizing,
     TurbopropLinearSizing,
 )
 from fast_openmdao.mission import (
@@ -165,6 +166,7 @@ __all__ = [
     "TotalPressure",
     "TotalTemperature",
     "TurbineStageFlow",
+    "TurbofanLinearSizing",
     "TurbopropLinearSizing",
     "ThrustSinkEfficiency",
     "TransmitterFanEfficiency",

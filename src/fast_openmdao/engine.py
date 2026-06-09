@@ -998,6 +998,67 @@ class TurbopropLinearSizing(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class TurbofanLinearSizing(om.ExplicitComponent):
+    """Compute FAST low-fidelity turbofan linear sizing estimates."""
+
+    def setup(self):
+        self.add_input("mach", val=0.05)
+        self.add_input("altitude", val=0.0, units="m")
+        self.add_input("overall_pressure_ratio", val=30.0)
+        self.add_input("bypass_ratio", val=5.0)
+        self.add_input("fan_pressure_ratio", val=1.5)
+        self.add_input("max_total_temperature_4", val=1600.0, units="K")
+        self.add_input("design_thrust", val=120000.0, units="N")
+        self.add_input("inlet_efficiency", val=0.99)
+        self.add_input("fan_efficiency", val=0.92)
+        self.add_input("compressor_efficiency", val=0.9)
+        self.add_input("bypass_nozzle_efficiency", val=0.98)
+        self.add_input("combustor_efficiency", val=0.99)
+        self.add_input("turbine_efficiency", val=0.9)
+        self.add_input("core_nozzle_efficiency", val=0.98)
+        self.add_output("tsfc", val=1.3e-5)
+        self.add_output("mass_flow_0", val=700.0, units="kg/s")
+        self.add_output("fuel_flow", val=1.5, units="kg/s")
+        self.add_output("compressor_work", val=4.0e5)
+        self.add_output("total_temperature_49", val=900.0, units="K")
+        self.add_output("fan_diameter", val=1.6, units="m")
+        self.add_output("corrected_mass_flow", val=700.0, units="kg/s")
+        self.add_output("core_exit_velocity", val=500.0, units="m/s")
+        self.add_output("fuel_air_ratio", val=0.02)
+        self.add_output("tgt_stagnation", val=900.0, units="K")
+        self.add_output("area_0", val=10.0, units="m**2")
+        self.add_output("area_1", val=10.0, units="m**2")
+        self.add_output("bypass_total_pressure_19", val=101300.0, units="Pa")
+        self.add_output("core_total_pressure_9", val=101300.0, units="Pa")
+        self.add_output("mass_flow_3", val=100.0, units="kg/s")
+        self.add_output("mass_flow_31", val=90.0, units="kg/s")
+        self.add_output("mass_flow_4", val=90.0, units="kg/s")
+        self.add_output("mass_flow_49", val=90.0, units="kg/s")
+        self.add_output("mass_flow_495", val=90.0, units="kg/s")
+        self.add_output("mass_flow_5", val=90.0, units="kg/s")
+        self.add_output("mass_flow_9", val=90.0, units="kg/s")
+        self.add_output("mass_flow_13", val=500.0, units="kg/s")
+        self.add_output("mass_flow_19", val=500.0, units="kg/s")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = turbofan_linear_sizing_values(
+            *[inputs[name][0] for name in turbofan_linear_sizing_input_names()]
+        )
+
+        for output in turbofan_linear_sizing_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = turbofan_linear_sizing_values(
+            *[inputs[name][0] for name in turbofan_linear_sizing_input_names()]
+        )
+
+        for output in turbofan_linear_sizing_output_names():
+            for variable in turbofan_linear_sizing_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 def simple_off_design_input_names():
     """Return scalar input names for SimpleOffDesignTurbofan derivatives."""
 
@@ -1042,6 +1103,57 @@ def turboprop_linear_sizing_output_names():
         "mass_flow_2",
         "fuel_flow",
         "total_temperature_7",
+    )
+
+
+def turbofan_linear_sizing_input_names():
+    """Return scalar inputs for TurbofanLinearSizing derivatives."""
+
+    return (
+        "mach",
+        "altitude",
+        "overall_pressure_ratio",
+        "bypass_ratio",
+        "fan_pressure_ratio",
+        "max_total_temperature_4",
+        "design_thrust",
+        "inlet_efficiency",
+        "fan_efficiency",
+        "compressor_efficiency",
+        "bypass_nozzle_efficiency",
+        "combustor_efficiency",
+        "turbine_efficiency",
+        "core_nozzle_efficiency",
+    )
+
+
+def turbofan_linear_sizing_output_names():
+    """Return scalar TurbofanLinearSizing outputs."""
+
+    return (
+        "tsfc",
+        "mass_flow_0",
+        "fuel_flow",
+        "compressor_work",
+        "total_temperature_49",
+        "fan_diameter",
+        "corrected_mass_flow",
+        "core_exit_velocity",
+        "fuel_air_ratio",
+        "tgt_stagnation",
+        "area_0",
+        "area_1",
+        "bypass_total_pressure_19",
+        "core_total_pressure_9",
+        "mass_flow_3",
+        "mass_flow_31",
+        "mass_flow_4",
+        "mass_flow_49",
+        "mass_flow_495",
+        "mass_flow_5",
+        "mass_flow_9",
+        "mass_flow_13",
+        "mass_flow_19",
     )
 
 
@@ -1149,6 +1261,206 @@ def turboprop_linear_sizing_values(
         result[output_name] = ad_value.value
 
         for input_name in turboprop_linear_sizing_input_names():
+            result["d%s_d%s" % (output_name, input_name)] = (
+                ad_value.derivatives.get(input_name, 0.0)
+            )
+
+    return result
+
+
+def turbofan_linear_sizing_values(
+    mach,
+    altitude,
+    overall_pressure_ratio,
+    bypass_ratio,
+    fan_pressure_ratio,
+    max_total_temperature_4,
+    design_thrust,
+    inlet_efficiency,
+    fan_efficiency,
+    compressor_efficiency,
+    bypass_nozzle_efficiency,
+    combustor_efficiency,
+    turbine_efficiency,
+    core_nozzle_efficiency,
+):
+    """Return FAST turbofan linear sizing outputs and derivatives."""
+
+    raw_inputs = {
+        "mach": mach,
+        "altitude": altitude,
+        "overall_pressure_ratio": overall_pressure_ratio,
+        "bypass_ratio": bypass_ratio,
+        "fan_pressure_ratio": fan_pressure_ratio,
+        "max_total_temperature_4": max_total_temperature_4,
+        "design_thrust": design_thrust,
+        "inlet_efficiency": inlet_efficiency,
+        "fan_efficiency": fan_efficiency,
+        "compressor_efficiency": compressor_efficiency,
+        "bypass_nozzle_efficiency": bypass_nozzle_efficiency,
+        "combustor_efficiency": combustor_efficiency,
+        "turbine_efficiency": turbine_efficiency,
+        "core_nozzle_efficiency": core_nozzle_efficiency,
+    }
+    values = {
+        name: _Ad.variable(raw_inputs[name], name)
+        for name in turbofan_linear_sizing_input_names()
+    }
+    gl = 7.0 / 5.0
+    gh = 4.0 / 3.0
+    cpl = gl * GAS_CONSTANT_AIR / (gl - 1.0)
+    cph = gh * GAS_CONSTANT_AIR / (gh - 1.0)
+    lower_heating_value = 43.17e6
+    mach_ad = values["mach"]
+    atmosphere = _ad_atmosphere_layer(values["altitude"])
+    cpr = values["overall_pressure_ratio"]
+    bpr = values["bypass_ratio"]
+    fpr = values["fan_pressure_ratio"]
+    tt4 = values["max_total_temperature_4"]
+    design_thrust_ad = values["design_thrust"]
+    eta1 = values["inlet_efficiency"]
+    eta2 = values["fan_efficiency"]
+    eta3 = values["compressor_efficiency"]
+    eta19 = values["bypass_nozzle_efficiency"]
+    eta4 = values["combustor_efficiency"]
+    eta49 = values["turbine_efficiency"]
+    eta5 = values["turbine_efficiency"]
+    eta9 = values["core_nozzle_efficiency"]
+    ts0 = atmosphere["temperature"]
+    ps0 = atmosphere["pressure"]
+    rho0 = atmosphere["density"]
+    pt0 = ps0 * _ad_pressure_ratio(mach_ad, gl)
+    tt0 = ts0 * _ad_isentropic_q(mach_ad, gl)
+    mass0_unit = 1.0 + bpr
+    u0 = mach_ad * _ad_sqrt(gl * GAS_CONSTANT_AIR * ts0)
+    area0_unit = mass0_unit / rho0 / u0
+    mass1 = mass0_unit
+    pt1 = pt0 * eta1
+    tt1 = tt0
+    mach1 = 0.4
+    ps1 = pt1 / _ad_pressure_ratio(mach1, gl)
+    ts1 = tt1 / _ad_isentropic_q(mach1, gl)
+    rho1 = ps1 / GAS_CONSTANT_AIR / ts1
+    u1 = mach1 * _ad_sqrt(gl * GAS_CONSTANT_AIR * ts1)
+    area1_unit = mass1 / rho1 / u1
+    pt2 = fpr * pt1
+    ideal_tt2 = tt1 * fpr ** (1.0 - 1.0 / gl)
+    tt2 = (ideal_tt2 - tt1) / eta2 + tt1
+    fan_work = (1.0 + bpr) * cpl * (tt2 - tt1)
+    mass13_unit = bpr
+    pt13 = pt2
+    tt13 = tt2
+    mass19_unit = mass13_unit
+    ps19 = ps0
+    tt19 = tt13
+    ts19_ideal = tt19 * (ps19 / pt13) ** ((gl - 1.0) / gl)
+    u19_ideal = _ad_sqrt((tt19 - ts19_ideal) * 2.0 * cpl)
+    u19 = u19_ideal * eta19
+    ts19 = tt19 - u19 ** 2.0 / 2.0 / cpl
+    pt19 = ps19 * (tt19 / ts19) ** (gl / (gl - 1.0))
+    pt3 = cpr * pt2
+    ideal_tt3 = tt2 * cpr ** ((gl - 1.0) / gl)
+    tt3 = (ideal_tt3 - tt2) / eta3 + tt2
+    compressor_work = cpl * (tt3 - tt2)
+    mass_leak = 0.01
+    mass_bleed = 0.03
+    mass_cooling = 0.06
+    mass31_unit = 1.0 - mass_leak - mass_bleed - mass_cooling
+    tt31 = tt3
+    pt31 = pt3
+    pt4 = pt31 * 0.95
+    cp_air_combustion = _ad_integrated_heat_value(
+        tt31,
+        tt4,
+        233.0,
+        1.0 / 210.0,
+        875.0,
+        993.0,
+    )
+    cp_jeta_combustion = _ad_integrated_heat_value(
+        tt31,
+        tt4,
+        4600.0,
+        1.0 / 410.0,
+        500.0,
+        100.0,
+    )
+    fuel_flow_unit = mass31_unit * cp_air_combustion / (
+        eta4 * lower_heating_value - cp_jeta_combustion
+    )
+    fuel_air_ratio = (tt4 / tt3 - 1.0) / (
+        (eta4 * lower_heating_value) / cp_air_combustion - tt4 / tt3
+    )
+    mass4_unit = mass31_unit + fuel_flow_unit
+    tt49_ideal = tt4 - compressor_work / mass4_unit / cph
+    pt49 = pt4 * (
+        1.0 + (tt49_ideal - tt4) / tt4 / eta49
+    ) ** (gh / (gh - 1.0))
+    tt49 = tt4 - compressor_work / mass4_unit / cph / eta49
+    mass495_unit = mass4_unit + mass_cooling
+    tt495 = (mass4_unit * cph * tt49 + mass_cooling * cpl * tt31) / (
+        cph * mass495_unit
+    )
+    pt495 = pt49 * (tt495 / tt49) ** (gh / (gh - 1.0))
+    tt5_ideal = tt495 - fan_work / mass495_unit / cph
+    pt5 = pt495 * (
+        1.0 + (tt5_ideal - tt495) / tt495 / eta5
+    ) ** (gh / (gh - 1.0))
+    tt5 = tt495 - fan_work / mass495_unit / cph / eta5
+    mass9_unit = mass495_unit
+    ps9 = ps0
+    tt9 = tt5
+    ts9_ideal = tt9 * (ps9 / pt5) ** ((gh - 1.0) / gh)
+    u9_ideal = _ad_sqrt((tt9 - ts9_ideal) * 2.0 * cph)
+    u9 = u9_ideal * eta9
+    ts9 = tt9 - u9 ** 2.0 / 2.0 / cph
+    pt9 = ps9 * (tt9 / ts9) ** (gh / (gh - 1.0))
+    specific_thrust = mass9_unit * u9 + mass19_unit * u19 - mass0_unit * u0
+    mass2 = design_thrust_ad / specific_thrust
+    area1 = area1_unit * mass2
+    fan_diameter = 2.0 * _ad_sqrt(area1 / math.pi)
+    mass0 = mass0_unit * mass2
+    mass3 = mass2
+    mass31 = mass31_unit * mass2
+    mass4 = mass4_unit * mass2
+    mass49 = mass4
+    mass495 = mass495_unit * mass2
+    mass5 = mass495
+    mass9 = mass9_unit * mass2
+    mass13 = mass13_unit * mass2
+    mass19 = mass19_unit * mass2
+    fuel_flow = fuel_flow_unit * mass2
+    ad_outputs = {
+        "tsfc": fuel_flow / design_thrust_ad,
+        "mass_flow_0": mass0,
+        "fuel_flow": fuel_flow,
+        "compressor_work": compressor_work,
+        "total_temperature_49": tt5,
+        "fan_diameter": fan_diameter,
+        "corrected_mass_flow": mass2 * (1.0 + bpr),
+        "core_exit_velocity": u9,
+        "fuel_air_ratio": fuel_air_ratio,
+        "tgt_stagnation": tt5,
+        "area_0": area0_unit * mass2,
+        "area_1": area1,
+        "bypass_total_pressure_19": pt19,
+        "core_total_pressure_9": pt9,
+        "mass_flow_3": mass3,
+        "mass_flow_31": mass31,
+        "mass_flow_4": mass4,
+        "mass_flow_49": mass49,
+        "mass_flow_495": mass495,
+        "mass_flow_5": mass5,
+        "mass_flow_9": mass9,
+        "mass_flow_13": mass13,
+        "mass_flow_19": mass19,
+    }
+    result = {}
+
+    for output_name, ad_value in ad_outputs.items():
+        result[output_name] = ad_value.value
+
+        for input_name in turbofan_linear_sizing_input_names():
             result["d%s_d%s" % (output_name, input_name)] = (
                 ad_value.derivatives.get(input_name, 0.0)
             )

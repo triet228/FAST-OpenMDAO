@@ -34,6 +34,7 @@ from fast_openmdao import (
     TotalPressure,
     TotalTemperature,
     TurbineStageFlow,
+    TurbofanLinearSizing,
     TurbopropLinearSizing,
 )
 from fast_python.engine import (
@@ -60,6 +61,7 @@ from fast_python.engine import (
     ts_tt,
     tt_ts,
     turb_stage,
+    turbofan_linear_sizing,
     turboprop_linear_sizing,
 )
 
@@ -516,6 +518,46 @@ def test_turboprop_linear_sizing_matches_fast_python():
     assert np.isclose(problem.get_val("total_temperature_7", units="K")[0], expected["Tt7"])
 
 
+def test_turbofan_linear_sizing_matches_fast_python():
+    """Check FAST low-fidelity turbofan linear sizing parity."""
+
+    engine_spec = make_turbofan_linear_sizing_spec()
+    expected = turbofan_linear_sizing(engine_spec)
+    problem = om.Problem()
+    problem.model.add_subsystem("sizing", TurbofanLinearSizing(), promotes=["*"])
+    problem.setup()
+    set_turbofan_linear_sizing_values(problem, engine_spec)
+    problem.run_model()
+    mapping = {
+        "tsfc": "TSFC",
+        "mass_flow_0": "MDot0",
+        "fuel_flow": "MFuel",
+        "compressor_work": "compwork",
+        "total_temperature_49": "Tt49",
+        "fan_diameter": "DFan",
+        "corrected_mass_flow": "wdot",
+        "core_exit_velocity": "u9",
+        "fuel_air_ratio": "f",
+        "tgt_stagnation": "TGT_Stagnation",
+        "area_0": "A0",
+        "area_1": "A1",
+        "bypass_total_pressure_19": "Pt19",
+        "core_total_pressure_9": "Pt9",
+        "mass_flow_3": "m3",
+        "mass_flow_31": "m31",
+        "mass_flow_4": "m4",
+        "mass_flow_49": "m49",
+        "mass_flow_495": "m495",
+        "mass_flow_5": "m5",
+        "mass_flow_9": "m9",
+        "mass_flow_13": "m13",
+        "mass_flow_19": "m19",
+    }
+
+    for output, fast_key in mapping.items():
+        assert np.isclose(problem.get_val(output)[0], expected[fast_key])
+
+
 def test_engine_primitives_declare_analytic_partials():
     """Check engine primitive derivatives against finite difference."""
 
@@ -599,6 +641,26 @@ def test_engine_primitives_declare_analytic_partials():
                 "compressor_efficiency": 0.9,
                 "combustor_efficiency": 0.98,
                 "turbine_efficiency": 0.9,
+            },
+        ),
+        (
+            "turbofan_linear_sizing",
+            TurbofanLinearSizing(),
+            {
+                "mach": 0.08,
+                "altitude": 1000.0,
+                "overall_pressure_ratio": 30.0,
+                "bypass_ratio": 5.0,
+                "fan_pressure_ratio": 1.5,
+                "max_total_temperature_4": 1600.0,
+                "design_thrust": 120000.0,
+                "inlet_efficiency": 0.99,
+                "fan_efficiency": 0.92,
+                "compressor_efficiency": 0.9,
+                "bypass_nozzle_efficiency": 0.98,
+                "combustor_efficiency": 0.99,
+                "turbine_efficiency": 0.9,
+                "core_nozzle_efficiency": 0.98,
             },
         ),
         (
@@ -692,6 +754,7 @@ def test_engine_primitives_declare_analytic_partials():
                 "nozzle",
                 "diffuser",
                 "turboprop_linear_sizing",
+                "turbofan_linear_sizing",
                 "burner",
                 "stage",
                 "turbine_stage",
@@ -919,6 +982,62 @@ def set_turboprop_linear_sizing_values(problem, engine_spec):
     problem.set_val("compressor_efficiency", eta["Compressors"])
     problem.set_val("combustor_efficiency", eta["Combustor"])
     problem.set_val("turbine_efficiency", eta["Turbines"])
+
+
+def make_turbofan_linear_sizing_spec():
+    """Return compact FAST-Python turbofan sizing spec."""
+
+    return {
+        "Mach": 0.05,
+        "Alt": 0.0,
+        "OPR": 30.0,
+        "BPR": 5.0,
+        "FPR": 1.5,
+        "Tt4Max": 1600.0,
+        "DesignThrust": 120000.0,
+        "NoSpools": 2,
+        "RPMs": [7400.0, 17820.0],
+        "FanGearRatio": np.nan,
+        "FanBoosters": False,
+        "MaxIter": 300,
+        "CoreFlow": {
+            "PaxBleed": 0.03,
+            "Leakage": 0.01,
+            "Cooling": 0.0,
+        },
+        "EtaPoly": {
+            "Inlet": 0.99,
+            "Diffusers": 0.99,
+            "Fan": 0.92,
+            "Compressors": 0.9,
+            "BypassNozzle": 0.98,
+            "Combustor": 0.99,
+            "Turbines": 0.9,
+            "CoreNozzle": 0.98,
+            "Nozzles": 0.99,
+            "Mixing": 0.0,
+        },
+    }
+
+
+def set_turbofan_linear_sizing_values(problem, engine_spec):
+    """Set OpenMDAO turbofan sizing inputs from FAST-Python spec fields."""
+
+    eta = engine_spec["EtaPoly"]
+    problem.set_val("mach", engine_spec["Mach"])
+    problem.set_val("altitude", engine_spec["Alt"], units="m")
+    problem.set_val("overall_pressure_ratio", engine_spec["OPR"])
+    problem.set_val("bypass_ratio", engine_spec["BPR"])
+    problem.set_val("fan_pressure_ratio", engine_spec["FPR"])
+    problem.set_val("max_total_temperature_4", engine_spec["Tt4Max"], units="K")
+    problem.set_val("design_thrust", engine_spec["DesignThrust"], units="N")
+    problem.set_val("inlet_efficiency", eta["Inlet"])
+    problem.set_val("fan_efficiency", eta["Fan"])
+    problem.set_val("compressor_efficiency", eta["Compressors"])
+    problem.set_val("bypass_nozzle_efficiency", eta["BypassNozzle"])
+    problem.set_val("combustor_efficiency", eta["Combustor"])
+    problem.set_val("turbine_efficiency", eta["Turbines"])
+    problem.set_val("core_nozzle_efficiency", eta["CoreNozzle"])
 
 
 def make_simple_off_design_aircraft():
