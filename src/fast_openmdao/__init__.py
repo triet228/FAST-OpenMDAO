@@ -61,7 +61,7 @@ from fast_openmdao.projection import (
     ElectricMotorSpecificPowerProjection,
     KPPProjection,
 )
-from fast_openmdao.regression import SquaredExponentialKernel
+from fast_openmdao.regression import GaussianProcessPrediction, SquaredExponentialKernel
 from fast_openmdao.propulsion import (
     CableWeightForSizing,
     EngineLapse,
@@ -103,6 +103,7 @@ __all__ = [
     "FlightConditions",
     "FlowArea",
     "Gravity",
+    "GaussianProcessPrediction",
     "InitialEnergyRemaining",
     "JetApproachConstraint",
     "JetAIntegratedHeat",
