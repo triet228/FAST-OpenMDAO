@@ -331,6 +331,71 @@ class JetAIntegratedHeat(om.ExplicitComponent):
         )
 
 
+class LocalEfficiency(om.ExplicitComponent):
+    """Compute FAST's local engine efficiency fit from Reynolds number."""
+
+    def setup(self):
+        self.add_input("reynolds", val=1.0e7)
+        self.add_output("local_efficiency", val=0.875)
+        self.declare_partials(of="local_efficiency", wrt="reynolds")
+
+    def compute(self, inputs, outputs):
+        outputs["local_efficiency"] = local_efficiency_value(inputs["reynolds"][0])
+
+    def compute_partials(self, inputs, partials):
+        partials["local_efficiency", "reynolds"] = local_efficiency_derivative(
+            inputs["reynolds"][0],
+        )
+
+
+class LocalReynolds(om.ExplicitComponent):
+    """Compute FAST's local engine Reynolds number from flow-state fields."""
+
+    def setup(self):
+        self.add_input("static_pressure", val=101300.0, units="Pa")
+        self.add_input("static_temperature", val=288.15, units="K")
+        self.add_input("outer_radius", val=1.0, units="m")
+        self.add_input("inner_radius", val=0.5, units="m")
+        self.add_input("mach", val=0.3)
+        self.add_input("gamma", val=1.4)
+        self.add_output("local_reynolds", val=1.0e7)
+        self.declare_partials(of="local_reynolds", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["local_reynolds"] = local_reynolds_value(
+            inputs["static_pressure"][0],
+            inputs["static_temperature"][0],
+            inputs["outer_radius"][0],
+            inputs["inner_radius"][0],
+            inputs["mach"][0],
+            inputs["gamma"][0],
+        )
+
+    def compute_partials(self, inputs, partials):
+        values = local_reynolds_values(
+            inputs["static_pressure"][0],
+            inputs["static_temperature"][0],
+            inputs["outer_radius"][0],
+            inputs["inner_radius"][0],
+            inputs["mach"][0],
+            inputs["gamma"][0],
+        )
+        partials["local_reynolds", "static_pressure"] = values[
+            "dreynolds_dstatic_pressure"
+        ]
+        partials["local_reynolds", "static_temperature"] = values[
+            "dreynolds_dstatic_temperature"
+        ]
+        partials["local_reynolds", "outer_radius"] = values[
+            "dreynolds_douter_radius"
+        ]
+        partials["local_reynolds", "inner_radius"] = values[
+            "dreynolds_dinner_radius"
+        ]
+        partials["local_reynolds", "mach"] = values["dreynolds_dmach"]
+        partials["local_reynolds", "gamma"] = values["dreynolds_dgamma"]
+
+
 def isentropic_q(mach, gamma):
     """Return FAST isentropic ``1 + (gamma - 1) / 2 * mach ** 2`` term."""
 
@@ -443,3 +508,97 @@ def heat_antiderivative(temperature, length, rate, midpoint, offset):
     return temperature * (offset + length) + length * math.log1p(
         math.exp(rate * (midpoint - temperature))
     ) / rate
+
+
+def local_efficiency_value(reynolds):
+    """Return FAST's local efficiency fit."""
+
+    high = 1.0
+    low = 0.75
+    growth_rate = 0.5
+    inflection = 7.0
+    return low + (high - low) / (
+        1.0 + math.exp(-growth_rate * (math.log10(reynolds) - inflection))
+    )
+
+
+def local_efficiency_derivative(reynolds):
+    """Return derivative of FAST's local efficiency fit."""
+
+    high = 1.0
+    low = 0.75
+    growth_rate = 0.5
+    inflection = 7.0
+    exponential = math.exp(-growth_rate * (math.log10(reynolds) - inflection))
+    return (
+        (high - low)
+        * growth_rate
+        * exponential
+        / ((1.0 + exponential) ** 2 * reynolds * math.log(10.0))
+    )
+
+
+def local_reynolds_value(
+    static_pressure,
+    static_temperature,
+    outer_radius,
+    inner_radius,
+    mach,
+    gamma,
+):
+    """Return FAST local Reynolds number from scalar flow-state fields."""
+
+    return local_reynolds_values(
+        static_pressure,
+        static_temperature,
+        outer_radius,
+        inner_radius,
+        mach,
+        gamma,
+    )["reynolds"]
+
+
+def local_reynolds_values(
+    static_pressure,
+    static_temperature,
+    outer_radius,
+    inner_radius,
+    mach,
+    gamma,
+):
+    """Return FAST local Reynolds number and analytical derivatives."""
+
+    length = outer_radius - inner_radius
+    coefficient = local_reynolds_coefficient()
+    reynolds = (
+        static_pressure
+        * mach
+        * length
+        * math.sqrt(gamma * GAS_CONSTANT_AIR)
+        / (GAS_CONSTANT_AIR * coefficient * static_temperature)
+    )
+
+    return {
+        "reynolds": reynolds,
+        "dreynolds_dstatic_pressure": reynolds / static_pressure,
+        "dreynolds_dstatic_temperature": -reynolds / static_temperature,
+        "dreynolds_douter_radius": reynolds / length,
+        "dreynolds_dinner_radius": -reynolds / length,
+        "dreynolds_dmach": reynolds / mach,
+        "dreynolds_dgamma": 0.5 * reynolds / gamma,
+    }
+
+
+def local_reynolds_coefficient():
+    """Return the temperature-root viscosity coefficient from FAST."""
+
+    sigma = 350e-12
+    boltzmann = 1.380639e-23
+    molecular_mass = 0.02869 / 6.022e23
+    return (
+        1.106
+        * 5.0
+        / 16.0
+        / sigma ** 2
+        * math.sqrt(boltzmann * molecular_mass / math.pi)
+    )

@@ -16,6 +16,8 @@ from fast_openmdao import (
     ChokedArea,
     FlowArea,
     JetAIntegratedHeat,
+    LocalEfficiency,
+    LocalReynolds,
     MassFlowParameter,
     StaticDensity,
     StaticPressure,
@@ -29,6 +31,8 @@ from fast_python.engine import (
     cp_air,
     cp_jeta,
     cv_air,
+    local_efficiency,
+    local_reynolds,
     mass_flow_parameter,
     ps_pt,
     pt_ps,
@@ -181,6 +185,45 @@ def test_engine_specific_heat_components_match_fast_python():
     assert np.isclose(jeta_heat.get_val("integrated_cp_jeta")[0], cp_jeta(300.0, 1200.0))
 
 
+def test_engine_local_efficiency_and_reynolds_match_fast_python():
+    """Check local efficiency and Reynolds primitive parity."""
+
+    efficiency = om.Problem()
+    efficiency.model.add_subsystem("efficiency", LocalEfficiency(), promotes=["*"])
+    efficiency.setup()
+    efficiency.set_val("reynolds", 2.5e7)
+    efficiency.run_model()
+
+    assert np.isclose(
+        efficiency.get_val("local_efficiency")[0],
+        local_efficiency(2.5e7),
+    )
+
+    flow_state = {
+        "Ps": 85000.0,
+        "Ts": 260.0,
+        "Ro": 0.9,
+        "Ri": 0.35,
+        "Mach": 0.45,
+        "Gam": 1.36,
+    }
+    reynolds = om.Problem()
+    reynolds.model.add_subsystem("reynolds", LocalReynolds(), promotes=["*"])
+    reynolds.setup()
+    reynolds.set_val("static_pressure", flow_state["Ps"], units="Pa")
+    reynolds.set_val("static_temperature", flow_state["Ts"], units="K")
+    reynolds.set_val("outer_radius", flow_state["Ro"], units="m")
+    reynolds.set_val("inner_radius", flow_state["Ri"], units="m")
+    reynolds.set_val("mach", flow_state["Mach"])
+    reynolds.set_val("gamma", flow_state["Gam"])
+    reynolds.run_model()
+
+    assert np.isclose(
+        reynolds.get_val("local_reynolds")[0],
+        local_reynolds(flow_state),
+    )
+
+
 def test_engine_primitives_declare_analytic_partials():
     """Check engine primitive derivatives against finite difference."""
 
@@ -197,6 +240,19 @@ def test_engine_primitives_declare_analytic_partials():
         ("cv", AirSpecificHeatVolume(), {"temperature": 300.0}),
         ("air_heat", AirIntegratedHeat(), {"temperature_low": 300.0, "temperature_high": 1200.0}),
         ("jeta_heat", JetAIntegratedHeat(), {"temperature_low": 300.0, "temperature_high": 1200.0}),
+        ("efficiency", LocalEfficiency(), {"reynolds": 2.5e7}),
+        (
+            "reynolds",
+            LocalReynolds(),
+            {
+                "static_pressure": 85000.0,
+                "static_temperature": 260.0,
+                "outer_radius": 0.9,
+                "inner_radius": 0.35,
+                "mach": 0.45,
+                "gamma": 1.36,
+            },
+        ),
     ]
 
     for name, component, values in cases:

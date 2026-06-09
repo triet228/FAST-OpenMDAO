@@ -29,6 +29,8 @@ derivative-native FAST equation components:
   derivatives.
 - Engine specific-heat components for air Cp, air Cv, integrated air heat, and
   integrated Jet-A heat with analytical partial derivatives.
+- Engine local Reynolds and local efficiency components with analytical
+  partial derivatives.
 - Propulsion scalar primitives for engine lapse, safe component weight, and
   efficiency selection with analytical partial derivatives.
 - Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
@@ -64,9 +66,9 @@ The public `fast_openmdao` package currently exports:
   `OEIMultiplier`, `PsLossSigmoid`
 - Cost: `BatteryReplacementCost`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
-  `ChokedArea`, `FlowArea`, `JetAIntegratedHeat`, `MassFlowParameter`,
-  `StaticDensity`, `StaticPressure`, `StaticTemperature`, `TotalPressure`,
-  `TotalTemperature`
+  `ChokedArea`, `FlowArea`, `JetAIntegratedHeat`, `LocalEfficiency`,
+  `LocalReynolds`, `MassFlowParameter`, `StaticDensity`, `StaticPressure`,
+  `StaticTemperature`, `TotalPressure`, `TotalTemperature`
 - Mission: `CruiseTimeTargetDistance`, `FlightConditions`
 - OEW: `TurbopropAirframeWeight`
 - Projection: `BatterySpecificEnergyProjection`,
