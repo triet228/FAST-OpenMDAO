@@ -67,6 +67,7 @@ The public `fast_openmdao` package currently exports:
   `StaticDensity`, `StaticPressure`, `StaticTemperature`, `TotalPressure`,
   `TotalTemperature`
 - Mission: `FlightConditions`
+- OEW: `TurbopropAirframeWeight`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `EngineLapse`, `SafeComponentWeight`, `ThrustSinkEfficiency`,
@@ -249,8 +250,10 @@ optimized values against FAST-Python residual functions.
    Done.
 17. Convert squared-exponential regression kernel with analytical partial
    derivatives. Done.
-18. Add complex-step derivative checks where supported by FAST-Python internals.
-19. Build reusable groups for mission, propulsion, weights, and objective
+18. Convert turboprop airframe-weight linear fit with analytical partial
+   derivatives. Done.
+19. Add complex-step derivative checks where supported by FAST-Python internals.
+20. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.
