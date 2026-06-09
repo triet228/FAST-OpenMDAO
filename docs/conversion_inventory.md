@@ -22,7 +22,7 @@ closed-form derivatives are practical.
 | `aircraft.py` | support | Keep as FAST data preparation until the data contract stabilizes. |
 | `analysis.py` | candidate | Top-level analysis group coordinating weights, mission, propulsion, and convergence. |
 | `atmosphere.py` | converted | `fast_openmdao.atmosphere.Gravity`, `fast_openmdao.atmosphere.StandardAtmosphere`. |
-| `battery.py` | candidate | Battery discharge, charge, aging, and sizing components. |
+| `battery.py` | candidate | Effective cell capacity and selected current root converted; discharge, charge, aging, and sizing components remain. |
 | `cases.py` | support | Case factories, not derivative components. |
 | `compare.py` | support | Regression comparison utilities. |
 | `constraint.py` | candidate | PsLoss sigmoid, OEI multiplier, FAR 25 engine-gradient selector, and cruise dynamic pressure converted; full constraint diagram and FAR/jet residual components remain. |

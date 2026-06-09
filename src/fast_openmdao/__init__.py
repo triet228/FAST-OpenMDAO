@@ -3,6 +3,7 @@
 """OpenMDAO integration layer for FAST-Python."""
 
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
+from fast_openmdao.battery import AvailableCellCapacity, BatteryCurrent
 from fast_openmdao.components import FastPythonComponent
 from fast_openmdao.constraint import (
     CruiseDynamicPressure,
@@ -41,6 +42,8 @@ __version__ = "0.1.0"
 __all__ = [
     "BatteryReplacementCost",
     "BatterySpecificEnergyProjection",
+    "AvailableCellCapacity",
+    "BatteryCurrent",
     "ChokedArea",
     "CruiseDynamicPressure",
     "ElectricMotorSpecificPowerProjection",
