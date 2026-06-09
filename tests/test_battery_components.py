@@ -14,18 +14,24 @@ from fast_openmdao import (
     BatteryChargeOCV,
     BatteryCyclingAging,
     BatteryCurrent,
+    BatteryHistoryColumnMatrix,
+    BatteryHistoryMatrix,
     BatteryNonzeroMean,
     DetailedBatterySizing,
     BatteryPowerHistory,
     BatteryPowerStep,
+    BatteryVector,
     BatteryWeightFromEnergy,
 )
 from fast_python.battery import (
+    as_history_matrix,
+    as_vector,
     available_cell_capacity,
     charging,
     cycling_aging_parameters,
     discharging,
     estimate_charge_ocv,
+    history_matrix,
     nonzero_mean,
     resize_battery,
     solve_battery_current,
@@ -153,6 +159,55 @@ def test_battery_nonzero_mean_matches_fast_python():
     zero_problem.run_model()
 
     assert np.isclose(zero_problem.get_val("nonzero_mean")[0], 0.0)
+
+
+def test_battery_shape_normalizers_match_fast_python():
+    """Check battery vector and history shape helpers against FAST-Python."""
+
+    vector_values = np.asarray([[1.0, 2.0], [3.0, 4.0]])
+    vector_problem = om.Problem()
+    vector_problem.model.add_subsystem(
+        "vector",
+        BatteryVector(input_shape=vector_values.shape),
+        promotes=["*"],
+    )
+    vector_problem.setup()
+    vector_problem.set_val("values", vector_values)
+    vector_problem.run_model()
+
+    assert np.allclose(vector_problem.get_val("vector"), as_vector(vector_values))
+
+    column_values = np.asarray([5.0, 6.0, 7.0])
+    column_problem = om.Problem()
+    column_problem.model.add_subsystem(
+        "column",
+        BatteryHistoryColumnMatrix(input_shape=column_values.shape),
+        promotes=["*"],
+    )
+    column_problem.setup()
+    column_problem.set_val("values", column_values)
+    column_problem.run_model()
+
+    assert np.allclose(
+        column_problem.get_val("history_matrix"),
+        as_history_matrix(column_values),
+    )
+
+    history_values = np.asarray([8.0, 9.0, 10.0])
+    history_problem = om.Problem()
+    history_problem.model.add_subsystem(
+        "history",
+        BatteryHistoryMatrix(input_shape=history_values.shape, columns=3),
+        promotes=["*"],
+    )
+    history_problem.setup()
+    history_problem.set_val("values", history_values)
+    history_problem.run_model()
+
+    assert np.allclose(
+        history_problem.get_val("history_matrix"),
+        history_matrix(history_values, 3),
+    )
 
 
 def test_detailed_battery_sizing_matches_fast_python_resize_battery():
@@ -325,6 +380,21 @@ def test_battery_primitives_declare_analytic_partials():
             "nonzero_mean",
             BatteryNonzeroMean(vec_size=3),
             {"values": np.asarray([1.0, 2.0, 4.0])},
+        ),
+        (
+            "battery_vector",
+            BatteryVector(input_shape=(2, 2)),
+            {"values": np.asarray([[1.0, 2.0], [3.0, 4.0]])},
+        ),
+        (
+            "battery_history_column",
+            BatteryHistoryColumnMatrix(input_shape=(3,)),
+            {"values": np.asarray([5.0, 6.0, 7.0])},
+        ),
+        (
+            "battery_history_matrix",
+            BatteryHistoryMatrix(input_shape=(3,), columns=3),
+            {"values": np.asarray([8.0, 9.0, 10.0])},
         ),
         (
             "charge_current",

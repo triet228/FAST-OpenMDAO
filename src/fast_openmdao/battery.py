@@ -236,6 +236,116 @@ class BatteryNonzeroMean(om.ExplicitComponent):
         partials["nonzero_mean", "values"] = values["dnonzero_mean_dvalues"]
 
 
+class BatteryVector(om.ExplicitComponent):
+    """Normalize FAST battery values to a one-dimensional vector.
+
+    Inputs:
+        values: Fixed-shape scalar, vector, or matrix battery data.
+
+    Outputs:
+        vector: Flattened values matching ``fast_python.battery.as_vector``
+            for numeric inputs.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = battery_shape_tuple(self.options["input_shape"])
+        output_size = int(np.prod(input_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("vector", val=np.zeros(output_size))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="vector",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["vector"] = battery_vector_values(inputs["values"])["vector"]
+
+
+class BatteryHistoryColumnMatrix(om.ExplicitComponent):
+    """Normalize a FAST battery history field to rows by battery columns.
+
+    Inputs:
+        values: Fixed-shape vector or matrix battery history field.
+
+    Outputs:
+        history_matrix: Values matching
+            ``fast_python.battery.as_history_matrix`` for numeric inputs.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = battery_shape_tuple(self.options["input_shape"])
+        output_shape = battery_history_column_output_shape(input_shape)
+        output_size = int(np.prod(output_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("history_matrix", val=np.zeros(output_shape))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="history_matrix",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["history_matrix"] = battery_history_column_values(
+            inputs["values"],
+        )["history_matrix"]
+
+
+class BatteryHistoryMatrix(om.ExplicitComponent):
+    """Normalize mission history as a fixed two-dimensional battery matrix.
+
+    Inputs:
+        values: Fixed-shape vector or matrix mission history values.
+
+    Outputs:
+        history_matrix: Matrix matching ``fast_python.battery.history_matrix``.
+
+    Assumptions:
+        The expected column count is fixed at setup. Dynamic FAST-Python shape
+        validation is handled by choosing an OpenMDAO layout before execution.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+        self.options.declare("columns", default=1)
+
+    def setup(self):
+        input_shape = battery_shape_tuple(self.options["input_shape"])
+        output_shape = battery_history_matrix_output_shape(
+            input_shape,
+            self.options["columns"],
+        )
+        output_size = int(np.prod(output_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("history_matrix", val=np.zeros(output_shape))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="history_matrix",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["history_matrix"] = battery_history_matrix_values(
+            inputs["values"],
+            self.options["columns"],
+        )["history_matrix"]
+
+
 class DetailedBatterySizing(om.ExplicitComponent):
     """Resize detailed battery parallel-cell counts and mass after a mission."""
 
@@ -642,6 +752,82 @@ def battery_nonzero_mean_values(values):
         "nonzero_mean": mean,
         "dnonzero_mean_dvalues": derivative,
     }
+
+
+def battery_shape_tuple(shape):
+    """Return an OpenMDAO option shape as a tuple of integers."""
+
+    if isinstance(shape, tuple) and len(shape) == 0:
+        return ()
+
+    array = np.asarray(shape).reshape(-1)
+
+    if array.size == 0:
+        return (1,)
+
+    return tuple(int(value) for value in array)
+
+
+def battery_vector_values(values):
+    """Return FAST battery values as a one-dimensional vector."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim == 0:
+        vector = array.reshape(1)
+    else:
+        vector = array.reshape(-1)
+
+    return {"vector": vector}
+
+
+def battery_history_column_output_shape(input_shape):
+    """Return output shape for FAST battery ``as_history_matrix``."""
+
+    if len(input_shape) == 1:
+        return (input_shape[0], 1)
+
+    return input_shape
+
+
+def battery_history_column_values(values):
+    """Return a FAST battery history field as rows by battery columns."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim == 1:
+        matrix = array.reshape(-1, 1)
+    else:
+        matrix = array
+
+    return {"history_matrix": matrix}
+
+
+def battery_history_matrix_output_shape(input_shape, columns):
+    """Return output shape for FAST battery history-matrix normalization."""
+
+    if len(input_shape) == 1 and columns == 1:
+        return (input_shape[0], 1)
+
+    if len(input_shape) == 1:
+        return (1, input_shape[0])
+
+    return input_shape
+
+
+def battery_history_matrix_values(values, columns):
+    """Return FAST battery mission history as a two-dimensional matrix."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim == 1 and columns == 1:
+        matrix = array.reshape(-1, 1)
+    elif array.ndim == 1:
+        matrix = array.reshape(1, -1)
+    else:
+        matrix = array
+
+    return {"history_matrix": matrix}
 
 
 def battery_power_step_input_names():
