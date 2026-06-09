@@ -323,6 +323,65 @@ class TurboelectricArchitecture(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class PartialTurboelectricArchitecture(om.ExplicitComponent):
+    """Build FAST's built-in partially turboelectric architecture matrices."""
+
+    def initialize(self):
+        self.options.declare("num_engines", default=2)
+
+    def setup(self):
+        num_engines = self.options["num_engines"]
+        num_components = 5 * num_engines + 2
+        num_transmitters = 5 * num_engines
+
+        self.add_input("power_split", val=0.5)
+        self.add_input("electric_motor_efficiency", val=0.95)
+        self.add_input("electric_generator_efficiency", val=0.95)
+        self.add_input("thrust_sink_efficiency", val=0.85)
+        self.add_output("architecture", val=np.zeros((num_components, num_components)))
+        self.add_output("upstream_split", val=np.zeros((num_components, num_components)))
+        self.add_output(
+            "downstream_split",
+            val=np.zeros((num_components, num_components)),
+        )
+        self.add_output(
+            "upstream_efficiency",
+            val=np.ones((num_components, num_components)),
+        )
+        self.add_output(
+            "downstream_efficiency",
+            val=np.ones((num_components, num_components)),
+        )
+        self.add_output("source_type", val=np.zeros(1))
+        self.add_output("transmitter_type", val=np.zeros(num_transmitters))
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = partial_turboelectric_architecture_values(
+            self.options["num_engines"],
+            inputs["power_split"][0],
+            inputs["electric_motor_efficiency"][0],
+            inputs["electric_generator_efficiency"][0],
+            inputs["thrust_sink_efficiency"][0],
+        )
+
+        for output in architecture_builder_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = partial_turboelectric_architecture_values(
+            self.options["num_engines"],
+            inputs["power_split"][0],
+            inputs["electric_motor_efficiency"][0],
+            inputs["electric_generator_efficiency"][0],
+            inputs["thrust_sink_efficiency"][0],
+        )
+
+        for output in architecture_builder_output_names():
+            for variable in partial_turboelectric_architecture_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class PowerSupplementCheck(om.ExplicitComponent):
     """Compute FAST supplemental transmitter power for fixed architecture topology.
 
@@ -909,6 +968,17 @@ def turboelectric_architecture_input_names():
     )
 
 
+def partial_turboelectric_architecture_input_names():
+    """Return inputs for PartialTurboelectricArchitecture derivatives."""
+
+    return (
+        "power_split",
+        "electric_motor_efficiency",
+        "electric_generator_efficiency",
+        "thrust_sink_efficiency",
+    )
+
+
 def parallel_hybrid_architecture_values(
     num_engines,
     power_split,
@@ -1245,6 +1315,139 @@ def turboelectric_architecture_values(
     for output_name, value in output_values.items():
         output_size = np.asarray(value).size
         for input_name in turboelectric_architecture_input_names():
+            derivative = derivative_maps.get(input_name, {}).get(output_name)
+
+            if derivative is None:
+                derivative = np.zeros(output_size)
+
+            result["d%s_d%s" % (output_name, input_name)] = np.asarray(
+                derivative,
+                dtype=float,
+            ).reshape(output_size, 1)
+
+    return result
+
+
+def partial_turboelectric_architecture_values(
+    num_engines,
+    power_split,
+    electric_motor_efficiency,
+    electric_generator_efficiency,
+    thrust_sink_efficiency,
+):
+    """Return FAST partial-turboelectric matrices and dense derivatives."""
+
+    num_components = 5 * num_engines + 2
+    architecture = np.zeros((num_components, num_components))
+    upstream_split = np.zeros_like(architecture)
+    downstream_split = np.zeros_like(architecture)
+    upstream_efficiency = np.ones_like(architecture)
+    downstream_efficiency = np.ones_like(architecture)
+    fuel = 0
+    engine_index = np.arange(1, 1 + num_engines)
+    generator_index = np.arange(1 + num_engines, 1 + 2 * num_engines)
+    motor_index = np.arange(1 + 2 * num_engines, 1 + 3 * num_engines)
+    inboard_index = np.arange(1 + 3 * num_engines, 1 + 4 * num_engines)
+    outboard_index = np.arange(1 + 4 * num_engines, 1 + 5 * num_engines)
+    final_sink = num_components - 1
+    architecture[fuel, engine_index] = 1.0
+    upstream_split[fuel, engine_index] = 1.0 / num_engines
+    downstream_split[engine_index, fuel] = 1.0
+
+    dupstream_split_dsplit = np.zeros_like(architecture)
+    ddownstream_split_dsplit = np.zeros_like(architecture)
+    dupstream_efficiency_dem = np.zeros_like(architecture)
+    ddownstream_efficiency_dem = np.zeros_like(architecture)
+    dupstream_efficiency_deg = np.zeros_like(architecture)
+    ddownstream_efficiency_deg = np.zeros_like(architecture)
+    dupstream_efficiency_dts = np.zeros_like(architecture)
+    ddownstream_efficiency_dts = np.zeros_like(architecture)
+
+    for engine, generator, motor, inboard, outboard in zip(
+        engine_index,
+        generator_index,
+        motor_index,
+        inboard_index,
+        outboard_index,
+    ):
+        architecture[engine, generator] = 1.0
+        architecture[engine, outboard] = 1.0
+        architecture[generator, motor] = 1.0
+        architecture[motor, inboard] = 1.0
+        architecture[inboard, final_sink] = 1.0
+        architecture[outboard, final_sink] = 1.0
+        upstream_split[engine, generator] = 1.0 - power_split
+        upstream_split[engine, outboard] = power_split
+        upstream_split[generator, motor] = 1.0
+        upstream_split[motor, inboard] = 1.0
+        upstream_split[inboard, final_sink] = 1.0
+        upstream_split[outboard, final_sink] = 1.0
+        downstream_split[generator, engine] = 1.0
+        downstream_split[motor, generator] = 1.0
+        downstream_split[inboard, motor] = 1.0
+        downstream_split[outboard, engine] = 1.0
+        upstream_efficiency[engine, generator] = electric_generator_efficiency
+        upstream_efficiency[engine, outboard] = thrust_sink_efficiency
+        upstream_efficiency[generator, motor] = electric_motor_efficiency
+        upstream_efficiency[motor, inboard] = thrust_sink_efficiency
+        downstream_efficiency[generator, engine] = electric_generator_efficiency
+        downstream_efficiency[motor, generator] = electric_motor_efficiency
+        downstream_efficiency[inboard, motor] = thrust_sink_efficiency
+        downstream_efficiency[outboard, engine] = thrust_sink_efficiency
+        dupstream_split_dsplit[engine, generator] = -1.0
+        dupstream_split_dsplit[engine, outboard] = 1.0
+        dupstream_efficiency_deg[engine, generator] = 1.0
+        ddownstream_efficiency_deg[generator, engine] = 1.0
+        dupstream_efficiency_dem[generator, motor] = 1.0
+        ddownstream_efficiency_dem[motor, generator] = 1.0
+        dupstream_efficiency_dts[engine, outboard] = 1.0
+        dupstream_efficiency_dts[motor, inboard] = 1.0
+        ddownstream_efficiency_dts[inboard, motor] = 1.0
+        ddownstream_efficiency_dts[outboard, engine] = 1.0
+
+    downstream_split[final_sink, inboard_index] = (1.0 - power_split) / num_engines
+    downstream_split[final_sink, outboard_index] = power_split / num_engines
+    ddownstream_split_dsplit[final_sink, inboard_index] = -1.0 / num_engines
+    ddownstream_split_dsplit[final_sink, outboard_index] = 1.0 / num_engines
+    source_type = np.asarray([1.0])
+    transmitter_type = np.asarray(
+        [1.0] * num_engines
+        + [3.0] * num_engines
+        + [0.0] * num_engines
+        + [2.0] * (2 * num_engines)
+    )
+    output_values = {
+        "architecture": architecture,
+        "upstream_split": upstream_split,
+        "downstream_split": downstream_split,
+        "upstream_efficiency": upstream_efficiency,
+        "downstream_efficiency": downstream_efficiency,
+        "source_type": source_type,
+        "transmitter_type": transmitter_type,
+    }
+    derivative_maps = {
+        "power_split": {
+            "upstream_split": dupstream_split_dsplit,
+            "downstream_split": ddownstream_split_dsplit,
+        },
+        "electric_motor_efficiency": {
+            "upstream_efficiency": dupstream_efficiency_dem,
+            "downstream_efficiency": ddownstream_efficiency_dem,
+        },
+        "electric_generator_efficiency": {
+            "upstream_efficiency": dupstream_efficiency_deg,
+            "downstream_efficiency": ddownstream_efficiency_deg,
+        },
+        "thrust_sink_efficiency": {
+            "upstream_efficiency": dupstream_efficiency_dts,
+            "downstream_efficiency": ddownstream_efficiency_dts,
+        },
+    }
+    result = dict(output_values)
+
+    for output_name, value in output_values.items():
+        output_size = np.asarray(value).size
+        for input_name in partial_turboelectric_architecture_input_names():
             derivative = derivative_maps.get(input_name, {}).get(output_name)
 
             if derivative is None:
