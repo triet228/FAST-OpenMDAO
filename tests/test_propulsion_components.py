@@ -22,6 +22,8 @@ from fast_openmdao import (
     PowerFlow,
     PowerSupplementCheck,
     PropulsionHistoryMatrix,
+    PropulsionHistoryMatrixSlice,
+    PropulsionHistoryVectorSlice,
     PropulsionTwoDimensionalArray,
     PropulsionVector,
     SafeComponentWeight,
@@ -35,6 +37,8 @@ from fast_openmdao import (
     TurbopropEngineWeightForSizing,
 )
 from fast_python.propulsion import (
+    assign_history_matrix,
+    assign_history_vector,
     cable_weight_for_sizing,
     create_prop_arch,
     engine_lapse,
@@ -765,6 +769,68 @@ def test_propulsion_shape_normalizers_match_fast_python():
     )
 
 
+def test_propulsion_history_vector_slice_matches_fast_python():
+    """Check fixed propulsion history-vector slice assignment parity."""
+
+    history = np.asarray([1.0, 2.0, 3.0, 4.0])
+    values = np.asarray([20.0, 30.0])
+    start = 1
+    stop = 3
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "history_slice",
+        PropulsionHistoryVectorSlice(history_size=4, start=start, stop=stop),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("history_vector", history)
+    problem.set_val("values", values)
+    problem.run_model()
+
+    section = {"Shaft": history.tolist()}
+    assign_history_vector(section, "Shaft", values, start, stop)
+
+    assert np.allclose(
+        problem.get_val("updated_history_vector"),
+        np.asarray(section["Shaft"]),
+    )
+
+
+def test_propulsion_history_matrix_slice_matches_fast_python():
+    """Check fixed propulsion history-matrix slice assignment parity."""
+
+    history = np.asarray(
+        [
+            [1.0, 2.0],
+            [3.0, 4.0],
+            [5.0, 6.0],
+        ]
+    )
+    values = np.asarray([[20.0, 30.0], [40.0, 50.0]])
+    start = 1
+    stop = 3
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "history_slice",
+        PropulsionHistoryMatrixSlice(num_rows=3, num_cols=2, start=start, stop=stop),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("history_matrix", history)
+    problem.set_val("values", values)
+    problem.run_model()
+
+    section = {"Shaft": history.tolist()}
+    assign_history_matrix(section, "Shaft", values, start, stop)
+
+    assert np.allclose(
+        problem.get_val("updated_history_matrix"),
+        np.asarray(section["Shaft"]),
+    )
+
+
 def test_propulsion_primitives_declare_analytic_partials():
     """Check propulsion primitive derivatives against finite difference."""
 
@@ -1113,6 +1179,28 @@ def test_propulsion_primitives_declare_analytic_partials():
             "propulsion_history",
             PropulsionHistoryMatrix(input_shape=(3,), columns=1),
             {"values": np.asarray([10.0, 11.0, 12.0])},
+        ),
+        (
+            "propulsion_history_vector_slice",
+            PropulsionHistoryVectorSlice(history_size=4, start=1, stop=3),
+            {
+                "history_vector": np.asarray([1.0, 2.0, 3.0, 4.0]),
+                "values": np.asarray([20.0, 30.0]),
+            },
+        ),
+        (
+            "propulsion_history_matrix_slice",
+            PropulsionHistoryMatrixSlice(num_rows=3, num_cols=2, start=1, stop=3),
+            {
+                "history_matrix": np.asarray(
+                    [
+                        [1.0, 2.0],
+                        [3.0, 4.0],
+                        [5.0, 6.0],
+                    ]
+                ),
+                "values": np.asarray([[20.0, 30.0], [40.0, 50.0]]),
+            },
         ),
         (
             "supplement",
