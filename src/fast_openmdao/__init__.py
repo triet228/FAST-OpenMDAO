@@ -46,7 +46,7 @@ from fast_openmdao.mission import (
     FlightConditions,
     InitialEnergyRemaining,
 )
-from fast_openmdao.oew import NumericSum, TurbopropAirframeWeight
+from fast_openmdao.oew import NumericSum, TurbofanAirframeWeight, TurbopropAirframeWeight
 from fast_openmdao.optimization import (
     BatteryEnergyAvailable,
     ElectricMotorPowerAvailable,
@@ -136,6 +136,7 @@ __all__ = [
     "ThrustSinkEfficiency",
     "TransmitterFanEfficiency",
     "TurbopropAirframeWeight",
+    "TurbofanAirframeWeight",
     "UnitConversion",
     "WeightSum",
     "__version__",
