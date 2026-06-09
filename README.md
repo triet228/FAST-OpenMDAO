@@ -133,7 +133,8 @@ The public `fast_openmdao` package currently exports:
 - Cost: `BatteryReplacementCost`
 - Database: `DatabaseFanThrustNormalization`, `DatabaseGeometryLoads`,
   `DatabasePropPowerNormalization`, `DatabaseWeightFractions`,
-  `MacLiftDragEstimate`, `TurbopropCruiseLiftDragEstimate`
+  `MacLiftDragEstimate`, `TurbofanCruiseLiftDragEstimate`,
+  `TurbopropCruiseLiftDragEstimate`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
   `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FlowArea`,

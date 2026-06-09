@@ -377,6 +377,58 @@ class DatabasePropPowerNormalization(om.ExplicitComponent):
                 ]
 
 
+class TurbofanCruiseLiftDragEstimate(om.ExplicitComponent):
+    """Compute FAST turbofan database cruise lift-to-drag estimates."""
+
+    def initialize(self):
+        self.options.declare("num_engines", default=1)
+
+    def setup(self):
+        self.add_input("mtow", val=70000.0, units="kg")
+        self.add_input("fuel_weight", val=15000.0, units="kg")
+        self.add_input("range", val=3000000.0, units="m")
+        self.add_input("tsfc_cruise", val=0.6)
+        self.add_input("cruise_mach", val=0.78)
+        self.add_input("temperature", val=223.15, units="K")
+        self.add_input("engine_thrust_cruise", val=60000.0, units="N")
+        self.add_output("breguet_lift_drag", val=9.0)
+        self.add_output("thrust_lift_drag", val=6.0)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = turbofan_cruise_lift_drag_values(
+            inputs["mtow"][0],
+            inputs["fuel_weight"][0],
+            inputs["range"][0],
+            inputs["tsfc_cruise"][0],
+            inputs["cruise_mach"][0],
+            inputs["temperature"][0],
+            inputs["engine_thrust_cruise"][0],
+            self.options["num_engines"],
+        )
+
+        for name in turbofan_cruise_lift_drag_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = turbofan_cruise_lift_drag_values(
+            inputs["mtow"][0],
+            inputs["fuel_weight"][0],
+            inputs["range"][0],
+            inputs["tsfc_cruise"][0],
+            inputs["cruise_mach"][0],
+            inputs["temperature"][0],
+            inputs["engine_thrust_cruise"][0],
+            self.options["num_engines"],
+        )
+
+        for output_name in turbofan_cruise_lift_drag_output_names():
+            for input_name in turbofan_cruise_lift_drag_input_names():
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
 def mac_lift_drag_values(aspect_ratio, reynolds):
     """Return FAST MAC L/D estimate and analytical derivatives."""
 
@@ -414,6 +466,84 @@ def turboprop_cruise_lift_drag_values(mtow, cruise_power, cruise_mach, temperatu
         "dlift_drag_dcruise_power": -lift_drag / cruise_power,
         "dlift_drag_dcruise_mach": lift_drag / cruise_mach,
     }
+
+
+def turbofan_cruise_lift_drag_input_names():
+    """Return turbofan cruise L/D component input names."""
+
+    return [
+        "mtow",
+        "fuel_weight",
+        "range",
+        "tsfc_cruise",
+        "cruise_mach",
+        "temperature",
+        "engine_thrust_cruise",
+    ]
+
+
+def turbofan_cruise_lift_drag_output_names():
+    """Return turbofan cruise L/D component output names."""
+
+    return [
+        "breguet_lift_drag",
+        "thrust_lift_drag",
+    ]
+
+
+def turbofan_cruise_lift_drag_values(
+    mtow,
+    fuel_weight,
+    mission_range,
+    tsfc_cruise,
+    cruise_mach,
+    temperature,
+    engine_thrust_cruise,
+    num_engines,
+):
+    """Return FAST turbofan cruise L/D estimates and derivatives."""
+
+    mtow = float(mtow)
+    fuel_weight = float(fuel_weight)
+    mission_range = float(mission_range)
+    tsfc_cruise = float(tsfc_cruise)
+    cruise_mach = float(cruise_mach)
+    temperature = float(temperature)
+    engine_thrust_cruise = float(engine_thrust_cruise)
+    num_engines = float(num_engines)
+    tsfc_si = tsfc_cruise * 0.453592 / 4.44822 / 3600.0 * 9.81
+    speed = cruise_mach * np.sqrt(1.4 * 287.0 * temperature)
+    weight_ratio = np.log(mtow / (mtow - fuel_weight))
+    breguet_lift_drag = mission_range * tsfc_si / speed / weight_ratio
+    thrust_lift_drag = (
+        mtow * 0.995 * 0.985 * 9.81 / (engine_thrust_cruise * num_engines)
+    )
+    values = {
+        "breguet_lift_drag": breguet_lift_drag,
+        "thrust_lift_drag": thrust_lift_drag,
+    }
+
+    for output_name in turbofan_cruise_lift_drag_output_names():
+        for input_name in turbofan_cruise_lift_drag_input_names():
+            values[f"d{output_name}_d{input_name}"] = 0.0
+
+    dweight_ratio_dmtow = 1.0 / mtow - 1.0 / (mtow - fuel_weight)
+    dweight_ratio_dfuel = 1.0 / (mtow - fuel_weight)
+    values["dbreguet_lift_drag_drange"] = breguet_lift_drag / mission_range
+    values["dbreguet_lift_drag_dtsfc_cruise"] = breguet_lift_drag / tsfc_cruise
+    values["dbreguet_lift_drag_dcruise_mach"] = -breguet_lift_drag / cruise_mach
+    values["dbreguet_lift_drag_dtemperature"] = -0.5 * breguet_lift_drag / temperature
+    values["dbreguet_lift_drag_dmtow"] = (
+        -breguet_lift_drag / weight_ratio * dweight_ratio_dmtow
+    )
+    values["dbreguet_lift_drag_dfuel_weight"] = (
+        -breguet_lift_drag / weight_ratio * dweight_ratio_dfuel
+    )
+    values["dthrust_lift_drag_dmtow"] = thrust_lift_drag / mtow
+    values["dthrust_lift_drag_dengine_thrust_cruise"] = (
+        -thrust_lift_drag / engine_thrust_cruise
+    )
+    return values
 
 
 def database_weight_fraction_input_names():

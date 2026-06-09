@@ -15,6 +15,7 @@ from fast_openmdao import (
     DatabasePropPowerNormalization,
     DatabaseWeightFractions,
     MacLiftDragEstimate,
+    TurbofanCruiseLiftDragEstimate,
     TurbopropCruiseLiftDragEstimate,
 )
 from fast_python.atmosphere import standard_atmosphere
@@ -103,6 +104,57 @@ def test_turboprop_cruise_lift_drag_estimate_declares_analytic_partials():
     problem.set_val("mtow", 18500.0, units="kg")
     problem.set_val("cruise_power", 1.6e6, units="W")
     problem.set_val("cruise_mach", 0.42)
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-4,
+    )
+
+    for partial_data in partials["lift_drag"].values():
+        assert (
+            partial_data["abs error"].forward < 1.0e-6
+            or partial_data["rel error"].forward < 1.0e-6
+        )
+
+
+def test_turbofan_cruise_lift_drag_estimate_matches_fast_python():
+    """Check FAST CalcFanVals turbofan cruise L/D parity."""
+
+    plane = make_fan_plane()
+    expected = calc_fan_vals(plane, "Vals")["Specs"]["Aero"]["L_D"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "lift_drag",
+        TurbofanCruiseLiftDragEstimate(
+            num_engines=plane["Specs"]["Propulsion"]["NumEngines"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_turbofan_cruise_lift_drag_values(problem, plane)
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("breguet_lift_drag")[0], expected["CrsBRE"])
+    assert np.isclose(problem.get_val("thrust_lift_drag")[0], expected["Crs"])
+
+
+def test_turbofan_cruise_lift_drag_estimate_declares_analytic_partials():
+    """Check turbofan cruise L/D derivatives against finite difference."""
+
+    plane = make_fan_plane()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "lift_drag",
+        TurbofanCruiseLiftDragEstimate(
+            num_engines=plane["Specs"]["Propulsion"]["NumEngines"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_turbofan_cruise_lift_drag_values(problem, plane)
     problem.run_model()
 
     partials = problem.check_partials(
@@ -391,6 +443,30 @@ def set_database_weight_fraction_values(problem, plane):
         units="kg",
     )
     problem.set_val("wing_area", specs["Aero"]["S"], units="m**2")
+
+
+def set_turbofan_cruise_lift_drag_values(problem, plane):
+    """Set OpenMDAO inputs from the shared turbofan database fixture."""
+
+    specs = plane["Specs"]
+    problem.set_val("mtow", specs["Weight"]["MTOW"], units="kg")
+    problem.set_val("fuel_weight", specs["Weight"]["Fuel"], units="kg")
+    problem.set_val("range", specs["Performance"]["Range"] * 1000.0, units="m")
+    problem.set_val(
+        "tsfc_cruise",
+        specs["Propulsion"]["Engine"]["TSFC_Crs"],
+    )
+    problem.set_val("cruise_mach", specs["Performance"]["Vels"]["Crs"])
+    problem.set_val(
+        "temperature",
+        standard_atmosphere(specs["Performance"]["Alts"]["Crs"])[0],
+        units="K",
+    )
+    problem.set_val(
+        "engine_thrust_cruise",
+        specs["Propulsion"]["Engine"]["Thrust_Crs"],
+        units="N",
+    )
 
 
 def set_database_geometry_load_values(problem, plane, max_payload):
