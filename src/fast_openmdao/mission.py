@@ -951,6 +951,103 @@ class RowMatrix(om.ExplicitComponent):
         partials["matrix", "value"] = values["dmatrix_dvalue"]
 
 
+class HistoryVectorSlice(om.ExplicitComponent):
+    """Assign a fixed FAST mission-history vector slice.
+
+    Inputs:
+        history_vector: Existing full history vector.
+        values: Values written into the configured ``start:stop`` slice.
+
+    Outputs:
+        updated_history_vector: History vector after the slice assignment.
+
+    Assumptions:
+        The slice bounds are fixed OpenMDAO options. This mirrors the numerical
+        behavior of FAST-Python's history-section assignment while exposing the
+        overwritten and preserved entries as a linear map.
+    """
+
+    def initialize(self):
+        self.options.declare("history_size", default=1)
+        self.options.declare("start", default=0)
+        self.options.declare("stop", default=1)
+
+    def setup(self):
+        history_size = self.options["history_size"]
+        value_size = self.options["stop"] - self.options["start"]
+        self.add_input("history_vector", val=np.zeros(history_size))
+        self.add_input("values", val=np.zeros(value_size))
+        self.add_output("updated_history_vector", val=np.zeros(history_size))
+        self.declare_partials(of="updated_history_vector", wrt="history_vector")
+        self.declare_partials(of="updated_history_vector", wrt="values")
+
+    def compute(self, inputs, outputs):
+        values = history_vector_slice_values(
+            inputs["history_vector"],
+            inputs["values"],
+            self.options["start"],
+            self.options["stop"],
+        )
+        outputs["updated_history_vector"] = values["updated_history_vector"]
+
+    def compute_partials(self, inputs, partials):
+        values = history_vector_slice_values(
+            inputs["history_vector"],
+            inputs["values"],
+            self.options["start"],
+            self.options["stop"],
+        )
+        partials["updated_history_vector", "history_vector"] = values[
+            "dupdated_history_vector_dhistory_vector"
+        ]
+        partials["updated_history_vector", "values"] = values[
+            "dupdated_history_vector_dvalues"
+        ]
+
+
+class HistoryMatrixSlice(om.ExplicitComponent):
+    """Assign a fixed FAST mission-history matrix row slice."""
+
+    def initialize(self):
+        self.options.declare("num_rows", default=1)
+        self.options.declare("num_cols", default=1)
+        self.options.declare("start", default=0)
+        self.options.declare("stop", default=1)
+
+    def setup(self):
+        num_rows = self.options["num_rows"]
+        num_cols = self.options["num_cols"]
+        value_rows = self.options["stop"] - self.options["start"]
+        self.add_input("history_matrix", val=np.zeros((num_rows, num_cols)))
+        self.add_input("values", val=np.zeros((value_rows, num_cols)))
+        self.add_output("updated_history_matrix", val=np.zeros((num_rows, num_cols)))
+        self.declare_partials(of="updated_history_matrix", wrt="history_matrix")
+        self.declare_partials(of="updated_history_matrix", wrt="values")
+
+    def compute(self, inputs, outputs):
+        values = history_matrix_slice_values(
+            inputs["history_matrix"],
+            inputs["values"],
+            self.options["start"],
+            self.options["stop"],
+        )
+        outputs["updated_history_matrix"] = values["updated_history_matrix"]
+
+    def compute_partials(self, inputs, partials):
+        values = history_matrix_slice_values(
+            inputs["history_matrix"],
+            inputs["values"],
+            self.options["start"],
+            self.options["stop"],
+        )
+        partials["updated_history_matrix", "history_matrix"] = values[
+            "dupdated_history_matrix_dhistory_matrix"
+        ]
+        partials["updated_history_matrix", "values"] = values[
+            "dupdated_history_matrix_dvalues"
+        ]
+
+
 def flight_condition_values(altitude, disa, velocity_type, velocity):
     """Return FAST flight-condition values and analytical derivatives."""
 
@@ -1746,6 +1843,54 @@ def row_matrix_values(value, rows):
     return {
         "matrix": matrix,
         "dmatrix_dvalue": derivative,
+    }
+
+
+def history_vector_slice_values(history_vector, values, start, stop):
+    """Return FAST history-vector slice assignment and Jacobians."""
+
+    history = np.asarray(history_vector, dtype=float).reshape(-1)
+    assigned = np.asarray(values, dtype=float).reshape(-1)
+    updated = history.copy()
+    updated[start:stop] = assigned
+    dhistory = np.eye(history.size)
+    dvalues = np.zeros((history.size, assigned.size))
+    dhistory[start:stop, start:stop] = 0.0
+
+    for row, source in enumerate(range(start, stop)):
+        dvalues[source, row] = 1.0
+
+    return {
+        "updated_history_vector": updated,
+        "dupdated_history_vector_dhistory_vector": dhistory,
+        "dupdated_history_vector_dvalues": dvalues,
+    }
+
+
+def history_matrix_slice_values(history_matrix, values, start, stop):
+    """Return FAST history-matrix row-slice assignment and Jacobians."""
+
+    history = np.asarray(history_matrix, dtype=float)
+    assigned = np.asarray(values, dtype=float)
+    updated = history.copy()
+    updated[start:stop, :] = assigned
+    output_size = history.size
+    value_size = assigned.size
+    num_cols = history.shape[1]
+    dhistory = np.eye(output_size)
+    dvalues = np.zeros((output_size, value_size))
+
+    for row in range(start, stop):
+        for col in range(num_cols):
+            output_index = row * num_cols + col
+            value_index = (row - start) * num_cols + col
+            dhistory[output_index, output_index] = 0.0
+            dvalues[output_index, value_index] = 1.0
+
+    return {
+        "updated_history_matrix": updated,
+        "dupdated_history_matrix_dhistory_matrix": dhistory,
+        "dupdated_history_matrix_dvalues": dvalues,
     }
 
 

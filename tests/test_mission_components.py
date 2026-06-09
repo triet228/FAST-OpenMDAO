@@ -21,6 +21,8 @@ from fast_openmdao import (
     CruiseTimeTargetDistance,
     DetailedTakeoffSegmentKinematicsPower,
     FlightConditions,
+    HistoryMatrixSlice,
+    HistoryVectorSlice,
     InitialEnergyRemaining,
     LandingSegmentKinematicsPower,
     PrescribedRateSegmentKinematicsPower,
@@ -29,6 +31,8 @@ from fast_openmdao import (
 )
 from fast_python.data_struct import init_mission_history
 from fast_python.mission import (
+    assign_history_matrix,
+    assign_history_vector,
     compute_flight_conditions,
     cruise_breguet_apply_source_delta,
     cruise_breguet_discharge_battery,
@@ -1062,6 +1066,134 @@ def test_row_matrix_declares_analytic_partials():
 
     for partial_data in partials["row_matrix"].values():
         assert partial_data["abs error"].forward < 1.0e-8
+
+
+def test_history_vector_slice_matches_fast_python():
+    """Check fixed history-vector slice assignment parity with FAST-Python."""
+
+    history = np.asarray([1.0, 2.0, 3.0, 4.0, 5.0])
+    values = np.asarray([20.0, 30.0])
+    start = 2
+    stop = 4
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "history_slice",
+        HistoryVectorSlice(history_size=5, start=start, stop=stop),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("history_vector", history)
+    problem.set_val("values", values)
+    problem.run_model()
+
+    section = {"Power": history.tolist()}
+    assign_history_vector(section, "Power", values, start, stop)
+
+    assert np.allclose(
+        problem.get_val("updated_history_vector"),
+        np.asarray(section["Power"]),
+    )
+
+
+def test_history_vector_slice_declares_analytic_partials():
+    """Check fixed history-vector slice assignment derivatives."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "history_slice",
+        HistoryVectorSlice(history_size=5, start=2, stop=4),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("history_vector", np.asarray([1.0, 2.0, 3.0, 4.0, 5.0]))
+    problem.set_val("values", np.asarray([20.0, 30.0]))
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["history_slice"].values():
+        assert partial_data["abs error"].forward < 1.0e-9
+
+
+def test_history_matrix_slice_matches_fast_python():
+    """Check fixed history-matrix row slice assignment parity with FAST-Python."""
+
+    history = np.asarray(
+        [
+            [1.0, 2.0],
+            [3.0, 4.0],
+            [5.0, 6.0],
+            [7.0, 8.0],
+        ]
+    )
+    values = np.asarray(
+        [
+            [20.0, 30.0],
+            [40.0, 50.0],
+        ]
+    )
+    start = 1
+    stop = 3
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "history_slice",
+        HistoryMatrixSlice(num_rows=4, num_cols=2, start=start, stop=stop),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("history_matrix", history)
+    problem.set_val("values", values)
+    problem.run_model()
+
+    section = {"Power": history.tolist()}
+    assign_history_matrix(section, "Power", values, start, stop)
+
+    assert np.allclose(
+        problem.get_val("updated_history_matrix"),
+        np.asarray(section["Power"]),
+    )
+
+
+def test_history_matrix_slice_declares_analytic_partials():
+    """Check fixed history-matrix row slice assignment derivatives."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "history_slice",
+        HistoryMatrixSlice(num_rows=4, num_cols=2, start=1, stop=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val(
+        "history_matrix",
+        np.asarray(
+            [
+                [1.0, 2.0],
+                [3.0, 4.0],
+                [5.0, 6.0],
+                [7.0, 8.0],
+            ]
+        ),
+    )
+    problem.set_val("values", np.asarray([[20.0, 30.0], [40.0, 50.0]]))
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["history_slice"].values():
+        assert partial_data["abs error"].forward < 1.0e-9
 
 
 def output_names():
