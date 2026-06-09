@@ -2,6 +2,7 @@
 
 """OpenMDAO components for FAST analysis helper equations."""
 
+import numpy as np
 import openmdao.api as om
 
 
@@ -50,3 +51,23 @@ class ConvergenceError(om.ExplicitComponent):
         sign = 1.0 if delta > 0.0 else -1.0
         partials["convergence_error", "delta"] = sign / baseline
         partials["convergence_error", "baseline"] = -abs(delta) / baseline ** 2
+
+
+class WeightSum(om.ExplicitComponent):
+    """Compute FAST's scalar sum of source-weight values."""
+
+    def initialize(self):
+        self.options.declare("vec_size", default=1)
+
+    def setup(self):
+        vec_size = self.options["vec_size"]
+        self.add_input("weight_values", val=np.ones(vec_size), units="kg")
+        self.add_output("weight_sum", val=1.0, units="kg")
+        self.declare_partials(
+            of="weight_sum",
+            wrt="weight_values",
+            val=np.ones(vec_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["weight_sum"] = np.sum(inputs["weight_values"])

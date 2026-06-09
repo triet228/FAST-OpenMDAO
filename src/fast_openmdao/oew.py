@@ -2,6 +2,7 @@
 
 """OpenMDAO components for FAST operating empty weight equations."""
 
+import numpy as np
 import openmdao.api as om
 
 
@@ -38,3 +39,23 @@ class TurbopropAirframeWeight(om.ExplicitComponent):
 
     def compute_partials(self, inputs, partials):
         partials["airframe_weight", "mtow"] = self.options["slope"]
+
+
+class NumericSum(om.ExplicitComponent):
+    """Compute FAST's scalar sum for OEW numeric values."""
+
+    def initialize(self):
+        self.options.declare("vec_size", default=1)
+
+    def setup(self):
+        vec_size = self.options["vec_size"]
+        self.add_input("values", val=np.ones(vec_size))
+        self.add_output("numeric_sum", val=1.0)
+        self.declare_partials(
+            of="numeric_sum",
+            wrt="values",
+            val=np.ones(vec_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["numeric_sum"] = np.sum(inputs["values"])

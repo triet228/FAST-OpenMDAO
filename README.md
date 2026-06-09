@@ -42,6 +42,8 @@ derivative-native FAST equation components:
 - Generic FAR 25 climb residual component with analytical partial derivatives.
 - Battery scalar primitives for effective cell capacity and selected current
   root with analytical partial derivatives.
+- Analysis and OEW summation helpers for scalar/vector weight values with
+  analytical partial derivatives.
 - Optimization helper primitives for available electric motor power and
   battery energy with analytical partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
@@ -60,7 +62,7 @@ derivative-native FAST equation components:
 The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
-- Analysis: `ConvergenceError`
+- Analysis: `ConvergenceError`, `WeightSum`
 - Battery: `AvailableCellCapacity`, `BatteryCurrent`
 - Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
   `FAR25EngineGradient`, `JetApproachConstraint`, `JetCruiseConstraint`,
@@ -72,7 +74,7 @@ The public `fast_openmdao` package currently exports:
   `LocalReynolds`, `MassFlowParameter`, `StaticDensity`, `StaticPressure`,
   `StaticTemperature`, `TotalPressure`, `TotalTemperature`
 - Mission: `CruiseTimeTargetDistance`, `FlightConditions`
-- OEW: `TurbopropAirframeWeight`
+- OEW: `NumericSum`, `TurbopropAirframeWeight`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
@@ -264,8 +266,10 @@ optimized values against FAST-Python residual functions.
    derivatives. Done.
 21. Convert optimization available-power and available-energy helpers with
    analytical partial derivatives. Done.
-22. Add complex-step derivative checks where supported by FAST-Python internals.
-23. Build reusable groups for mission, propulsion, weights, and objective
+22. Convert scalar/vector analysis and OEW summation helpers with analytical
+   partial derivatives. Done.
+23. Add complex-step derivative checks where supported by FAST-Python internals.
+24. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

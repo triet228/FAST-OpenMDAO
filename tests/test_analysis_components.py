@@ -9,8 +9,8 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import ConvergenceError
-from fast_python.analysis import convergence_error
+from fast_openmdao import ConvergenceError, WeightSum
+from fast_python.analysis import convergence_error, sum_weight
 
 
 def test_convergence_error_matches_fast_python():
@@ -46,4 +46,46 @@ def test_convergence_error_declares_analytic_partials():
     )
 
     for partial_data in partials["convergence"].values():
+        assert partial_data["abs error"].forward < 1.0e-8
+
+
+def test_weight_sum_matches_fast_python():
+    """Check source-weight summation parity with FAST-Python."""
+
+    values = np.asarray([12.0, 4.0, 3.5])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "weight",
+        WeightSum(vec_size=values.size),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("weight_values", values, units="kg")
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("weight_sum", units="kg")[0], sum_weight(values))
+
+
+def test_weight_sum_declares_analytic_partials():
+    """Check source-weight summation derivatives against finite difference."""
+
+    values = np.asarray([12.0, 4.0, 3.5])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "weight",
+        WeightSum(vec_size=values.size),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("weight_values", values, units="kg")
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for partial_data in partials["weight"].values():
         assert partial_data["abs error"].forward < 1.0e-8

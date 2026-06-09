@@ -20,7 +20,7 @@ closed-form derivatives are practical.
 | FAST-Python module | Status | OpenMDAO target |
 | --- | --- | --- |
 | `aircraft.py` | support | Keep as FAST data preparation until the data contract stabilizes. |
-| `analysis.py` | candidate | Scalar convergence-error helper converted; top-level analysis group coordinating weights, mission, propulsion, and convergence remains. |
+| `analysis.py` | candidate | Scalar convergence-error and weight-sum helpers converted; top-level analysis group coordinating weights, mission, propulsion, and convergence remains. |
 | `atmosphere.py` | converted | `fast_openmdao.atmosphere.Gravity`, `fast_openmdao.atmosphere.StandardAtmosphere`. |
 | `battery.py` | candidate | Effective cell capacity and selected current root converted; discharge, charge, aging, and sizing components remain. |
 | `cases.py` | support | Case factories, not derivative components. |
@@ -36,7 +36,7 @@ closed-form derivatives are practical.
 | `main.py` | support | CLI entry point. |
 | `markers.py` | support | MATLAB marker compatibility. |
 | `mission.py` | candidate | `fast_openmdao.mission.FlightConditions` and cruise time-target distance conversion converted; segment, Breguet cruise, and mission groups remain. |
-| `oew.py` | candidate | Turboprop airframe-weight linear fit converted; OEW iteration and turbofan airframe-weight regression remain. |
+| `oew.py` | candidate | Turboprop airframe-weight linear fit and numeric-sum helper converted; OEW iteration and turbofan airframe-weight regression remain. |
 | `optimization.py` | candidate | Available electric motor power and battery energy helpers converted; recast remaining useful objective and constraint functions as OpenMDAO driver setup, and avoid porting custom optimizers unless needed. |
 | `plotting.py` | support | Plot preparation and rendering utilities. |
 | `profiles.py` | support | Mission profile factories. |

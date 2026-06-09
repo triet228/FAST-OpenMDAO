@@ -2,7 +2,7 @@
 
 """OpenMDAO integration layer for FAST-Python."""
 
-from fast_openmdao.analysis import ConvergenceError
+from fast_openmdao.analysis import ConvergenceError, WeightSum
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.battery import AvailableCellCapacity, BatteryCurrent
 from fast_openmdao.components import FastPythonComponent
@@ -35,7 +35,7 @@ from fast_openmdao.engine import (
     TotalTemperature,
 )
 from fast_openmdao.mission import CruiseTimeTargetDistance, FlightConditions
-from fast_openmdao.oew import TurbopropAirframeWeight
+from fast_openmdao.oew import NumericSum, TurbopropAirframeWeight
 from fast_openmdao.optimization import (
     BatteryEnergyAvailable,
     ElectricMotorPowerAvailable,
@@ -88,6 +88,7 @@ __all__ = [
     "LocalEfficiency",
     "LocalReynolds",
     "MassFlowParameter",
+    "NumericSum",
     "OEIMultiplier",
     "PsLossSigmoid",
     "SafeComponentWeight",
@@ -102,6 +103,7 @@ __all__ = [
     "TransmitterFanEfficiency",
     "TurbopropAirframeWeight",
     "UnitConversion",
+    "WeightSum",
     "__version__",
     "make_fast_optimization_problem",
     "make_fast_problem",
