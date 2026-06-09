@@ -5,8 +5,8 @@
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import SpecPowerUnitConversion
-from fast_python.data_struct import convert_spec_units
+from fast_openmdao import DefaultFuelSpecificEnergy, SpecPowerUnitConversion
+from fast_python.data_struct import convert_spec_units, default_fuel_specific_energy
 
 
 def test_spec_power_unit_conversion_matches_fast_python():
@@ -35,6 +35,25 @@ def test_spec_power_unit_conversion_matches_fast_python():
         problem.get_val("battery_specific_energy_si")[0],
         expected["SpecEnergy"]["Batt"],
     )
+
+
+def test_default_fuel_specific_energy_matches_fast_python():
+    """Check FAST SpecProcessing default fuel specific energy parity."""
+
+    for aircraft_class in ("Turbofan", "Turboprop", "Piston"):
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "fuel",
+            DefaultFuelSpecificEnergy(aircraft_class=aircraft_class),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.run_model()
+
+        assert np.isclose(
+            problem.get_val("fuel_specific_energy")[0],
+            default_fuel_specific_energy(aircraft_class),
+        )
 
 
 def test_spec_power_unit_conversion_skip_branch_matches_fast_python():

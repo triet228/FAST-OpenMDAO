@@ -122,6 +122,7 @@ COVERAGE_ALIASES = {
     "cycling_aging_parameters": {"BatteryCyclingAging"},
     "diffuser": {"DiffuserFlow"},
     "discharging": {"BatteryPowerHistory", "BatteryPowerStep"},
+    "default_fuel_specific_energy": {"DefaultFuelSpecificEnergy"},
     "electric_motor_specific_power": {"ElectricMotorSpecificPowerProjection"},
     "engine_weights_for_sizing": {
         "TurbofanEngineWeightForSizing",
@@ -161,6 +162,7 @@ COVERAGE_ALIASES = {
     "hess_upd": {"HessianUpdate"},
     "initial_energy_remaining": {"InitialEnergyRemaining"},
     "initial_source_weight": {"SourceWeightVector"},
+    "is_detailed_battery": {"DetailedBatteryFlag"},
     "jet25_111": {"JetFAR25NamedClimbConstraint"},
     "jet25_119": {"JetFAR25NamedClimbConstraint"},
     "jet25_121a": {"JetFAR25NamedClimbConstraint"},
@@ -212,6 +214,7 @@ COVERAGE_ALIASES = {
     "ps_pt": {"StaticPressure"},
     "pt_ps": {"TotalPressure"},
     "reg_processing": {"RegressionInverseTerm"},
+    "regression_scalar": {"GaussianProcessPrediction"},
     "regression_airframe_weight": {"TurbofanAirframeWeight"},
     "restore_source_weight": {"SourceWeightRestore"},
     "restore_scalar_or_list": {

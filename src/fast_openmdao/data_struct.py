@@ -5,6 +5,30 @@
 import openmdao.api as om
 
 
+class DefaultFuelSpecificEnergy(om.ExplicitComponent):
+    """Return FAST's class-dependent default fuel specific energy.
+
+    Outputs:
+        fuel_specific_energy: Default fuel specific energy in kWh/kg.
+
+    Assumptions:
+        FAST chooses this value from the discrete aircraft class during
+        SpecProcessing. There is no continuous derivative surface because the
+        output is a constant for each aircraft-class branch.
+    """
+
+    def initialize(self):
+        self.options.declare("aircraft_class", default="Turbofan")
+
+    def setup(self):
+        self.add_output("fuel_specific_energy", val=12.0)
+
+    def compute(self, inputs, outputs):
+        outputs["fuel_specific_energy"] = default_fuel_specific_energy_value(
+            self.options["aircraft_class"],
+        )
+
+
 class SpecPowerUnitConversion(om.ExplicitComponent):
     """Convert FAST SpecProcessing power fields to SI units.
 
@@ -93,6 +117,15 @@ def spec_power_unit_conversion_scale(analysis_type):
         "power_to_weight": 1.0e3,
         "specific_energy": 3.6e6,
     }
+
+
+def default_fuel_specific_energy_value(aircraft_class):
+    """Return FAST SpecProcessing default fuel specific energy in kWh/kg."""
+
+    if aircraft_class == "Piston":
+        return 4.465e7 / 3.6e6
+
+    return 4.32e7 / 3.6e6
 
 
 def spec_power_unit_conversion_values(

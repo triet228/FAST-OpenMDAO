@@ -62,7 +62,7 @@ from fast_openmdao.database import (
     TurbofanMacLiftDragEstimate,
     TurbopropCruiseLiftDragEstimate,
 )
-from fast_openmdao.data_struct import SpecPowerUnitConversion
+from fast_openmdao.data_struct import DefaultFuelSpecificEnergy, SpecPowerUnitConversion
 from fast_openmdao.engine import (
     AirIntegratedHeat,
     AirSpecificHeat,
@@ -270,6 +270,7 @@ __all__ = [
     "DatabasePropPowerNormalization",
     "DatabasePropThrustLoading",
     "DatabaseWeightFractions",
+    "DefaultFuelSpecificEnergy",
     "DesignOperationalConstraints",
     "DesignSplitBounds",
     "DetailedTakeoffSegmentKinematicsPower",
