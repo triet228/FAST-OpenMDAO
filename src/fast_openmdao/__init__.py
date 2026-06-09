@@ -22,6 +22,12 @@ from fast_openmdao.projection import (
     ElectricMotorSpecificPowerProjection,
     KPPProjection,
 )
+from fast_openmdao.propulsion import (
+    EngineLapse,
+    SafeComponentWeight,
+    ThrustSinkEfficiency,
+    TransmitterFanEfficiency,
+)
 from fast_openmdao.units import UnitConversion
 
 __version__ = "0.1.0"
@@ -31,18 +37,22 @@ __all__ = [
     "BatterySpecificEnergyProjection",
     "ChokedArea",
     "ElectricMotorSpecificPowerProjection",
+    "EngineLapse",
     "FastPythonComponent",
     "FlightConditions",
     "FlowArea",
     "Gravity",
     "KPPProjection",
     "MassFlowParameter",
+    "SafeComponentWeight",
     "StaticDensity",
     "StaticPressure",
     "StaticTemperature",
     "StandardAtmosphere",
     "TotalPressure",
     "TotalTemperature",
+    "ThrustSinkEfficiency",
+    "TransmitterFanEfficiency",
     "UnitConversion",
     "__version__",
     "make_fast_optimization_problem",

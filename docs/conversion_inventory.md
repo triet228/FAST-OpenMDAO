@@ -41,7 +41,7 @@ closed-form derivatives are practical.
 | `plotting.py` | support | Plot preparation and rendering utilities. |
 | `profiles.py` | support | Mission profile factories. |
 | `projection.py` | converted | `fast_openmdao.projection.KPPProjection` plus battery and electric motor projection aliases. |
-| `propulsion.py` | candidate | Power-flow, architecture, sizing, fuel-use, and history components. |
+| `propulsion.py` | candidate | Engine lapse, safe component weight, and efficiency selectors converted; power-flow, architecture, sizing, fuel-use, and history components remain. |
 | `reference.py` | support | Reference case store and archive access. |
 | `regression.py` | candidate | Regression kernels and GP predictor components where differentiable. |
 | `retrofit.py` | support | Retrofit option factory placeholder. |
