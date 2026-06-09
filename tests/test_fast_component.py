@@ -9,7 +9,11 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import FastPythonComponent, make_fast_problem
+from fast_openmdao import (
+    FastPythonComponent,
+    make_fast_optimization_problem,
+    make_fast_problem,
+)
 from tests.fixtures import make_compact_aircraft, make_compact_mission
 
 
@@ -107,6 +111,40 @@ def test_component_can_be_added_directly_to_openmdao_problem():
     problem.run_model()
 
     assert abs(problem.get_val("mtow", units="kg")[0] - 3000.0) < 1.0e-9
+
+
+def test_optimization_builder_runs_slsqp_driver():
+    """Check the problem builder can drive a scalar FAST design variable."""
+
+    input_specs = fake_input_specs()
+    input_specs[0]["val"] = 40000.0
+    problem = make_fast_optimization_problem(
+        aircraft=make_fake_aircraft(),
+        mission=make_fake_mission(),
+        input_specs=input_specs,
+        output_specs=fake_output_specs(),
+        runner=fake_runner,
+        design_vars=[
+            {
+                "name": "cruise_lift_to_drag",
+                "lower": 5.0,
+                "upper": 20.0,
+            },
+        ],
+        objective={
+            "name": "mtow",
+        },
+        driver_options={
+            "maxiter": 20,
+            "tol": 1.0e-9,
+        },
+    )
+    problem.setup()
+    result = problem.run_driver()
+
+    assert result.success
+    assert problem.get_val("cruise_lift_to_drag")[0] > 19.99
+    assert abs(problem.get_val("mtow", units="kg")[0] - 3000.0) < 1.0e-5
 
 
 def fake_input_specs():

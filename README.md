@@ -15,6 +15,8 @@ This repository now has its first OpenMDAO bridge:
 
 - `FastPythonComponent`: an `om.ExplicitComponent` that wraps a `FAST-Python`
   run.
+- `make_fast_optimization_problem`: a driver-ready builder that attaches
+  design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
   aircraft or mission dictionaries.
 - Path-based scalar output specs that extract values from the FAST result.
@@ -93,12 +95,45 @@ The component currently uses OpenMDAO finite-difference partials. That makes the
 framework driver-ready while FAST-Python internals are converted toward
 derivative-native implementations.
 
+## Minimal Optimization Setup
+
+```python
+from fast_openmdao import make_fast_optimization_problem
+
+problem = make_fast_optimization_problem(
+    aircraft=aircraft,
+    mission=mission,
+    input_specs=[
+        {
+            "name": "cruise_lift_to_drag",
+            "target": "aircraft",
+            "path": ("Specs", "Aero", "L_D", "Crs"),
+            "val": 10.0,
+        },
+    ],
+    design_vars=[
+        {
+            "name": "cruise_lift_to_drag",
+            "lower": 5.0,
+            "upper": 25.0,
+        },
+    ],
+    objective={
+        "name": "mtow",
+    },
+)
+
+problem.setup()
+problem.run_driver()
+```
+
 ## Development Roadmap
 
 1. Add a minimal OpenMDAO component that wraps a `FAST-Python` case. Done.
 2. Expose scalar FAST inputs as OpenMDAO design variables. Done.
 3. Add finite-difference checks around the component bridge. Done.
-4. Add optimization examples that run from the command line.
-5. Add complex-step derivative checks where supported by FAST-Python internals.
-6. Build reusable groups for mission, propulsion, weights, and objective
+4. Add a driver-ready optimization problem builder. Done.
+5. Add optimization examples that run from the command line.
+6. Add complex-step derivative checks where supported by FAST-Python internals.
+7. Build reusable groups for mission, propulsion, weights, and objective
    functions.
