@@ -4,7 +4,11 @@
 
 from fast_openmdao.analysis import ConvergenceError, SourceWeightVector, WeightSum
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
-from fast_openmdao.battery import AvailableCellCapacity, BatteryCurrent
+from fast_openmdao.battery import (
+    AvailableCellCapacity,
+    BatteryCurrent,
+    BatteryWeightFromEnergy,
+)
 from fast_openmdao.components import FastPythonComponent
 from fast_openmdao.constraint import (
     CruiseDynamicPressure,
@@ -81,6 +85,7 @@ __all__ = [
     "BatterySpecificEnergyProjection",
     "AvailableCellCapacity",
     "BatteryCurrent",
+    "BatteryWeightFromEnergy",
     "ChokedArea",
     "CableWeightForSizing",
     "ConvergenceError",

@@ -4,6 +4,7 @@
 
 import math
 
+import numpy as np
 import openmdao.api as om
 
 
@@ -77,6 +78,47 @@ class BatteryCurrent(om.ExplicitComponent):
         ]
 
 
+class BatteryWeightFromEnergy(om.ExplicitComponent):
+    """Size battery-source weight from final mission energy use."""
+
+    def initialize(self):
+        self.options.declare("src_type", default=(0.0,))
+        self.options.declare("npoint", default=1)
+
+    def setup(self):
+        src_type = np.asarray(self.options["src_type"], dtype=float).reshape(-1)
+        npoint = self.options["npoint"]
+        nbatt = max(1, int(np.count_nonzero(src_type == 0.0)))
+        self._src_type = src_type
+        self._npoint = npoint
+        self._nbatt = nbatt
+
+        self.add_input("battery_source_energy", shape=(npoint, len(src_type)), units="J")
+        self.add_input("battery_specific_energy", val=1.0, units="J/kg")
+        self.add_output("battery_weight", shape=nbatt, units="kg")
+        self.declare_partials(of="battery_weight", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["battery_weight"] = battery_weight_from_energy_values(
+            self._src_type,
+            inputs["battery_source_energy"],
+            inputs["battery_specific_energy"][0],
+        )["battery_weight"]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_weight_from_energy_values(
+            self._src_type,
+            inputs["battery_source_energy"],
+            inputs["battery_specific_energy"][0],
+        )
+        partials["battery_weight", "battery_source_energy"] = values[
+            "dbattery_weight_dbattery_source_energy"
+        ]
+        partials["battery_weight", "battery_specific_energy"] = values[
+            "dbattery_weight_dbattery_specific_energy"
+        ]
+
+
 def available_cell_capacity_value(cap_cell, state_of_health, analysis_type, degradation):
     """Return FAST effective cell capacity scalar value."""
 
@@ -137,4 +179,52 @@ def battery_current_derivatives(
         "dcurrent_dhot_voltage": -(current ** 2) / denominator,
         "dcurrent_dcold_voltage": -current / denominator,
         "dcurrent_drequested_cell_power": 1.0 / denominator,
+    }
+
+
+def battery_weight_from_energy_values(
+    src_type,
+    battery_source_energy,
+    battery_specific_energy,
+):
+    """Return FAST simple ResizeBattery weight and dense derivatives."""
+
+    src_type = np.asarray(src_type, dtype=float).reshape(-1)
+    energy = np.asarray(battery_source_energy, dtype=float)
+    battery_columns = np.flatnonzero(src_type == 0.0)
+    nbatt = max(1, len(battery_columns))
+    weight = np.zeros(nbatt)
+    dweight_denergy = np.zeros((nbatt, energy.size))
+    dweight_dspecific_energy = np.zeros(nbatt)
+
+    if len(battery_columns) == 0:
+        return {
+            "battery_weight": weight,
+            "dbattery_weight_dbattery_source_energy": dweight_denergy,
+            "dbattery_weight_dbattery_specific_energy": dweight_dspecific_energy,
+        }
+
+    battery_energy = energy[:, battery_columns]
+
+    if np.sum(battery_energy) == 0.0:
+        return {
+            "battery_weight": weight,
+            "dbattery_weight_dbattery_source_energy": dweight_denergy,
+            "dbattery_weight_dbattery_specific_energy": dweight_dspecific_energy,
+        }
+
+    final_energy = battery_energy[-1, :]
+    weight = final_energy / battery_specific_energy
+    nsrc = len(src_type)
+
+    for index, column in enumerate(battery_columns):
+        dweight_denergy[index, (energy.shape[0] - 1) * nsrc + column] = (
+            1.0 / battery_specific_energy
+        )
+
+    dweight_dspecific_energy = -final_energy / battery_specific_energy ** 2
+    return {
+        "battery_weight": weight,
+        "dbattery_weight_dbattery_source_energy": dweight_denergy,
+        "dbattery_weight_dbattery_specific_energy": dweight_dspecific_energy,
     }

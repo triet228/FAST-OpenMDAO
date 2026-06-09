@@ -9,8 +9,12 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import AvailableCellCapacity, BatteryCurrent
-from fast_python.battery import available_cell_capacity, solve_battery_current
+from fast_openmdao import AvailableCellCapacity, BatteryCurrent, BatteryWeightFromEnergy
+from fast_python.battery import (
+    available_cell_capacity,
+    resize_battery,
+    solve_battery_current,
+)
 
 
 def test_available_cell_capacity_matches_fast_python():
@@ -55,6 +59,36 @@ def test_battery_current_matches_fast_python_real_roots():
         )
 
 
+def test_battery_weight_from_energy_matches_fast_python_resize_battery():
+    """Check simple ResizeBattery energy sizing parity with FAST-Python."""
+
+    src_type = np.asarray([1.0, 0.0, 0.0])
+    energy = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [10.0, 100.0, 120.0],
+        ]
+    )
+    specific_energy = 0.4 * 3.6e6
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "weight",
+        BatteryWeightFromEnergy(src_type=src_type, npoint=2),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("battery_source_energy", energy, units="J")
+    problem.set_val("battery_specific_energy", specific_energy, units="J/kg")
+    problem.run_model()
+
+    result = resize_battery(make_resize_battery_aircraft(src_type, energy, specific_energy))
+
+    assert np.allclose(
+        problem.get_val("battery_weight", units="kg"),
+        np.asarray(result["Specs"]["Weight"]["Batt"]),
+    )
+
+
 def test_battery_primitives_declare_analytic_partials():
     """Check battery primitive derivatives against finite difference."""
 
@@ -63,6 +97,19 @@ def test_battery_primitives_declare_analytic_partials():
             "capacity",
             AvailableCellCapacity(analysis_type=-2, degradation=1),
             {"cap_cell": 2.4, "state_of_health": 90.0},
+        ),
+        (
+            "weight",
+            BatteryWeightFromEnergy(src_type=np.asarray([1.0, 0.0, 0.0]), npoint=2),
+            {
+                "battery_source_energy": np.asarray(
+                    [
+                        [0.0, 0.0, 0.0],
+                        [10.0, 100.0, 120.0],
+                    ]
+                ),
+                "battery_specific_energy": 0.4 * 3.6e6,
+            },
         ),
         (
             "current",
@@ -119,5 +166,38 @@ def make_battery_aircraft(cap_cell, state_of_health):
                 "Degradation": 1,
                 "SOH": [100.0, state_of_health],
             },
+        },
+    }
+
+
+def make_resize_battery_aircraft(src_type, source_energy, specific_energy):
+    """Return minimal aircraft dictionary for FAST-Python ResizeBattery."""
+
+    return {
+        "Specs": {
+            "Propulsion": {
+                "PropArch": {
+                    "SrcType": src_type.tolist(),
+                    "Arch": 1,
+                }
+            },
+            "Power": {
+                "SpecEnergy": {
+                    "Batt": specific_energy,
+                }
+            },
+        },
+        "Mission": {
+            "History": {
+                "SI": {
+                    "Energy": {
+                        "E_ES": source_energy.tolist(),
+                        "Eleft_ES": np.zeros_like(source_energy).tolist(),
+                    }
+                }
+            }
+        },
+        "Settings": {
+            "DetailedBatt": 0,
         },
     }
