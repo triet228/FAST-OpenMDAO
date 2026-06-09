@@ -32,6 +32,7 @@ from fast_openmdao import (
     SanitizedArray,
     SanitizedGradient,
     SanitizedValues,
+    SimplexPostSplitHistory,
     SplitScheduleFill,
     TwoDimensionalArray,
     ZeroIfEmpty,
@@ -58,6 +59,7 @@ from fast_python.optimization import (
     sanitize_array,
     sanitize_gradient,
     sanitize_values,
+    simplex_post,
     simplex_setup,
     two_dimensional,
     zero_if_empty,
@@ -271,6 +273,33 @@ def test_operational_simplex_tableau_matches_fast_python():
 
         expected = simplex_setup(case["aircraft"], case["indices"])
         assert np.allclose(problem.get_val("tableau"), expected)
+
+
+def test_simplex_post_split_history_matches_fast_python():
+    """Check FAST simplex optimized split history write-back parity."""
+
+    case = make_simplex_post_split_history_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "post",
+        SimplexPostSplitHistory(
+            history_size=case["initial_power_split"].size,
+            indices=case["indices"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("initial_power_split", case["initial_power_split"])
+    problem.set_val("optimized_power_split", case["optimized_power_split"])
+    problem.run_model()
+
+    expected = simplex_post(
+        case["aircraft"],
+        case["indices"],
+        case["optimized_power_split"],
+    )
+    expected_history = expected["Mission"]["History"]["SI"]["Power"]["Phi"]
+    assert np.allclose(problem.get_val("updated_power_split"), expected_history)
 
 
 def test_split_schedule_fill_matches_fast_python():
@@ -828,6 +857,14 @@ def test_optimization_helpers_declare_analytic_partials():
             operational_simplex_tableau_derivative_inputs(),
         ),
         (
+            "simplex_post",
+            SimplexPostSplitHistory(history_size=5, indices=np.asarray([1, 3, 5])),
+            {
+                "initial_power_split": np.asarray([0.1, 0.2, 0.3, 0.4, 0.5]),
+                "optimized_power_split": np.asarray([0.7, 0.8]),
+            },
+        ),
+        (
             "split_fill",
             SplitScheduleFill(
                 num_rows=make_split_schedule_fill_case()["target"].shape[0],
@@ -1240,6 +1277,28 @@ def set_operational_simplex_tableau_inputs(problem, case):
             problem.set_val(name, case[name])
         else:
             problem.set_val(name, value)
+
+
+def make_simplex_post_split_history_case():
+    """Return deterministic values for FAST simplex_post write-back checks."""
+
+    initial = np.asarray([0.1, 0.2, 0.3, 0.4, 0.5])
+    return {
+        "initial_power_split": initial,
+        "optimized_power_split": np.asarray([0.7, 0.8]),
+        "indices": np.asarray([1, 3, 5]),
+        "aircraft": {
+            "Mission": {
+                "History": {
+                    "SI": {
+                        "Power": {
+                            "Phi": initial.copy(),
+                        },
+                    },
+                },
+            },
+        },
+    }
 
 
 def make_design_split_bound_aircraft(num_design_splits):

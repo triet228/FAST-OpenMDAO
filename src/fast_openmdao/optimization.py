@@ -376,6 +376,42 @@ class OperationalSimplexTableau(om.ExplicitComponent):
             partials["tableau", input_name] = values["dtableau_d%s" % input_name]
 
 
+class SimplexPostSplitHistory(om.ExplicitComponent):
+    """Write optimized FAST simplex power splits into a fixed history vector."""
+
+    def initialize(self):
+        self.options.declare("history_size", default=1)
+        self.options.declare("indices", default=(1,))
+
+    def setup(self):
+        history_size = self.options["history_size"]
+        phi_size = simplex_post_phi_size(self.options["indices"])
+        self.add_input("initial_power_split", val=np.zeros(history_size))
+        self.add_input("optimized_power_split", val=np.zeros(phi_size))
+        self.add_output("updated_power_split", val=np.zeros(history_size))
+        self.declare_partials(of="updated_power_split", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["updated_power_split"] = simplex_post_split_history_values(
+            inputs["initial_power_split"],
+            inputs["optimized_power_split"],
+            self.options["indices"],
+        )["updated_power_split"]
+
+    def compute_partials(self, inputs, partials):
+        values = simplex_post_split_history_values(
+            inputs["initial_power_split"],
+            inputs["optimized_power_split"],
+            self.options["indices"],
+        )
+        partials["updated_power_split", "initial_power_split"] = values[
+            "dupdated_power_split_dinitial_power_split"
+        ]
+        partials["updated_power_split", "optimized_power_split"] = values[
+            "dupdated_power_split_doptimized_power_split"
+        ]
+
+
 class SplitScheduleFill(om.ExplicitComponent):
     """Fill a FAST split schedule from a flattened optimized split vector.
 
@@ -1877,6 +1913,42 @@ def add_objective_coefficients(
             raise ValueError(
                 "OperationalSimplexTableau objective must be FuelBurn or Energy."
             )
+
+
+def simplex_post_phi_size(indices):
+    """Return FAST simplex_post optimized phi count for selected indices."""
+
+    return max(0, np.asarray(indices).reshape(-1).size - 1)
+
+
+def simplex_post_split_history_values(
+    initial_power_split,
+    optimized_power_split,
+    indices,
+):
+    """Return FAST simplex_post split history and constant Jacobians."""
+
+    initial = np.asarray(initial_power_split, dtype=float).reshape(-1)
+    optimized = np.asarray(optimized_power_split, dtype=float).reshape(-1)
+    one_based = np.asarray(indices, dtype=int).reshape(-1)
+    num_phi = simplex_post_phi_size(one_based)
+    updated = np.array(initial, dtype=float, copy=True)
+    dinitial = np.eye(initial.size)
+    doptimized = np.zeros((initial.size, optimized.size))
+
+    for phi_index, (row, value) in enumerate(
+        zip(one_based[:num_phi], optimized[:num_phi]),
+    ):
+        history_index = int(row) - 1
+        updated[history_index] = value
+        dinitial[history_index, :] = 0.0
+        doptimized[history_index, phi_index] = 1.0
+
+    return {
+        "updated_power_split": updated,
+        "dupdated_power_split_dinitial_power_split": dinitial,
+        "dupdated_power_split_doptimized_power_split": doptimized,
+    }
 
 
 def split_schedule_fill_values(

@@ -215,8 +215,8 @@ The public `fast_openmdao` package currently exports:
   `MeritFunction`, `OneBasedHistoryValues`, `OperationalObjective`,
   `OperationalSimplexTableau`, `OperationalSplitConstraints`,
   `PowerManagementObjective`, `PowerLimitConstraints`, `SanitizedArray`,
-  `SanitizedGradient`,
-  `SanitizedValues`, `SplitScheduleFill`, `TwoDimensionalArray`,
+  `SanitizedGradient`, `SanitizedValues`, `SimplexPostSplitHistory`,
+  `SplitScheduleFill`, `TwoDimensionalArray`,
   `ZeroIfEmpty`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
