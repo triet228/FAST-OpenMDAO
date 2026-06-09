@@ -28,6 +28,8 @@ derivative-native FAST equation components:
   derivatives for fixed architectures.
 - Mission Breguet propulsive-efficiency and power-split selectors with
   analytical partial derivatives for fixed storage paths.
+- Mission Breguet mass, power, and energy history component with analytical
+  partial derivatives for fixed non-detailed-battery architectures.
 - Mission Breguet source-energy allocation helper with analytical partial
   derivatives for fixed source layouts.
 - Mission initial source-energy remaining helper with analytical partial
@@ -118,7 +120,8 @@ The public `fast_openmdao` package currently exports:
   `StaticTemperature`, `ThermalPerfectGamma`, `TotalPressure`,
   `TotalTemperature`, `TurbineStageFlow`, `TurbofanLinearSizing`,
   `TurbopropLinearSizing`
-- Mission: `CruiseBreguetEfficiencyTriplet`, `CruiseBreguetPowerSplit`,
+- Mission: `CruiseBreguetEfficiencyTriplet`, `CruiseBreguetPowerHistory`,
+  `CruiseBreguetPowerSplit`,
   `CruiseBreguetPropulsiveEfficiency`, `CruiseBreguetSourceEnergy`,
   `CruiseTimeTargetDistance`, `FlightConditions`, `InitialEnergyRemaining`
 - OEW: `NumericSum`, `TurbofanAirframeWeight`, `TurbopropAirframeWeight`

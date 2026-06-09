@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     CruiseBreguetEfficiencyTriplet,
+    CruiseBreguetPowerHistory,
     CruiseBreguetPowerSplit,
     CruiseBreguetPropulsiveEfficiency,
     CruiseBreguetSourceEnergy,
@@ -21,6 +22,7 @@ from fast_openmdao import (
 from fast_python.mission import (
     compute_flight_conditions,
     cruise_breguet_efficiency_triplet,
+    cruise_breguet_power_history,
     cruise_breguet_power_split,
     cruise_breguet_propulsive_efficiency,
     cruise_breguet_source_energy,
@@ -305,6 +307,73 @@ def test_cruise_breguet_selectors_declare_analytic_partials():
             assert partial_data["abs error"].forward < 1.0e-10
 
 
+def test_cruise_breguet_power_history_matches_fast_python():
+    """Check non-detailed CruiseBRE power-history parity by architecture."""
+
+    values = make_breguet_power_history_values()
+
+    for architecture in ("AC", "PHE", "SHE", "TE", "PE", "E"):
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "history",
+            CruiseBreguetPowerHistory(
+                architecture=architecture,
+                npoint=values["npoint"],
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+
+        for name, value in values["inputs"].items():
+            problem.set_val(name, value)
+
+        problem.run_model()
+        expected = fast_python_breguet_power_history(architecture, values)
+
+        for output_name, expected_value in expected.items():
+            assert np.allclose(problem.get_val(output_name), expected_value)
+
+
+def test_cruise_breguet_power_history_declares_analytic_partials():
+    """Check CruiseBRE power-history derivatives for smooth branches."""
+
+    values = make_breguet_power_history_values()
+
+    for architecture in ("AC", "PHE", "SHE", "TE", "PE", "E"):
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "history",
+            CruiseBreguetPowerHistory(
+                architecture=architecture,
+                npoint=values["npoint"],
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+
+        for name, value in values["inputs"].items():
+            problem.set_val(name, value)
+
+        problem.run_model()
+        partials = problem.check_partials(
+            out_stream=None,
+            method="fd",
+            form="central",
+            step=1.0e-6,
+            step_calc="rel",
+        )
+
+        for key, partial_data in partials["history"].items():
+            absolute_error = partial_data["abs error"].forward
+            relative_error = partial_data["rel error"].forward
+            assert absolute_error < 2.0e-2 or relative_error < 1.0e-2, (
+                architecture,
+                key,
+                absolute_error,
+                relative_error,
+            )
+
+
 def test_cruise_breguet_source_energy_matches_fast_python():
     """Check CruiseBRE source-energy allocation parity with FAST-Python."""
 
@@ -514,6 +583,78 @@ def make_breguet_source_energy_values():
                 ],
             },
         },
+    }
+
+
+def make_breguet_power_history_values():
+    """Return FAST-shaped CruiseBRE power-history values."""
+
+    return {
+        "npoint": 4,
+        "inputs": {
+            "initial_mass": 18500.0,
+            "distance_step": np.asarray([8200.0, 9100.0, 10400.0]),
+            "time_step": np.asarray([70.0, 76.0, 83.0]),
+            "fuel_specific_energy": 43.2e6,
+            "battery_specific_energy": 900000.0,
+            "lift_drag": 16.5,
+            "propulsive_efficiency": 0.84,
+            "electric_motor_efficiency": 0.95,
+            "electric_generator_efficiency": 0.91,
+            "gas_turbine_efficiency": 0.36,
+            "power_split": 0.32,
+        },
+    }
+
+
+def fast_python_breguet_power_history(architecture, values):
+    """Return FAST-Python CruiseBRE outputs in OpenMDAO names."""
+
+    inputs = values["inputs"]
+    mass = np.zeros(values["npoint"])
+    mass[0] = inputs["initial_mass"]
+    soc = np.ones(values["npoint"]) * 100.0
+    aircraft = {
+        "Specs": {
+            "Power": {
+                "Battery": {
+                    "SerCells": np.nan,
+                    "ParCells": np.nan,
+                },
+            },
+        },
+    }
+    result = cruise_breguet_power_history(
+        aircraft,
+        architecture,
+        mass,
+        inputs["distance_step"],
+        inputs["time_step"],
+        np.ones(values["npoint"]) * 120.0,
+        9.81,
+        inputs["fuel_specific_energy"],
+        inputs["battery_specific_energy"],
+        inputs["lift_drag"],
+        inputs["propulsive_efficiency"],
+        inputs["electric_motor_efficiency"],
+        inputs["electric_generator_efficiency"],
+        inputs["gas_turbine_efficiency"],
+        inputs["power_split"],
+        soc,
+    )
+
+    return {
+        "fuel_power": result[0],
+        "battery_power": result[1],
+        "propulsor_power": result[2],
+        "motor_power": result[3],
+        "generator_power": result[4],
+        "required_power": result[5],
+        "fuel_burn": result[6],
+        "fuel_energy": result[7],
+        "battery_energy": result[8],
+        "phi_history": result[9],
+        "mass": mass,
     }
 
 

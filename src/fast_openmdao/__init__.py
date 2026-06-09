@@ -57,6 +57,7 @@ from fast_openmdao.engine import (
 )
 from fast_openmdao.mission import (
     CruiseBreguetEfficiencyTriplet,
+    CruiseBreguetPowerHistory,
     CruiseBreguetPowerSplit,
     CruiseBreguetPropulsiveEfficiency,
     CruiseBreguetSourceEnergy,
@@ -118,6 +119,7 @@ __all__ = [
     "DiffuserFlow",
     "CruiseDynamicPressure",
     "CruiseBreguetEfficiencyTriplet",
+    "CruiseBreguetPowerHistory",
     "CruiseBreguetPowerSplit",
     "CruiseBreguetPropulsiveEfficiency",
     "CruiseBreguetSourceEnergy",

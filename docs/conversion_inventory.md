@@ -35,7 +35,7 @@ closed-form derivatives are practical.
 | `io.py` | support | JSON input/output validation. |
 | `main.py` | support | CLI entry point. |
 | `markers.py` | support | MATLAB marker compatibility. |
-| `mission.py` | candidate | `fast_openmdao.mission.FlightConditions`, cruise time-target distance conversion, Breguet cruise efficiency triplet, Breguet propulsive-efficiency and power-split selectors, Breguet source-energy allocation, and initial source-energy remaining converted; segment, remaining Breguet cruise, and mission groups remain. |
+| `mission.py` | candidate | `fast_openmdao.mission.FlightConditions`, cruise time-target distance conversion, Breguet cruise efficiency triplet, Breguet propulsive-efficiency and power-split selectors, non-detailed-battery Breguet mass/power/energy history, Breguet source-energy allocation, and initial source-energy remaining converted; segment, detailed-battery Breguet discharge behavior, and mission groups remain. |
 | `oew.py` | candidate | Turboprop airframe-weight linear fit, turbofan airframe-weight regression, and numeric-sum helper converted; OEW iteration loops remain. |
 | `optimization.py` | candidate | Available electric motor power, battery energy, objective selectors, active power-limit residual, and operational split bound helpers converted; recast remaining useful objective and constraint functions as OpenMDAO driver setup, and avoid porting custom optimizers unless needed. |
 | `plotting.py` | support | Plot preparation and rendering utilities. |

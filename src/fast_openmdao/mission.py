@@ -377,6 +377,113 @@ class CruiseBreguetPowerSplit(om.ExplicitComponent):
             ]
 
 
+class CruiseBreguetPowerHistory(om.ExplicitComponent):
+    """Compute FAST CruiseBRE mass, power, and energy histories.
+
+    Inputs:
+        initial_mass: Segment starting mass in kg.
+        distance_step: Cruise distance increments in m.
+        time_step: Cruise time increments in s.
+        fuel_specific_energy: Fuel specific energy in J/kg.
+        battery_specific_energy: Battery specific energy in J/kg.
+        lift_drag: Segment lift-to-drag ratio.
+        propulsive_efficiency, electric_motor_efficiency,
+            electric_generator_efficiency, gas_turbine_efficiency: CruiseBRE
+            branch efficiencies.
+        power_split: FAST CruiseBRE electric/fuel split phi.
+
+    Outputs:
+        mass: Segment mass history in kg.
+        fuel_power, battery_power, propulsor_power, motor_power,
+            generator_power, required_power: FAST power histories in W.
+        fuel_burn: Fuel-burn increments in kg.
+        fuel_energy, battery_energy: Source-energy increments in J.
+        phi_history: Power split history.
+
+    Assumptions:
+        ``architecture`` is fixed for optimization. Detailed cell-discharge
+        depletion is intentionally excluded because FAST changes the active
+        branch after SOC depletion, which is not a smooth optimizer component.
+    """
+
+    def initialize(self):
+        self.options.declare("architecture", default="AC")
+        self.options.declare("npoint", default=3)
+
+    def setup(self):
+        npoint = self.options["npoint"]
+        nstep = npoint - 1
+        self.add_input("initial_mass", val=1000.0, units="kg")
+        self.add_input("distance_step", val=np.ones(nstep), units="m")
+        self.add_input("time_step", val=np.ones(nstep), units="s")
+        self.add_input("fuel_specific_energy", val=43200000.0, units="J/kg")
+        self.add_input("battery_specific_energy", val=1000.0, units="J/kg")
+        self.add_input("lift_drag", val=15.0)
+        self.add_input("propulsive_efficiency", val=0.84)
+        self.add_input("electric_motor_efficiency", val=0.95)
+        self.add_input("electric_generator_efficiency", val=0.91)
+        self.add_input("gas_turbine_efficiency", val=0.36)
+        self.add_input("power_split", val=0.3)
+        self.add_output("mass", val=np.ones(npoint), units="kg")
+        self.add_output("fuel_power", val=np.zeros(npoint), units="W")
+        self.add_output("battery_power", val=np.zeros(npoint), units="W")
+        self.add_output("propulsor_power", val=np.zeros(npoint), units="W")
+        self.add_output("motor_power", val=np.zeros(npoint), units="W")
+        self.add_output("generator_power", val=np.zeros(npoint), units="W")
+        self.add_output("required_power", val=np.zeros(npoint), units="W")
+        self.add_output("fuel_burn", val=np.zeros(nstep), units="kg")
+        self.add_output("fuel_energy", val=np.zeros(nstep), units="J")
+        self.add_output("battery_energy", val=np.zeros(nstep), units="J")
+        self.add_output("phi_history", val=np.zeros(npoint))
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = cruise_breguet_power_history_values(
+            self.options["architecture"],
+            self.options["npoint"],
+            cruise_breguet_power_history_inputs(inputs),
+        )
+        for name in cruise_breguet_power_history_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        data = cruise_breguet_power_history_inputs(inputs)
+        jacobian = {}
+
+        for output_name in cruise_breguet_power_history_output_names():
+            output_size = (
+                self.options["npoint"] - 1
+                if output_name in breguet_power_history_step_output_names()
+                else self.options["npoint"]
+            )
+            for input_name in cruise_breguet_power_history_input_names():
+                input_size = np.asarray(data[input_name]).size
+                jacobian[output_name, input_name] = np.zeros(
+                    (output_size, input_size)
+                )
+
+        for input_name in cruise_breguet_power_history_input_names():
+            size = np.asarray(data[input_name]).size
+            for index in range(size):
+                seeds = zero_breguet_power_history_seeds(
+                    self.options["npoint"],
+                    input_name,
+                    index,
+                )
+                values = cruise_breguet_power_history_values(
+                    self.options["architecture"],
+                    self.options["npoint"],
+                    data,
+                    seeds,
+                )
+                for output_name in cruise_breguet_power_history_output_names():
+                    column = values[f"d{output_name}"].reshape(-1)
+                    jacobian[output_name, input_name][:, index] = column
+
+        for key, block in jacobian.items():
+            partials[key] = block
+
+
 class InitialEnergyRemaining(om.ExplicitComponent):
     """Initialize FAST mission source-energy remaining history.
 
@@ -550,6 +657,422 @@ def initial_energy_remaining_values(
         "dsource_energy_left_dfuel_weight": dfuel_weight,
         "dsource_energy_left_dbattery_weight": dbattery_weight,
     }
+
+
+def cruise_breguet_power_history_inputs(inputs):
+    """Return scalar/vector input mapping for CruiseBRE power history."""
+
+    return {
+        "initial_mass": inputs["initial_mass"][0],
+        "distance_step": np.asarray(inputs["distance_step"], dtype=float).reshape(-1),
+        "time_step": np.asarray(inputs["time_step"], dtype=float).reshape(-1),
+        "fuel_specific_energy": inputs["fuel_specific_energy"][0],
+        "battery_specific_energy": inputs["battery_specific_energy"][0],
+        "lift_drag": inputs["lift_drag"][0],
+        "propulsive_efficiency": inputs["propulsive_efficiency"][0],
+        "electric_motor_efficiency": inputs["electric_motor_efficiency"][0],
+        "electric_generator_efficiency": inputs[
+            "electric_generator_efficiency"
+        ][0],
+        "gas_turbine_efficiency": inputs["gas_turbine_efficiency"][0],
+        "power_split": inputs["power_split"][0],
+    }
+
+
+def cruise_breguet_power_history_values(architecture, npoint, data, seeds=None):
+    """Return FAST CruiseBRE histories and optional forward sensitivities."""
+
+    arch = architecture.upper()
+    if seeds is None:
+        seeds = zero_breguet_power_history_seeds(npoint)
+
+    values = zero_breguet_power_history_values(npoint)
+    values["mass"][0] = data["initial_mass"]
+    values["dmass"][0] = seeds["initial_mass"]
+    values["phi_history"][:] = data["power_split"]
+    values["dphi_history"][:] = seeds["power_split"]
+
+    if arch in ("AC", "PHE", "SHE", "TE"):
+        fill_combustion_breguet_history(arch, data, seeds, values)
+    elif arch == "PE":
+        fill_partially_electric_breguet_history(data, seeds, values)
+    elif arch == "E":
+        fill_electric_breguet_history(data, seeds, values)
+    else:
+        raise ValueError("architecture must be AC, PHE, SHE, TE, PE, or E.")
+
+    return values
+
+
+def fill_combustion_breguet_history(arch, data, seeds, values):
+    """Fill AC/PHE/SHE/TE CruiseBRE histories and sensitivities."""
+
+    eta = breguet_efficiency_sensitivity(arch, data, seeds)
+    phi = data["power_split"]
+    dphi = seeds["power_split"]
+    split = phi / (1.0 - phi)
+    dsplit = dphi / (1.0 - phi) ** 2
+    fuel = data["fuel_specific_energy"]
+    dfuel = seeds["fuel_specific_energy"]
+    lift_drag = data["lift_drag"]
+    dlift_drag = seeds["lift_drag"]
+    gravity = 9.81
+    term = eta["eta1"] + eta["eta2"] * split
+    dterm = eta["deta1"] + eta["deta2"] * split + eta["eta2"] * dsplit
+    denominator = eta["eta3"] * (fuel / gravity) * lift_drag * term
+    ddenominator = denominator * (
+        eta["deta3"] / eta["eta3"]
+        + dfuel / fuel
+        + dlift_drag / lift_drag
+        + dterm / term
+    )
+
+    fill_exponential_mass_history(data, seeds, values, denominator, ddenominator)
+    fill_fuel_outputs(data, seeds, values)
+    values["battery_power"] = values["fuel_power"] * split
+    values["dbattery_power"] = values["dfuel_power"] * split + values[
+        "fuel_power"
+    ] * dsplit
+    values["battery_energy"] = values["battery_power"][:-1] * data["time_step"]
+    values["dbattery_energy"] = (
+        values["dbattery_power"][:-1] * data["time_step"]
+        + values["battery_power"][:-1] * seeds["time_step"]
+    )
+    values["required_power"] = eta["eta3"] * (
+        eta["eta1"] * values["fuel_power"]
+        + eta["eta2"] * values["battery_power"]
+    )
+    values["drequired_power"] = eta["deta3"] * (
+        eta["eta1"] * values["fuel_power"]
+        + eta["eta2"] * values["battery_power"]
+    ) + eta["eta3"] * (
+        eta["deta1"] * values["fuel_power"]
+        + eta["eta1"] * values["dfuel_power"]
+        + eta["deta2"] * values["battery_power"]
+        + eta["eta2"] * values["dbattery_power"]
+    )
+    values["propulsor_power"] = (
+        values["required_power"] / data["propulsive_efficiency"]
+    )
+    values["dpropulsor_power"] = (
+        values["drequired_power"] / data["propulsive_efficiency"]
+        - values["required_power"]
+        * seeds["propulsive_efficiency"]
+        / data["propulsive_efficiency"] ** 2
+    )
+
+    if arch == "PHE":
+        values["motor_power"] = values["battery_power"] * eta["eta2"]
+        values["dmotor_power"] = (
+            values["dbattery_power"] * eta["eta2"]
+            + values["battery_power"] * eta["deta2"]
+        )
+    elif arch in ("SHE", "TE"):
+        values["motor_power"] = values["propulsor_power"]
+        values["dmotor_power"] = values["dpropulsor_power"]
+        values["generator_power"] = (
+            values["fuel_power"]
+            * data["gas_turbine_efficiency"]
+            * data["electric_generator_efficiency"]
+        )
+        values["dgenerator_power"] = values["dfuel_power"] * data[
+            "gas_turbine_efficiency"
+        ] * data["electric_generator_efficiency"] + values["fuel_power"] * (
+            seeds["gas_turbine_efficiency"]
+            * data["electric_generator_efficiency"]
+            + data["gas_turbine_efficiency"]
+            * seeds["electric_generator_efficiency"]
+        )
+
+
+def fill_partially_electric_breguet_history(data, seeds, values):
+    """Fill PE CruiseBRE histories and sensitivities."""
+
+    phi = data["power_split"]
+    dphi = seeds["power_split"]
+    eta_em = data["electric_motor_efficiency"]
+    deta_em = seeds["electric_motor_efficiency"]
+    eta_gt = data["gas_turbine_efficiency"]
+    deta_gt = seeds["gas_turbine_efficiency"]
+    numerator = 24.0 * eta_em * phi
+    dnumerator = 24.0 * (deta_em * phi + eta_em * dphi)
+    denominator = 25.0 * eta_gt + 24.0 * eta_em * phi - 25.0 * eta_gt * phi
+    ddenominator = (
+        25.0 * deta_gt
+        + 24.0 * (deta_em * phi + eta_em * dphi)
+        - 25.0 * (deta_gt * phi + eta_gt * dphi)
+    )
+    zeta = numerator / denominator
+    dzeta = (dnumerator * denominator - numerator * ddenominator) / denominator ** 2
+    eta0, deta0 = partially_electric_eta0(data, seeds, zeta, dzeta)
+    breguet_denominator = (
+        data["lift_drag"] * eta0 * data["fuel_specific_energy"] / 9.81
+    )
+    dbreguet_denominator = breguet_denominator * (
+        seeds["lift_drag"] / data["lift_drag"]
+        + deta0 / eta0
+        + seeds["fuel_specific_energy"] / data["fuel_specific_energy"]
+    )
+
+    fill_exponential_mass_history(
+        data,
+        seeds,
+        values,
+        breguet_denominator,
+        dbreguet_denominator,
+    )
+    fill_fuel_outputs(data, seeds, values)
+    split = zeta / (1.0 - zeta)
+    dsplit = dzeta / (1.0 - zeta) ** 2
+    values["motor_power"] = values["fuel_power"] * split
+    values["dmotor_power"] = values["dfuel_power"] * split + values[
+        "fuel_power"
+    ] * dsplit
+    values["generator_power"] = values["motor_power"] / eta_em
+    values["dgenerator_power"] = (
+        values["dmotor_power"] / eta_em
+        - values["motor_power"] * deta_em / eta_em ** 2
+    )
+    values["required_power"] = (
+        values["motor_power"] * data["propulsive_efficiency"] / zeta
+    )
+    values["drequired_power"] = values["dmotor_power"] * data[
+        "propulsive_efficiency"
+    ] / zeta + values["motor_power"] * (
+        seeds["propulsive_efficiency"] / zeta
+        - data["propulsive_efficiency"] * dzeta / zeta ** 2
+    )
+    values["propulsor_power"] = (
+        values["fuel_power"] * data["gas_turbine_efficiency"]
+    )
+    values["dpropulsor_power"] = (
+        values["dfuel_power"] * data["gas_turbine_efficiency"]
+        + values["fuel_power"] * seeds["gas_turbine_efficiency"]
+    )
+
+
+def fill_electric_breguet_history(data, seeds, values):
+    """Fill E CruiseBRE histories and sensitivities."""
+
+    distance_sum = data["distance_step"].sum()
+    ddistance_sum = seeds["distance_step"].sum()
+    denominator = (
+        data["battery_specific_energy"]
+        / 9.81
+        * data["lift_drag"]
+        * data["electric_motor_efficiency"]
+        * data["propulsive_efficiency"]
+    )
+    ddenominator = denominator * (
+        seeds["battery_specific_energy"] / data["battery_specific_energy"]
+        + seeds["lift_drag"] / data["lift_drag"]
+        + seeds["electric_motor_efficiency"] / data["electric_motor_efficiency"]
+        + seeds["propulsive_efficiency"] / data["propulsive_efficiency"]
+    )
+    battery_weight = data["initial_mass"] * distance_sum / denominator
+    dbattery_weight = (
+        seeds["initial_mass"] * distance_sum
+        + data["initial_mass"] * ddistance_sum
+    ) / denominator - data["initial_mass"] * distance_sum * ddenominator / denominator ** 2
+    values["mass"][:] = data["initial_mass"]
+    values["dmass"][:] = seeds["initial_mass"]
+    values["battery_energy"][:] = data["battery_specific_energy"] / battery_weight
+    values["dbattery_energy"][:] = (
+        seeds["battery_specific_energy"] / battery_weight
+        - data["battery_specific_energy"] * dbattery_weight / battery_weight ** 2
+    )
+    values["battery_power"][:-1] = values["battery_energy"] / data["time_step"]
+    values["dbattery_power"][:-1] = (
+        values["dbattery_energy"] / data["time_step"]
+        - values["battery_energy"] * seeds["time_step"] / data["time_step"] ** 2
+    )
+    values["motor_power"] = (
+        values["battery_power"] * data["electric_motor_efficiency"]
+    )
+    values["dmotor_power"] = values["dbattery_power"] * data[
+        "electric_motor_efficiency"
+    ] + values["battery_power"] * seeds["electric_motor_efficiency"]
+    values["required_power"] = (
+        values["motor_power"] * data["propulsive_efficiency"]
+    )
+    values["drequired_power"] = values["dmotor_power"] * data[
+        "propulsive_efficiency"
+    ] + values["motor_power"] * seeds["propulsive_efficiency"]
+    values["propulsor_power"] = values["motor_power"]
+    values["dpropulsor_power"] = values["dmotor_power"]
+
+
+def fill_exponential_mass_history(data, seeds, values, denominator, ddenominator):
+    """Fill Breguet exponential mass recurrence and sensitivities."""
+
+    for index in range(data["distance_step"].size):
+        exponent = -data["distance_step"][index] / denominator
+        dexponent = (
+            -seeds["distance_step"][index] / denominator
+            + data["distance_step"][index] * ddenominator / denominator ** 2
+        )
+        factor = np.exp(exponent)
+        dfactor = factor * dexponent
+        values["mass"][index + 1] = values["mass"][index] * factor
+        values["dmass"][index + 1] = (
+            values["dmass"][index] * factor + values["mass"][index] * dfactor
+        )
+
+
+def fill_fuel_outputs(data, seeds, values):
+    """Fill fuel burn, fuel energy, and fuel power histories."""
+
+    values["fuel_burn"] = -np.diff(values["mass"])
+    values["dfuel_burn"] = -np.diff(values["dmass"])
+    values["fuel_energy"] = values["fuel_burn"] * data["fuel_specific_energy"]
+    values["dfuel_energy"] = (
+        values["dfuel_burn"] * data["fuel_specific_energy"]
+        + values["fuel_burn"] * seeds["fuel_specific_energy"]
+    )
+    values["fuel_power"][:-1] = values["fuel_energy"] / data["time_step"]
+    values["dfuel_power"][:-1] = (
+        values["dfuel_energy"] / data["time_step"]
+        - values["fuel_energy"] * seeds["time_step"] / data["time_step"] ** 2
+    )
+
+
+def partially_electric_eta0(data, seeds, zeta, dzeta):
+    """Return PE effective Breguet efficiency and sensitivity."""
+
+    numerator = (
+        data["gas_turbine_efficiency"]
+        * data["propulsive_efficiency"]
+        * data["electric_motor_efficiency"]
+        * data["electric_generator_efficiency"]
+    )
+    dnumerator = numerator * (
+        seeds["gas_turbine_efficiency"] / data["gas_turbine_efficiency"]
+        + seeds["propulsive_efficiency"] / data["propulsive_efficiency"]
+        + seeds["electric_motor_efficiency"] / data["electric_motor_efficiency"]
+        + seeds["electric_generator_efficiency"]
+        / data["electric_generator_efficiency"]
+    )
+    denominator = (
+        (1.0 - zeta)
+        * data["electric_motor_efficiency"]
+        * data["electric_generator_efficiency"]
+        + zeta
+    )
+    ddenominator = (
+        -dzeta
+        * data["electric_motor_efficiency"]
+        * data["electric_generator_efficiency"]
+        + (1.0 - zeta)
+        * (
+            seeds["electric_motor_efficiency"]
+            * data["electric_generator_efficiency"]
+            + data["electric_motor_efficiency"]
+            * seeds["electric_generator_efficiency"]
+        )
+        + dzeta
+    )
+    eta0 = numerator / denominator
+    deta0 = (dnumerator * denominator - numerator * ddenominator) / denominator ** 2
+    return eta0, deta0
+
+
+def breguet_efficiency_sensitivity(architecture, data, seeds):
+    """Return CruiseBRE efficiency triplet and directional sensitivity."""
+
+    values = cruise_breguet_efficiency_values(
+        architecture,
+        data["propulsive_efficiency"],
+        data["electric_motor_efficiency"],
+        data["electric_generator_efficiency"],
+        data["gas_turbine_efficiency"],
+    )
+    for output_name in ("eta1", "eta2", "eta3"):
+        total = 0.0
+        for input_name in breguet_efficiency_input_names():
+            total += values[f"d{output_name}_d{input_name}"] * seeds[input_name]
+        values[f"d{output_name}"] = total
+
+    return values
+
+
+def zero_breguet_power_history_values(npoint):
+    """Return zero-filled CruiseBRE history value and sensitivity arrays."""
+
+    nstep = npoint - 1
+    values = {}
+    for name in cruise_breguet_power_history_output_names():
+        size = nstep if name in breguet_power_history_step_output_names() else npoint
+        values[name] = np.zeros(size)
+        values[f"d{name}"] = np.zeros(size)
+    return values
+
+
+def zero_breguet_power_history_seeds(npoint, active_name=None, active_index=0):
+    """Return one-hot input seed mapping for forward sensitivity propagation."""
+
+    seeds = {}
+    for name in cruise_breguet_power_history_input_names():
+        if name in breguet_power_history_step_input_names():
+            seeds[name] = np.zeros(npoint - 1)
+        else:
+            seeds[name] = 0.0
+
+    if active_name is None:
+        return seeds
+
+    if active_name in breguet_power_history_step_input_names():
+        seeds[active_name][active_index] = 1.0
+    else:
+        seeds[active_name] = 1.0
+    return seeds
+
+
+def cruise_breguet_power_history_input_names():
+    """Return CruiseBRE power-history input names."""
+
+    return (
+        "initial_mass",
+        "distance_step",
+        "time_step",
+        "fuel_specific_energy",
+        "battery_specific_energy",
+        "lift_drag",
+        "propulsive_efficiency",
+        "electric_motor_efficiency",
+        "electric_generator_efficiency",
+        "gas_turbine_efficiency",
+        "power_split",
+    )
+
+
+def breguet_power_history_step_input_names():
+    """Return vector step input names for CruiseBRE power history."""
+
+    return ("distance_step", "time_step")
+
+
+def cruise_breguet_power_history_output_names():
+    """Return CruiseBRE power-history output names."""
+
+    return (
+        "mass",
+        "fuel_power",
+        "battery_power",
+        "propulsor_power",
+        "motor_power",
+        "generator_power",
+        "required_power",
+        "fuel_burn",
+        "fuel_energy",
+        "battery_energy",
+        "phi_history",
+    )
+
+
+def breguet_power_history_step_output_names():
+    """Return vector step output names for CruiseBRE power history."""
+
+    return ("fuel_burn", "fuel_energy", "battery_energy")
 
 
 def cruise_breguet_source_energy_values(
