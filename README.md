@@ -35,6 +35,14 @@ docs/                  conversion inventory and audit notes
 tools/                 conversion audit utilities
 ```
 
+## Documentation
+
+- `docs/index.md`: documentation map and project workflow.
+- `docs/setup.md`: environment setup, validation, and troubleshooting.
+- `docs/component_authoring.md`: conventions for adding native OpenMDAO
+  components.
+- `docs/conversion_inventory.md`: FAST-Python conversion status by module.
+
 ## Setup
 
 Use the `FAST-OpenMDAO` conda environment.
