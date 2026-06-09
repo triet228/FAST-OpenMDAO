@@ -14,6 +14,7 @@ from fast_openmdao import (
     EngineLapse,
     EngineThrustRequirement,
     FuelUseHistory,
+    ParallelHybridArchitecture,
     PowerAvailable,
     PowerFlow,
     PowerSupplementCheck,
@@ -29,6 +30,7 @@ from fast_python.propulsion import (
     engine_weights_for_sizing,
     estimate_fuel_use,
     get_thrust_sink_efficiency,
+    parallel_hybrid_architecture,
     power_available,
     power_flow,
     power_supplement_check,
@@ -108,6 +110,42 @@ def test_efficiency_selectors_match_fast_python():
         transmitter.get_val("transmitter_fan_efficiency")[0],
         transmitter_fan_efficiency(specs, "Turbofan"),
     )
+
+
+def test_parallel_hybrid_architecture_matches_fast_python():
+    """Check PHE architecture matrix builder parity with FAST-Python."""
+
+    values = make_parallel_hybrid_architecture_values()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "architecture",
+        ParallelHybridArchitecture(num_engines=values["num_engines"]),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("power_split", values["power_split"])
+    problem.set_val("electric_motor_efficiency", values["electric_motor_efficiency"])
+    problem.set_val("thrust_sink_efficiency", values["thrust_sink_efficiency"])
+    problem.run_model()
+
+    expected = parallel_hybrid_architecture(
+        values["num_engines"],
+        values["electric_motor_efficiency"],
+        values["thrust_sink_efficiency"],
+    )
+    assert np.allclose(problem.get_val("architecture"), expected[0])
+    assert np.allclose(
+        problem.get_val("upstream_split"),
+        expected[1](values["power_split"]),
+    )
+    assert np.allclose(
+        problem.get_val("downstream_split"),
+        expected[2](values["power_split"]),
+    )
+    assert np.allclose(problem.get_val("upstream_efficiency"), expected[3])
+    assert np.allclose(problem.get_val("downstream_efficiency"), expected[4])
+    assert np.allclose(problem.get_val("source_type"), expected[5])
+    assert np.allclose(problem.get_val("transmitter_type"), expected[6])
 
 
 def test_power_supplement_check_matches_fast_python():
@@ -390,7 +428,23 @@ def test_propulsion_primitives_declare_analytic_partials():
     fuel_derivative_case["fuel_specific_energy"] = 1000.0
     fuel_derivative_case["initial_fuel_energy"] = 5.0
     fuel_derivative_case["initial_fuel_energy_left"] = 1000.0
+    architecture_values = make_parallel_hybrid_architecture_values()
     cases = [
+        (
+            "parallel_hybrid",
+            ParallelHybridArchitecture(
+                num_engines=architecture_values["num_engines"],
+            ),
+            {
+                "power_split": architecture_values["power_split"],
+                "electric_motor_efficiency": architecture_values[
+                    "electric_motor_efficiency"
+                ],
+                "thrust_sink_efficiency": architecture_values[
+                    "thrust_sink_efficiency"
+                ],
+            },
+        ),
         (
             "fuel",
             FuelUseHistory(
@@ -572,6 +626,17 @@ def make_efficiency_specs():
                 "Propeller": 0.83,
             },
         },
+    }
+
+
+def make_parallel_hybrid_architecture_values():
+    """Return scalar inputs for FAST parallel-hybrid architecture construction."""
+
+    return {
+        "num_engines": 2,
+        "power_split": 0.37,
+        "electric_motor_efficiency": 0.94,
+        "thrust_sink_efficiency": 0.86,
     }
 
 

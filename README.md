@@ -63,6 +63,9 @@ derivative-native FAST equation components:
   supplemental transmitter power with analytical partial derivatives.
 - Propulsion fuel-use history accumulation for corrected fuel flow, fuel burn,
   aircraft mass, and fuel-source energy with analytical partial derivatives.
+- Propulsion parallel-hybrid architecture matrix builder for architecture,
+  split, efficiency, source-type, and transmitter-type arrays with analytical
+  partial derivatives.
 - Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
   engine-gradient selection, and cruise dynamic pressure with analytical
   partial derivatives.
@@ -138,9 +141,10 @@ The public `fast_openmdao` package currently exports:
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `CableWeightForSizing`, `EngineLapse`,
-  `EngineThrustRequirement`, `FuelUseHistory`, `PowerAvailable`, `PowerFlow`,
-  `PowerSupplementCheck`, `SafeComponentWeight`, `ThrustSinkEfficiency`,
-  `TransmitterFanEfficiency`, `TurbopropEngineWeightForSizing`
+  `EngineThrustRequirement`, `FuelUseHistory`, `ParallelHybridArchitecture`,
+  `PowerAvailable`, `PowerFlow`, `PowerSupplementCheck`, `SafeComponentWeight`,
+  `ThrustSinkEfficiency`, `TransmitterFanEfficiency`,
+  `TurbopropEngineWeightForSizing`
 - Regression: `GaussianProcessPrediction`, `SquaredExponentialKernel`
 - Units: `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
