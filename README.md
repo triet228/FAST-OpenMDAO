@@ -64,8 +64,8 @@ derivative-native FAST equation components:
   requirement, turboprop/piston engine sizing weight, power-flow propagation,
   power-available propagation, safe component weight, efficiency selection, and
   supplemental transmitter power with analytical partial derivatives.
-- Propulsion fuel-use history accumulation for corrected fuel flow, fuel burn,
-  aircraft mass, and fuel-source energy with analytical partial derivatives.
+- Propulsion fuel-use and battery-source energy history accumulation with
+  analytical partial derivatives.
 - Propulsion conventional/electric, parallel-hybrid, series-hybrid,
   turboelectric, and partial-turboelectric architecture matrix builders for
   architecture, split, efficiency, source-type, and transmitter-type arrays
@@ -147,7 +147,7 @@ The public `fast_openmdao` package currently exports:
   `PowerManagementObjective`, `PowerLimitConstraints`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
-- Propulsion: `CableWeightForSizing`, `EngineLapse`,
+- Propulsion: `BatteryEnergyHistory`, `CableWeightForSizing`, `EngineLapse`,
   `EngineThrustRequirement`, `FuelUseHistory`, `ParallelHybridArchitecture`,
   `PartialTurboelectricArchitecture`, `PowerAvailable`, `PowerFlow`,
   `PowerSupplementCheck`, `SafeComponentWeight`, `SeriesHybridArchitecture`,

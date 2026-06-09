@@ -10,6 +10,7 @@ import numpy as np
 import openmdao.api as om
 
 from fast_openmdao import (
+    BatteryEnergyHistory,
     CableWeightForSizing,
     EngineLapse,
     EngineThrustRequirement,
@@ -44,6 +45,7 @@ from fast_python.propulsion import (
     series_hybrid_architecture,
     transmitter_fan_efficiency,
     turboelectric_architecture,
+    update_battery_energy,
 )
 
 
@@ -513,6 +515,39 @@ def test_cable_weight_for_sizing_matches_fast_python():
     assert np.isclose(problem.get_val("cable_weight", units="kg")[0], expected)
 
 
+def test_battery_energy_history_matches_fast_python_update():
+    """Check smooth battery energy accumulation parity with FAST-Python."""
+
+    case = make_battery_energy_history_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "battery_energy",
+        BatteryEnergyHistory(
+            num_points=case["source_power"].shape[0],
+            battery_sources=case["battery_sources"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("source_power", case["source_power"], units="W")
+    problem.set_val("time_step", case["time_step"], units="s")
+    problem.set_val("initial_source_energy", case["initial_source_energy"], units="J")
+    problem.set_val(
+        "initial_source_energy_left",
+        case["initial_source_energy_left"],
+        units="J",
+    )
+    problem.run_model()
+
+    expected = evaluate_fast_python_battery_energy_case(case)
+
+    assert np.allclose(problem.get_val("source_energy", units="J"), expected["energy"])
+    assert np.allclose(
+        problem.get_val("source_energy_left", units="J"),
+        expected["energy_left"],
+    )
+
+
 def test_fuel_use_history_matches_fast_python_custom_model():
     """Check fuel-use accumulation parity with FAST-Python."""
 
@@ -590,6 +625,11 @@ def test_propulsion_primitives_declare_analytic_partials():
     fuel_derivative_case["fuel_specific_energy"] = 1000.0
     fuel_derivative_case["initial_fuel_energy"] = 5.0
     fuel_derivative_case["initial_fuel_energy_left"] = 1000.0
+    battery_energy_case = make_battery_energy_history_case()
+    battery_energy_derivative_case = dict(battery_energy_case)
+    battery_energy_derivative_case["initial_source_energy_left"] = np.asarray(
+        [1000.0, 2000.0, 3000.0]
+    )
     simple_conventional_values = make_simple_source_architecture_values("C")
     simple_electric_values = make_simple_source_architecture_values("E")
     architecture_values = make_parallel_hybrid_architecture_values()
@@ -718,6 +758,23 @@ def test_propulsion_primitives_declare_analytic_partials():
                 ],
                 "mass_flow_correction": fuel_derivative_case[
                     "mass_flow_correction"
+                ],
+            },
+        ),
+        (
+            "battery_energy",
+            BatteryEnergyHistory(
+                num_points=battery_energy_derivative_case["source_power"].shape[0],
+                battery_sources=battery_energy_derivative_case["battery_sources"],
+            ),
+            {
+                "source_power": battery_energy_derivative_case["source_power"],
+                "time_step": battery_energy_derivative_case["time_step"],
+                "initial_source_energy": battery_energy_derivative_case[
+                    "initial_source_energy"
+                ],
+                "initial_source_energy_left": battery_energy_derivative_case[
+                    "initial_source_energy_left"
                 ],
             },
         ),
@@ -1140,6 +1197,103 @@ def make_cable_weight_case():
     cables = np.asarray([False, True, False, True])
     downstream_power = np.asarray([0.0, 400000.0, 0.0, 250000.0, 0.0])
     return aircraft, cables, downstream_power
+
+
+def make_battery_energy_history_case():
+    """Return smooth battery source-power history for energy checks."""
+
+    return {
+        "battery_sources": np.asarray([False, True, True]),
+        "engine_transmitters": np.asarray([True, False]),
+        "source_power": np.asarray(
+            [
+                [0.0, 900.0, 600.0],
+                [0.0, 800.0, 550.0],
+                [0.0, 700.0, 500.0],
+                [0.0, 650.0, 450.0],
+            ]
+        ),
+        "time_step": np.asarray([20.0, 30.0, 25.0]),
+        "initial_source_energy": np.asarray([1000.0, 2000.0, 3000.0]),
+        "initial_source_energy_left": np.asarray([1.0e9, 8.0e8, 7.0e8]),
+    }
+
+
+def evaluate_fast_python_battery_energy_case(case):
+    """Run FAST-Python update_battery_energy on the smooth active branch."""
+
+    num_points, num_sources = case["source_power"].shape
+    num_engines = case["engine_transmitters"].size
+    num_components = num_sources + num_engines
+    source_power = case["source_power"]
+    pout = np.zeros((num_points, num_components))
+    pout[:, :num_sources] = source_power
+    source_energy = np.tile(case["initial_source_energy"], (num_points, 1))
+    source_energy_left = np.tile(
+        case["initial_source_energy_left"],
+        (num_points, 1),
+    )
+    soc = np.ones((num_points, num_sources)) * 100.0
+    voltage = np.zeros((num_points, num_sources))
+    current = np.zeros((num_points, num_sources))
+    capacity = np.zeros((num_points, num_sources))
+    c_rate = np.zeros((num_points, num_sources))
+    lam_dwn = np.ones((num_points, num_components, num_components))
+    mass = np.ones(num_points) * 1000.0
+    aircraft = {
+        "Settings": {
+            "Analysis": {
+                "Type": 1,
+            },
+        },
+        "Specs": {
+            "Power": {
+                "Battery": {
+                    "SerCells": float("nan"),
+                    "ParCells": float("nan"),
+                },
+            },
+            "Propulsion": {
+                "PropArch": {
+                    "Type": "PHE",
+                },
+            },
+        },
+        "Mission": {
+            "Profile": {
+                "MissID": 1,
+            },
+            "History": {
+                "Flags": {
+                    "SOCOff": [0],
+                },
+            },
+        },
+    }
+
+    update_battery_energy(
+        aircraft,
+        pout,
+        case["time_step"],
+        case["battery_sources"],
+        case["engine_transmitters"],
+        num_sources,
+        source_energy,
+        source_energy_left,
+        soc,
+        voltage,
+        current,
+        capacity,
+        c_rate,
+        lam_dwn,
+        mass,
+        0,
+    )
+
+    return {
+        "energy": source_energy,
+        "energy_left": source_energy_left,
+    }
 
 
 def make_fuel_use_case():

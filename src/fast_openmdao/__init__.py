@@ -92,6 +92,7 @@ from fast_openmdao.projection import (
 )
 from fast_openmdao.regression import GaussianProcessPrediction, SquaredExponentialKernel
 from fast_openmdao.propulsion import (
+    BatteryEnergyHistory,
     CableWeightForSizing,
     EngineLapse,
     EngineThrustRequirement,
@@ -120,6 +121,7 @@ __all__ = [
     "AirTemperatureFromHeatAdded",
     "AirTemperatureFromHeatRemoved",
     "BatteryEnergyAvailable",
+    "BatteryEnergyHistory",
     "BatteryChargeOCV",
     "BatteryCyclingAging",
     "BatteryReplacementCost",

@@ -856,6 +856,93 @@ class CableWeightForSizing(om.ExplicitComponent):
         ]
 
 
+class BatteryEnergyHistory(om.ExplicitComponent):
+    """Accumulate FAST battery source energy for the smooth active branch.
+
+    Inputs:
+        source_power: Source power-output history in W.
+        time_step: Segment time steps in s.
+        initial_source_energy: Source energy used at the segment start in J.
+        initial_source_energy_left: Source energy left at the segment start in J.
+
+    Outputs:
+        source_energy: Per-source used energy history in J.
+        source_energy_left: Per-source remaining energy history in J.
+
+    Assumptions:
+        ``battery_sources`` is fixed source metadata. This represents the
+        non-detailed battery branch of FAST ``update_battery_energy`` before
+        depletion cutoff. Non-battery source columns are passed through as
+        constant initial histories.
+    """
+
+    def initialize(self):
+        self.options.declare("num_points", default=2)
+        self.options.declare("battery_sources")
+
+    def setup(self):
+        num_points = self.options["num_points"]
+        battery_sources = np.asarray(
+            self.options["battery_sources"],
+            dtype=bool,
+        ).reshape(-1)
+        num_sources = battery_sources.size
+        self.add_input(
+            "source_power",
+            val=np.zeros((num_points, num_sources)),
+            units="W",
+        )
+        self.add_input("time_step", val=np.ones(num_points - 1), units="s")
+        self.add_input("initial_source_energy", val=np.zeros(num_sources), units="J")
+        self.add_input(
+            "initial_source_energy_left",
+            val=np.zeros(num_sources),
+            units="J",
+        )
+        self.add_output(
+            "source_energy",
+            val=np.zeros((num_points, num_sources)),
+            units="J",
+        )
+        self.add_output(
+            "source_energy_left",
+            val=np.zeros((num_points, num_sources)),
+            units="J",
+        )
+        self.declare_partials(of=["source_energy", "source_energy_left"], wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = battery_energy_history_values(
+            inputs["source_power"],
+            inputs["time_step"],
+            inputs["initial_source_energy"],
+            inputs["initial_source_energy_left"],
+            self.options["battery_sources"],
+        )
+        outputs["source_energy"] = values["source_energy"]
+        outputs["source_energy_left"] = values["source_energy_left"]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_energy_history_values(
+            inputs["source_power"],
+            inputs["time_step"],
+            inputs["initial_source_energy"],
+            inputs["initial_source_energy_left"],
+            self.options["battery_sources"],
+        )
+
+        for output_name in ("source_energy", "source_energy_left"):
+            for input_name in (
+                "source_power",
+                "time_step",
+                "initial_source_energy",
+                "initial_source_energy_left",
+            ):
+                partials[output_name, input_name] = values[
+                    "d%s_d%s" % (output_name, input_name)
+                ]
+
+
 class FuelUseHistory(om.ExplicitComponent):
     """Accumulate FAST fuel-flow history into fuel burn, mass, and source energy."""
 
@@ -2288,6 +2375,71 @@ def cable_weight_for_sizing_values(
         "dcable_weight_dcable_power_to_weight": np.asarray(
             [[np.sum((power_matrix / 1.0e6) * weighted_geometry)]]
         ),
+    }
+
+
+def battery_energy_history_values(
+    source_power,
+    time_step,
+    initial_source_energy,
+    initial_source_energy_left,
+    battery_sources,
+):
+    """Return smooth FAST battery-energy histories and dense partials."""
+
+    source_power = np.asarray(source_power, dtype=float)
+    time_step = np.asarray(time_step, dtype=float).reshape(-1)
+    initial_source_energy = np.asarray(initial_source_energy, dtype=float).reshape(-1)
+    initial_source_energy_left = np.asarray(
+        initial_source_energy_left,
+        dtype=float,
+    ).reshape(-1)
+    battery_sources = np.asarray(battery_sources, dtype=bool).reshape(-1)
+    num_points, num_sources = source_power.shape
+    output_size = num_points * num_sources
+    source_energy = np.tile(initial_source_energy, (num_points, 1))
+    source_energy_left = np.tile(initial_source_energy_left, (num_points, 1))
+    denergy_dpower = np.zeros((output_size, source_power.size))
+    dleft_dpower = np.zeros((output_size, source_power.size))
+    denergy_dtime = np.zeros((output_size, time_step.size))
+    dleft_dtime = np.zeros((output_size, time_step.size))
+    denergy_dinitial = np.zeros((output_size, num_sources))
+    dleft_dinitial = np.zeros((output_size, num_sources))
+    denergy_dinitial_left = np.zeros((output_size, num_sources))
+    dleft_dinitial_left = np.zeros((output_size, num_sources))
+
+    for row in range(num_points):
+        for source in range(num_sources):
+            output_index = row * num_sources + source
+            denergy_dinitial[output_index, source] = 1.0
+            dleft_dinitial_left[output_index, source] = 1.0
+
+    for source in np.where(battery_sources)[0]:
+        used = np.cumsum(source_power[:-1, source] * time_step)
+        source_energy[1:, source] = initial_source_energy[source] + used
+        source_energy_left[1:, source] = initial_source_energy_left[source] - used
+
+        for row in range(1, num_points):
+            output_index = row * num_sources + source
+
+            for step in range(row):
+                power_index = step * num_sources + source
+                denergy_dpower[output_index, power_index] = time_step[step]
+                dleft_dpower[output_index, power_index] = -time_step[step]
+                denergy_dtime[output_index, step] = source_power[step, source]
+                dleft_dtime[output_index, step] = -source_power[step, source]
+
+    return {
+        "source_energy": source_energy,
+        "source_energy_left": source_energy_left,
+        "dsource_energy_dsource_power": denergy_dpower,
+        "dsource_energy_dtime_step": denergy_dtime,
+        "dsource_energy_dinitial_source_energy": denergy_dinitial,
+        "dsource_energy_dinitial_source_energy_left": denergy_dinitial_left,
+        "dsource_energy_left_dsource_power": dleft_dpower,
+        "dsource_energy_left_dtime_step": dleft_dtime,
+        "dsource_energy_left_dinitial_source_energy": dleft_dinitial,
+        "dsource_energy_left_dinitial_source_energy_left": dleft_dinitial_left,
     }
 
 
