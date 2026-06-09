@@ -21,7 +21,7 @@ from fast_openmdao.examples.compact_electric import (
     validate_lift_to_drag_demo_against_fast_python_samples,
 )
 from fast_openmdao.examples.compact_electric import (
-    validate_hybrid_power_split_demo_against_fast_python_samples,
+    validate_hybrid_power_split_multistart_against_fast_python_samples,
 )
 
 
@@ -226,17 +226,19 @@ def test_compact_lift_to_drag_optimum_matches_fast_python_sample_sweep():
 def test_compact_hybrid_power_split_optimizations_match_fast_python_sweeps():
     """Check hybrid split optimizations against repeated FAST-Python samples."""
 
-    for split_initial in (0.15, 0.4, 0.7):
-        validation = validate_hybrid_power_split_demo_against_fast_python_samples(
-            split_initial=split_initial,
-            split_lower=0.0,
-            split_upper=0.75,
-            sample_count=7,
-        )
+    validation = validate_hybrid_power_split_multistart_against_fast_python_samples(
+        split_initials=(0.15, 0.4, 0.7),
+        split_lower=0.0,
+        split_upper=0.75,
+        sample_count=7,
+    )
 
-        assert validation["agrees_with_samples"]
-        assert validation["split_error"] < 1.0e-4
-        assert validation["energy_error"] < 1.0e-4
+    assert validation["agrees_with_samples"]
+    assert len(validation["runs"]) == 3
+
+    for run in validation["runs"]:
+        assert run["split_error"] < 1.0e-4
+        assert run["energy_error"] < 1.0e-4
 
 
 def fake_input_specs():

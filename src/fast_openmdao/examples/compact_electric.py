@@ -598,6 +598,83 @@ def validate_hybrid_power_split_demo_against_fast_python_samples(
     }
 
 
+def validate_hybrid_power_split_multistart_against_fast_python_samples(
+    split_initials=None,
+    split_lower=0.0,
+    split_upper=0.75,
+    sample_count=7,
+    split_tolerance=1.0e-4,
+    energy_tolerance=1.0e-4,
+):
+    """Compare several hybrid split optimizations against one FAST-Python sweep.
+
+    Inputs:
+        split_initials: Iterable of OpenMDAO starting splits. Defaults to low,
+            middle, and high values inside the tested bounds.
+        split_lower: Lower split bound.
+        split_upper: Upper split bound.
+        sample_count: Number of FAST-Python point evaluations.
+        split_tolerance: Allowed optimized-split mismatch.
+        energy_tolerance: Allowed objective mismatch in joules.
+
+    Outputs:
+        Dictionary containing each OpenMDAO run, the shared FAST-Python sweep,
+        the best sampled point, and aggregate agreement.
+
+    Assumptions:
+        The FAST-Python sweep is independent of optimizer starting point, so it
+        is evaluated once and reused to check every OpenMDAO optimum.
+    """
+
+    if split_initials is None:
+        split_initials = (0.15, 0.4, 0.7)
+
+    samples = sample_fast_python_hybrid_power_split_sweep(
+        split_lower=split_lower,
+        split_upper=split_upper,
+        sample_count=sample_count,
+    )
+    best_sample = min(samples, key=lambda sample: sample["battery_energy_used"])
+    runs = []
+
+    for split_initial in split_initials:
+        openmdao_summary = run_hybrid_power_split_demo(
+            split_initial=split_initial,
+            split_lower=split_lower,
+            split_upper=split_upper,
+        )
+        split_error = abs(
+            openmdao_summary["climb_power_split"]
+            - best_sample["climb_power_split"]
+        )
+        energy_error = abs(
+            openmdao_summary["battery_energy_used"]
+            - best_sample["battery_energy_used"]
+        )
+        runs.append(
+            {
+                "split_initial": split_initial,
+                "success": openmdao_summary["success"],
+                "agrees_with_samples": (
+                    openmdao_summary["success"]
+                    and split_error <= split_tolerance
+                    and energy_error <= energy_tolerance
+                ),
+                "openmdao": openmdao_summary,
+                "split_error": split_error,
+                "energy_error": energy_error,
+            }
+        )
+
+    return {
+        "success": all(run["success"] for run in runs),
+        "agrees_with_samples": all(run["agrees_with_samples"] for run in runs),
+        "runs": runs,
+        "best_fast_python_sample": best_sample,
+        "fast_python_samples": samples,
+    }
+
+
 def validate_lift_to_drag_demo_against_fast_python_samples(
     lift_to_drag_initial=10.0,
     lift_to_drag_lower=5.0,
