@@ -6,6 +6,7 @@ import numpy as np
 import openmdao.api as om
 
 from fast_openmdao.atmosphere import GAS_CONSTANT_AIR, atmosphere_layer
+from fast_openmdao.battery import battery_power_history_values
 from fast_python.atmosphere import standard_atmosphere
 
 
@@ -482,6 +483,83 @@ class CruiseBreguetPowerHistory(om.ExplicitComponent):
 
         for key, block in jacobian.items():
             partials[key] = block
+
+
+class CruiseBreguetDetailedBattery(om.ExplicitComponent):
+    """Apply FAST CruiseBRE detailed battery discharge and depletion logic."""
+
+    def initialize(self):
+        self.options.declare("architecture", default="E")
+        self.options.declare("npoint", default=3)
+        self.options.declare("analysis_type", default=0)
+        self.options.declare("degradation", default=0)
+
+    def setup(self):
+        npoint = self.options["npoint"]
+        nstep = npoint - 1
+        self.add_input("battery_power", val=np.zeros(npoint), units="W")
+        self.add_input("time_step", val=np.ones(nstep), units="s")
+        self.add_input("initial_soc", val=100.0)
+        self.add_input("phi_history", val=np.zeros(npoint))
+        self.add_input("parallel_cells", val=10.0)
+        self.add_input("series_cells", val=100.0)
+        self.add_input("max_cell_voltage", val=4.2)
+        self.add_input("internal_resistance", val=0.01)
+        self.add_input("exponential_voltage", val=0.1)
+        self.add_input("exponential_capacity", val=1.0)
+        self.add_input("cap_cell", val=2.4)
+        self.add_input("state_of_health", val=100.0)
+        self.add_output("adjusted_battery_power", val=np.zeros(npoint), units="W")
+        self.add_output("soc", val=np.ones(npoint) * 100.0)
+        self.add_output("adjusted_phi_history", val=np.zeros(npoint))
+        self.add_output("soc_off", val=0.0)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = cruise_breguet_detailed_battery_values(
+            self.options["architecture"],
+            inputs["battery_power"],
+            inputs["time_step"],
+            inputs["initial_soc"][0],
+            inputs["phi_history"],
+            inputs["parallel_cells"][0],
+            inputs["series_cells"][0],
+            inputs["max_cell_voltage"][0],
+            inputs["internal_resistance"][0],
+            inputs["exponential_voltage"][0],
+            inputs["exponential_capacity"][0],
+            inputs["cap_cell"][0],
+            inputs["state_of_health"][0],
+            self.options["analysis_type"],
+            self.options["degradation"],
+        )
+        outputs["adjusted_battery_power"] = values["adjusted_battery_power"]
+        outputs["soc"] = values["soc"]
+        outputs["adjusted_phi_history"] = values["adjusted_phi_history"]
+        outputs["soc_off"] = values["soc_off"]
+
+    def compute_partials(self, inputs, partials):
+        values = cruise_breguet_detailed_battery_values(
+            self.options["architecture"],
+            inputs["battery_power"],
+            inputs["time_step"],
+            inputs["initial_soc"][0],
+            inputs["phi_history"],
+            inputs["parallel_cells"][0],
+            inputs["series_cells"][0],
+            inputs["max_cell_voltage"][0],
+            inputs["internal_resistance"][0],
+            inputs["exponential_voltage"][0],
+            inputs["exponential_capacity"][0],
+            inputs["cap_cell"][0],
+            inputs["state_of_health"][0],
+            self.options["analysis_type"],
+            self.options["degradation"],
+        )
+
+        for output in cruise_breguet_detailed_battery_output_names():
+            for variable in cruise_breguet_detailed_battery_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
 class InitialEnergyRemaining(om.ExplicitComponent):
@@ -1073,6 +1151,191 @@ def breguet_power_history_step_output_names():
     """Return vector step output names for CruiseBRE power history."""
 
     return ("fuel_burn", "fuel_energy", "battery_energy")
+
+
+def cruise_breguet_detailed_battery_input_names():
+    """Return input names for CruiseBreguetDetailedBattery derivatives."""
+
+    return (
+        "battery_power",
+        "time_step",
+        "initial_soc",
+        "phi_history",
+        "parallel_cells",
+        "series_cells",
+        "max_cell_voltage",
+        "internal_resistance",
+        "exponential_voltage",
+        "exponential_capacity",
+        "cap_cell",
+        "state_of_health",
+    )
+
+
+def cruise_breguet_detailed_battery_output_names():
+    """Return output names for CruiseBreguetDetailedBattery."""
+
+    return (
+        "adjusted_battery_power",
+        "soc",
+        "adjusted_phi_history",
+        "soc_off",
+    )
+
+
+def cruise_breguet_detailed_battery_values(
+    architecture,
+    battery_power,
+    time_step,
+    initial_soc,
+    phi_history,
+    parallel_cells,
+    series_cells,
+    max_cell_voltage,
+    internal_resistance,
+    exponential_voltage,
+    exponential_capacity,
+    cap_cell,
+    state_of_health,
+    analysis_type=0,
+    degradation=0,
+):
+    """Return detailed CruiseBRE battery discharge values and local derivatives."""
+
+    battery_power = np.asarray(battery_power, dtype=float).reshape(-1)
+    time_step = np.asarray(time_step, dtype=float).reshape(-1)
+    phi_history = np.asarray(phi_history, dtype=float).reshape(-1)
+    npoint = battery_power.size
+    nstep = npoint - 1
+
+    if time_step.size != nstep or phi_history.size != npoint:
+        raise ValueError("CruiseBreguetDetailedBattery requires npoint histories.")
+
+    history = battery_power_history_values(
+        battery_power[:-1],
+        time_step,
+        initial_soc,
+        parallel_cells,
+        series_cells,
+        max_cell_voltage,
+        internal_resistance,
+        exponential_voltage,
+        exponential_capacity,
+        cap_cell,
+        state_of_health,
+        True,
+        False,
+        analysis_type,
+        degradation,
+    )
+
+    adjusted_power = battery_power.copy()
+    adjusted_power[:-1] = history["output_power"]
+    soc = history["soc"].copy()
+    adjusted_phi = phi_history.copy()
+    soc_off = 0.0
+    depleted = np.where(soc < 20.0)[0]
+    stop = None
+
+    if len(depleted) > 0 and architecture != "E":
+        stop = depleted[0]
+        adjusted_power[stop:] = 0.0
+        adjusted_phi[stop:] = 0.0
+        soc[stop:] = soc[max(0, stop - 1)]
+        soc_off = 1.0
+
+    output_sizes = {
+        "adjusted_battery_power": npoint,
+        "soc": npoint,
+        "adjusted_phi_history": npoint,
+        "soc_off": 1,
+    }
+    input_sizes = {
+        "battery_power": npoint,
+        "time_step": nstep,
+        "initial_soc": 1,
+        "phi_history": npoint,
+        "parallel_cells": 1,
+        "series_cells": 1,
+        "max_cell_voltage": 1,
+        "internal_resistance": 1,
+        "exponential_voltage": 1,
+        "exponential_capacity": 1,
+        "cap_cell": 1,
+        "state_of_health": 1,
+    }
+    jacobian = {}
+
+    for output, output_size in output_sizes.items():
+        for variable, input_size in input_sizes.items():
+            jacobian[output, variable] = np.zeros((output_size, input_size))
+
+    for variable in battery_power_history_input_names_for_breguet():
+        if variable == "battery_power":
+            source = "requested_power"
+        elif variable == "time_step":
+            source = "time"
+        elif variable == "initial_soc":
+            source = "soc_begin"
+        else:
+            source = variable
+        block = history["doutput_power_d%s" % source]
+
+        if variable == "battery_power":
+            jacobian["adjusted_battery_power", variable][:-1, :-1] = block
+            jacobian["adjusted_battery_power", variable][-1, -1] = 1.0
+        else:
+            jacobian["adjusted_battery_power", variable][:-1, :] = block
+
+        soc_block = history["dsoc_d%s" % source]
+
+        if variable == "battery_power":
+            jacobian["soc", variable][:, :-1] = soc_block
+        else:
+            jacobian["soc", variable] = soc_block
+
+    jacobian["adjusted_phi_history", "phi_history"] = np.eye(npoint)
+
+    if stop is not None:
+        freeze_row = max(0, stop - 1)
+
+        for variable in cruise_breguet_detailed_battery_input_names():
+            jacobian["adjusted_battery_power", variable][stop:, :] = 0.0
+            jacobian["adjusted_phi_history", variable][stop:, :] = 0.0
+            jacobian["soc", variable][stop:, :] = jacobian["soc", variable][
+                freeze_row,
+                :,
+            ]
+
+    result = {
+        "adjusted_battery_power": adjusted_power,
+        "soc": soc,
+        "adjusted_phi_history": adjusted_phi,
+        "soc_off": soc_off,
+    }
+
+    for key, value in jacobian.items():
+        result["d%s_d%s" % key] = value
+
+    return result
+
+
+def battery_power_history_input_names_for_breguet():
+    """Return detailed-Breguet inputs that feed BatteryPowerHistory."""
+
+    return (
+        "battery_power",
+        "time_step",
+        "initial_soc",
+        "parallel_cells",
+        "series_cells",
+        "max_cell_voltage",
+        "internal_resistance",
+        "exponential_voltage",
+        "exponential_capacity",
+        "cap_cell",
+        "state_of_health",
+    )
 
 
 def cruise_breguet_source_energy_values(

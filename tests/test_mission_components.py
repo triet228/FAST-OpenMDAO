@@ -10,6 +10,7 @@ import numpy as np
 import openmdao.api as om
 
 from fast_openmdao import (
+    CruiseBreguetDetailedBattery,
     CruiseBreguetEfficiencyTriplet,
     CruiseBreguetPowerHistory,
     CruiseBreguetPowerSplit,
@@ -21,6 +22,7 @@ from fast_openmdao import (
 )
 from fast_python.mission import (
     compute_flight_conditions,
+    cruise_breguet_discharge_battery,
     cruise_breguet_efficiency_triplet,
     cruise_breguet_power_history,
     cruise_breguet_power_split,
@@ -374,6 +376,72 @@ def test_cruise_breguet_power_history_declares_analytic_partials():
             )
 
 
+def test_cruise_breguet_detailed_battery_matches_fast_python():
+    """Check detailed CruiseBRE battery discharge parity."""
+
+    for architecture, values in (
+        ("E", make_breguet_detailed_battery_values(False)),
+        ("PHE", make_breguet_detailed_battery_values(True)),
+    ):
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "battery",
+            CruiseBreguetDetailedBattery(
+                architecture=architecture,
+                npoint=values["npoint"],
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+        set_breguet_detailed_battery_values(problem, values)
+        problem.run_model()
+
+        expected = fast_python_breguet_detailed_battery(architecture, values)
+        assert np.allclose(
+            problem.get_val("adjusted_battery_power", units="W"),
+            expected["adjusted_battery_power"],
+        )
+        assert np.allclose(problem.get_val("soc"), expected["soc"])
+        assert np.allclose(
+            problem.get_val("adjusted_phi_history"),
+            expected["adjusted_phi_history"],
+        )
+        assert np.isclose(problem.get_val("soc_off")[0], expected["soc_off"])
+
+
+def test_cruise_breguet_detailed_battery_declares_analytic_partials():
+    """Check detailed CruiseBRE battery derivatives on a smooth branch."""
+
+    values = make_breguet_detailed_battery_values(False)
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "battery",
+        CruiseBreguetDetailedBattery(
+            architecture="E",
+            npoint=values["npoint"],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_breguet_detailed_battery_values(problem, values)
+    problem.run_model()
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-6,
+    )
+
+    for key, partial_data in partials["battery"].items():
+        absolute_error = partial_data["abs error"].forward
+        relative_error = partial_data["rel error"].forward
+        assert absolute_error < 1.0e-3 or relative_error < 1.0e-5, (
+            key,
+            absolute_error,
+            relative_error,
+        )
+
+
 def test_cruise_breguet_source_energy_matches_fast_python():
     """Check CruiseBRE source-energy allocation parity with FAST-Python."""
 
@@ -656,6 +724,97 @@ def fast_python_breguet_power_history(architecture, values):
         "phi_history": result[9],
         "mass": mass,
     }
+
+
+def make_breguet_detailed_battery_values(trigger_depletion):
+    """Return FAST-shaped values for detailed CruiseBRE battery discharge."""
+
+    if trigger_depletion:
+        battery_power = np.asarray([15000.0, 16000.0, 17000.0, 18000.0])
+        initial_soc = 22.0
+    else:
+        battery_power = np.asarray([900.0, 760.0, 610.0, 480.0])
+        initial_soc = 88.0
+
+    return {
+        "npoint": 4,
+        "battery_power": battery_power,
+        "time_step": np.asarray([35.0, 40.0, 45.0]),
+        "initial_soc": initial_soc,
+        "phi_history": np.asarray([0.35, 0.32, 0.28, 0.25]),
+        "parallel_cells": 9.0,
+        "series_cells": 84.0,
+        "max_cell_voltage": 4.2,
+        "internal_resistance": 0.01,
+        "exponential_voltage": 0.1,
+        "exponential_capacity": 1.0,
+        "cap_cell": 2.4,
+        "state_of_health": 100.0,
+    }
+
+
+def fast_python_breguet_detailed_battery(architecture, values):
+    """Return FAST-Python detailed CruiseBRE battery outputs."""
+
+    aircraft = {
+        "Specs": {
+            "Battery": {
+                "MaxExtVolCell": values["max_cell_voltage"],
+                "IntResist": values["internal_resistance"],
+                "ExpVol": values["exponential_voltage"],
+                "ExpCap": values["exponential_capacity"],
+                "CapCell": values["cap_cell"],
+            },
+            "Power": {
+                "Battery": {
+                    "ParCells": values["parallel_cells"],
+                    "SerCells": values["series_cells"],
+                },
+            },
+        },
+        "Mission": {
+            "Profile": {
+                "MissID": 1,
+            },
+            "History": {
+                "Flags": {
+                    "SOCOff": [0],
+                },
+            },
+        },
+    }
+    soc = np.ones(values["npoint"]) * values["initial_soc"]
+    result = cruise_breguet_discharge_battery(
+        aircraft,
+        values["battery_power"].copy(),
+        values["time_step"],
+        soc,
+        values["phi_history"].copy(),
+        architecture,
+    )
+    return {
+        "adjusted_battery_power": result[0],
+        "soc": result[1],
+        "adjusted_phi_history": result[2],
+        "soc_off": aircraft["Mission"]["History"]["Flags"]["SOCOff"][0],
+    }
+
+
+def set_breguet_detailed_battery_values(problem, values):
+    """Set OpenMDAO detailed CruiseBRE battery inputs."""
+
+    problem.set_val("battery_power", values["battery_power"], units="W")
+    problem.set_val("time_step", values["time_step"], units="s")
+    problem.set_val("initial_soc", values["initial_soc"])
+    problem.set_val("phi_history", values["phi_history"])
+    problem.set_val("parallel_cells", values["parallel_cells"])
+    problem.set_val("series_cells", values["series_cells"])
+    problem.set_val("max_cell_voltage", values["max_cell_voltage"])
+    problem.set_val("internal_resistance", values["internal_resistance"])
+    problem.set_val("exponential_voltage", values["exponential_voltage"])
+    problem.set_val("exponential_capacity", values["exponential_capacity"])
+    problem.set_val("cap_cell", values["cap_cell"])
+    problem.set_val("state_of_health", values["state_of_health"])
 
 
 def make_initial_energy_remaining_values():

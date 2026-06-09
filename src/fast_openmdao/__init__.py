@@ -59,6 +59,7 @@ from fast_openmdao.engine import (
     TurbopropLinearSizing,
 )
 from fast_openmdao.mission import (
+    CruiseBreguetDetailedBattery,
     CruiseBreguetEfficiencyTriplet,
     CruiseBreguetPowerHistory,
     CruiseBreguetPowerSplit,
@@ -126,6 +127,7 @@ __all__ = [
     "ConvergenceError",
     "DiffuserFlow",
     "CruiseDynamicPressure",
+    "CruiseBreguetDetailedBattery",
     "CruiseBreguetEfficiencyTriplet",
     "CruiseBreguetPowerHistory",
     "CruiseBreguetPowerSplit",
