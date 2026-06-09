@@ -240,6 +240,111 @@ class FAR25ClimbConstraint(om.ExplicitComponent):
         ]
 
 
+class JetFAR25NamedClimbConstraint(om.ExplicitComponent):
+    """Compute FAST named FAR 25 jet climb residuals."""
+
+    def initialize(self):
+        self.options.declare("name", default="jet25_111")
+        self.options.declare("aircraft_class", default="Turbofan")
+        self.options.declare("constraint_type", default=0)
+        self.options.declare("req_type", default=1)
+        self.options.declare("num_engines", default=2)
+        self.options.declare("ps_loss", default=0.2)
+        self.options.declare("cl_takeoff", default=2.0)
+        self.options.declare("cl_landing", default=2.4)
+        self.options.declare("cl_cruise", default=0.7)
+        self.options.declare("cd0_takeoff", default=0.05)
+        self.options.declare("cd0_landing", default=0.08)
+        self.options.declare("cd0_cruise", default=0.02)
+        self.options.declare("aspect_ratio", default=9.0)
+        self.options.declare("oswald_takeoff", default=0.75)
+        self.options.declare("oswald_landing", default=0.7)
+        self.options.declare("oswald_cruise", default=0.8)
+        self.options.declare("temperature_correction", default=1.1)
+        self.options.declare("wland_mtow", default=0.85)
+        self.options.declare("max_continuous", default=0.95)
+        self.options.declare("stall_velocity", default=60.0)
+
+    def setup(self):
+        self.add_input("wing_loading", val=400.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_output("far25_named_residual", val=0.0)
+        self.declare_partials(of="far25_named_residual", wrt="*")
+
+    def compute(self, inputs, outputs):
+        parameters = named_far25_climb_parameters(
+            self.options["name"],
+            self.options["constraint_type"],
+            self.options["num_engines"],
+            self.options["ps_loss"],
+            self.options["cl_takeoff"],
+            self.options["cl_landing"],
+            self.options["cl_cruise"],
+            self.options["cd0_takeoff"],
+            self.options["cd0_landing"],
+            self.options["cd0_cruise"],
+            self.options["oswald_takeoff"],
+            self.options["oswald_landing"],
+            self.options["oswald_cruise"],
+            self.options["temperature_correction"],
+            self.options["wland_mtow"],
+            self.options["max_continuous"],
+        )
+        outputs["far25_named_residual"] = far25_climb_residual(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            parameters["cl"],
+            parameters["cd0"],
+            self.options["aspect_ratio"],
+            parameters["oswald"],
+            parameters["correction"],
+            parameters["gradient"],
+            parameters["ks"],
+            self.options["stall_velocity"],
+        )
+
+    def compute_partials(self, inputs, partials):
+        parameters = named_far25_climb_parameters(
+            self.options["name"],
+            self.options["constraint_type"],
+            self.options["num_engines"],
+            self.options["ps_loss"],
+            self.options["cl_takeoff"],
+            self.options["cl_landing"],
+            self.options["cl_cruise"],
+            self.options["cd0_takeoff"],
+            self.options["cd0_landing"],
+            self.options["cd0_cruise"],
+            self.options["oswald_takeoff"],
+            self.options["oswald_landing"],
+            self.options["oswald_cruise"],
+            self.options["temperature_correction"],
+            self.options["wland_mtow"],
+            self.options["max_continuous"],
+        )
+        derivatives = far25_climb_derivatives(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            parameters["cl"],
+            parameters["cd0"],
+            self.options["aspect_ratio"],
+            parameters["oswald"],
+            parameters["correction"],
+            parameters["ks"],
+            self.options["stall_velocity"],
+        )
+        partials["far25_named_residual", "wing_loading"] = derivatives[
+            "dresidual_dwing_loading"
+        ]
+        partials["far25_named_residual", "thrust_loading"] = derivatives[
+            "dresidual_dthrust_loading"
+        ]
+
+
 class PsLossSigmoid(om.ExplicitComponent):
     """Evaluate FAST PsLoss sigmoid climb-gradient helper."""
 
@@ -400,6 +505,170 @@ def selected_engine_gradient(constraint_type, num_engines, two_engine, three_eng
         return three_engine
 
     return four_engine
+
+
+def named_far25_climb_parameters(
+    name,
+    constraint_type,
+    num_engines,
+    ps_loss,
+    cl_takeoff,
+    cl_landing,
+    cl_cruise,
+    cd0_takeoff,
+    cd0_landing,
+    cd0_cruise,
+    oswald_takeoff,
+    oswald_landing,
+    oswald_cruise,
+    temperature_correction,
+    wland_mtow,
+    max_continuous,
+):
+    """Return fixed FAST named FAR 25 climb wrapper parameters."""
+
+    key = name.lower()
+
+    if key == "jet25_111":
+        if constraint_type == 1:
+            gradient = ps_loss_sigmoid_value(ps_loss, 0.5026, -42.54, 0.7925, 1.198)
+        else:
+            gradient = selected_engine_gradient(
+                constraint_type,
+                num_engines,
+                0.012,
+                0.015,
+                0.017,
+            )
+
+        return {
+            "cl": cl_takeoff,
+            "cd0": cd0_takeoff - 0.025,
+            "oswald": oswald_takeoff,
+            "correction": temperature_correction
+            * oei_multiplier_value(constraint_type, num_engines, ps_loss),
+            "gradient": gradient,
+            "ks": 1.2,
+        }
+
+    if key == "jet25_119":
+        gradient = 0.032
+
+        if constraint_type == 1:
+            gradient = ps_loss_sigmoid_value(ps_loss, 0.0, 0.0, 0.0, 3.2)
+
+        return {
+            "cl": cl_landing,
+            "cd0": cd0_landing,
+            "oswald": oswald_landing,
+            "correction": temperature_correction * wland_mtow,
+            "gradient": gradient,
+            "ks": 1.3,
+        }
+
+    if key == "jet25_121a":
+        if constraint_type == 1:
+            gradient = ps_loss_sigmoid_value(ps_loss, 0.4999, -151.22, 0.7855, 0.001)
+        else:
+            gradient = selected_engine_gradient(
+                constraint_type,
+                num_engines,
+                0.0,
+                0.003,
+                0.005,
+            )
+
+        return {
+            "cl": cl_takeoff,
+            "cd0": cd0_takeoff,
+            "oswald": oswald_takeoff,
+            "correction": temperature_correction
+            * oei_multiplier_value(constraint_type, num_engines, ps_loss),
+            "gradient": gradient,
+            "ks": 1.15,
+        }
+
+    if key == "jet25_121b":
+        if constraint_type == 1:
+            gradient = ps_loss_sigmoid_value(ps_loss, 0.6024, -42.00, 0.7829, 2.398)
+        else:
+            gradient = selected_engine_gradient(
+                constraint_type,
+                num_engines,
+                0.024,
+                0.027,
+                0.030,
+            )
+
+        return {
+            "cl": cl_takeoff,
+            "cd0": cd0_takeoff - 0.025,
+            "oswald": oswald_takeoff,
+            "correction": temperature_correction
+            * oei_multiplier_value(constraint_type, num_engines, ps_loss),
+            "gradient": gradient,
+            "ks": 1.2,
+        }
+
+    if key == "jet25_121c":
+        if constraint_type == 1:
+            gradient = ps_loss_sigmoid_value(ps_loss, 0.5026, -42.54, 0.7925, 1.198)
+        else:
+            gradient = selected_engine_gradient(
+                constraint_type,
+                num_engines,
+                0.012,
+                0.015,
+                0.017,
+            )
+
+        return {
+            "cl": cl_cruise,
+            "cd0": cd0_cruise,
+            "oswald": oswald_cruise,
+            "correction": temperature_correction
+            * oei_multiplier_value(constraint_type, num_engines, ps_loss)
+            * max_continuous,
+            "gradient": gradient,
+            "ks": 1.25,
+        }
+
+    if key == "jet25_121d":
+        if constraint_type == 1:
+            gradient = ps_loss_sigmoid_value(ps_loss, 0.6025, -41.75, 0.7830, 2.098)
+        else:
+            gradient = selected_engine_gradient(
+                constraint_type,
+                num_engines,
+                0.021,
+                0.024,
+                0.027,
+            )
+
+        return {
+            "cl": cl_landing,
+            "cd0": 0.5 * (cd0_landing + cd0_takeoff),
+            "oswald": oswald_landing,
+            "correction": temperature_correction
+            * oei_multiplier_value(constraint_type, num_engines, ps_loss)
+            * wland_mtow,
+            "gradient": gradient,
+            "ks": 1.5,
+        }
+
+    raise ValueError("Unknown FAR 25 named climb constraint.")
+
+
+def oei_multiplier_value(constraint_type, num_engines, ps_loss):
+    """Return FAST OEI multiplier from fixed settings."""
+
+    if constraint_type == 0:
+        return num_engines / (num_engines - 1.0)
+
+    if constraint_type == 1:
+        return 1.045 * ps_loss ** 2 + 1.0
+
+    raise ValueError("OEIMultiplier Type must be 0 or 1.")
 
 
 def jet_approach_residual(

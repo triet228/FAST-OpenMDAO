@@ -15,6 +15,7 @@ from fast_openmdao import (
     FAR25EngineGradient,
     JetApproachConstraint,
     JetCruiseConstraint,
+    JetFAR25NamedClimbConstraint,
     JetLandingFieldLengthConstraint,
     JetTakeoffFieldLengthConstraint,
     OEIMultiplier,
@@ -25,6 +26,11 @@ from fast_python.constraint import (
     far25_engine_gradient,
     jet_app,
     jet25_111,
+    jet25_119,
+    jet25_121a,
+    jet25_121b,
+    jet25_121c,
+    jet25_121d,
     jet_crs,
     jet_div,
     jet_lfl,
@@ -282,6 +288,37 @@ def test_far25_climb_component_matches_fast_python_jet25_111():
     )
 
 
+def test_named_far25_climb_components_match_fast_python():
+    """Check named FAR 25 climb wrappers match FAST-Python functions."""
+
+    aircraft = make_full_constraint_aircraft()
+    fast_functions = {
+        "jet25_111": jet25_111,
+        "jet25_119": jet25_119,
+        "jet25_121a": jet25_121a,
+        "jet25_121b": jet25_121b,
+        "jet25_121c": jet25_121c,
+        "jet25_121d": jet25_121d,
+    }
+
+    for name, fast_function in fast_functions.items():
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "constraint",
+            make_named_far25_component(name, aircraft),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("wing_loading", 400.0, units="kg/m**2")
+        problem.set_val("thrust_loading", 0.3)
+        problem.run_model()
+
+        assert np.isclose(
+            problem.get_val("far25_named_residual")[0],
+            fast_function(400.0, 0.3, aircraft),
+        )
+
+
 def test_constraint_primitives_declare_analytic_partials():
     """Check constraint primitive derivatives against finite difference."""
 
@@ -350,6 +387,11 @@ def test_constraint_primitives_declare_analytic_partials():
                 ks=1.2,
                 stall_velocity=60.0,
             ),
+            {"wing_loading": 400.0, "thrust_loading": 0.3},
+        ),
+        (
+            "named_far25",
+            make_named_far25_component("jet25_121d", make_full_constraint_aircraft()),
             {"wing_loading": 400.0, "thrust_loading": 0.3},
         ),
     ]
@@ -509,6 +551,36 @@ def make_zero_residual_problem(component, residual_name, design_var, initial, lo
     problem.setup()
     problem.set_val(design_var, initial)
     return problem
+
+
+def make_named_far25_component(name, aircraft):
+    """Return a named FAR 25 OpenMDAO component from FAST aircraft fields."""
+
+    specs = aircraft["Specs"]
+    performance = specs["Performance"]
+    aero = specs["Aero"]
+    return JetFAR25NamedClimbConstraint(
+        name=name,
+        aircraft_class=specs["TLAR"]["Class"],
+        constraint_type=aircraft["Settings"]["ConstraintType"],
+        req_type=specs["TLAR"]["ReqType"],
+        num_engines=specs["Propulsion"]["NumEngines"],
+        ps_loss=performance["PsLoss"],
+        cl_takeoff=aero["CL"]["Tko"],
+        cl_landing=aero["CL"]["Lnd"],
+        cl_cruise=aero["CL"]["Crs"],
+        cd0_takeoff=aero["CD0"]["Tko"],
+        cd0_landing=aero["CD0"]["Lnd"],
+        cd0_cruise=aero["CD0"]["Crs"],
+        aspect_ratio=aero["AR"],
+        oswald_takeoff=aero["e"]["Tko"],
+        oswald_landing=aero["e"]["Lnd"],
+        oswald_cruise=aero["e"]["Crs"],
+        temperature_correction=performance["TempInc"],
+        wland_mtow=performance["Wland_MTOW"],
+        max_continuous=performance["MaxCont"],
+        stall_velocity=performance["Vels"]["Stl"],
+    )
 
 
 def make_constraint_aircraft(constraint_type, ps_loss=0.2, num_engines=2):
