@@ -36,6 +36,10 @@ from fast_openmdao.engine import (
 )
 from fast_openmdao.mission import CruiseTimeTargetDistance, FlightConditions
 from fast_openmdao.oew import TurbopropAirframeWeight
+from fast_openmdao.optimization import (
+    BatteryEnergyAvailable,
+    ElectricMotorPowerAvailable,
+)
 from fast_openmdao.problem import make_fast_optimization_problem, make_fast_problem
 from fast_openmdao.projection import (
     BatterySpecificEnergyProjection,
@@ -57,6 +61,7 @@ __all__ = [
     "AirIntegratedHeat",
     "AirSpecificHeat",
     "AirSpecificHeatVolume",
+    "BatteryEnergyAvailable",
     "BatteryReplacementCost",
     "BatterySpecificEnergyProjection",
     "AvailableCellCapacity",
@@ -66,6 +71,7 @@ __all__ = [
     "CruiseDynamicPressure",
     "CruiseTimeTargetDistance",
     "ElectricMotorSpecificPowerProjection",
+    "ElectricMotorPowerAvailable",
     "EngineLapse",
     "FAR25EngineGradient",
     "FAR25ClimbConstraint",

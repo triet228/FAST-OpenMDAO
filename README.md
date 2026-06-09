@@ -42,6 +42,8 @@ derivative-native FAST equation components:
 - Generic FAR 25 climb residual component with analytical partial derivatives.
 - Battery scalar primitives for effective cell capacity and selected current
   root with analytical partial derivatives.
+- Optimization helper primitives for available electric motor power and
+  battery energy with analytical partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
   design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
@@ -71,6 +73,7 @@ The public `fast_openmdao` package currently exports:
   `StaticTemperature`, `TotalPressure`, `TotalTemperature`
 - Mission: `CruiseTimeTargetDistance`, `FlightConditions`
 - OEW: `TurbopropAirframeWeight`
+- Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `EngineLapse`, `SafeComponentWeight`, `ThrustSinkEfficiency`,
@@ -259,8 +262,10 @@ optimized values against FAST-Python residual functions.
    derivatives. Done.
 20. Convert scalar convergence-error helper with analytical partial
    derivatives. Done.
-21. Add complex-step derivative checks where supported by FAST-Python internals.
-22. Build reusable groups for mission, propulsion, weights, and objective
+21. Convert optimization available-power and available-energy helpers with
+   analytical partial derivatives. Done.
+22. Add complex-step derivative checks where supported by FAST-Python internals.
+23. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.
