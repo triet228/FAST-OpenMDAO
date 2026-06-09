@@ -332,6 +332,51 @@ class SplitScheduleFill(om.ExplicitComponent):
         ]
 
 
+class GradientBlock(om.ExplicitComponent):
+    """Format FAST finite-difference gradient values as a gradient block.
+
+    Inputs:
+        gradient_values: Scalar, vector, or matrix gradient data.
+
+    Outputs:
+        gradient_block: FAST nconstraint-by-ndvars gradient matrix.
+
+    Assumptions:
+        The input shape and number of design variables are fixed options. This
+        mirrors ``fast_python.optimization.as_gradient_block`` for a fixed
+        setup branch and gives OpenMDAO a constant analytical Jacobian.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+        self.options.declare("num_design_vars", default=1)
+
+    def setup(self):
+        input_shape = tuple(np.asarray(self.options["input_shape"]).reshape(-1))
+        input_shape = tuple(int(value) for value in input_shape)
+        num_design_vars = self.options["num_design_vars"]
+        rows = gradient_block_output_rows(input_shape, num_design_vars)
+        self.add_input("gradient_values", val=np.zeros(input_shape))
+        self.add_output("gradient_block", val=np.zeros((rows, num_design_vars)))
+        self.declare_partials(of="gradient_block", wrt="gradient_values")
+
+    def compute(self, inputs, outputs):
+        values = gradient_block_values(
+            inputs["gradient_values"],
+            self.options["num_design_vars"],
+        )
+        outputs["gradient_block"] = values["gradient_block"]
+
+    def compute_partials(self, inputs, partials):
+        values = gradient_block_values(
+            inputs["gradient_values"],
+            self.options["num_design_vars"],
+        )
+        partials["gradient_block", "gradient_values"] = values[
+            "dgradient_block_dgradient_values"
+        ]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -1031,6 +1076,54 @@ def split_schedule_fill_values(
         "dfilled_splits_dtarget_splits": dtarget,
         "dfilled_splits_doptimized_splits": doptimized,
     }
+
+
+def gradient_block_output_rows(input_shape, num_design_vars):
+    """Return FAST gradient-block row count for fixed input shape."""
+
+    array = np.zeros(input_shape)
+    shaped = reshape_gradient_block(array, num_design_vars)
+    return shaped.shape[0]
+
+
+def gradient_block_values(gradient_values, num_design_vars):
+    """Return FAST gradient-block values and the constant shape Jacobian."""
+
+    values = np.asarray(gradient_values, dtype=float)
+    block = reshape_gradient_block(values, num_design_vars)
+    derivative = np.zeros((block.size, values.size))
+
+    for index in range(values.size):
+        seed = np.zeros_like(values)
+        seed.reshape(-1)[index] = 1.0
+        derivative[:, index] = reshape_gradient_block(
+            seed,
+            num_design_vars,
+        ).reshape(-1)
+
+    return {
+        "gradient_block": block,
+        "dgradient_block_dgradient_values": derivative,
+    }
+
+
+def reshape_gradient_block(values, num_design_vars):
+    """Apply FAST-Python's gradient-block reshape and column expansion rules."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim == 0:
+        array = array.reshape(1, 1)
+    elif array.ndim == 1:
+        if len(array) == num_design_vars:
+            array = array.reshape(1, num_design_vars)
+        else:
+            array = array.reshape(-1, 1)
+
+    if array.shape[1] == 1 and num_design_vars != 1:
+        array = np.repeat(array, num_design_vars, axis=1)
+
+    return array.reshape(array.shape[0], num_design_vars)
 
 
 def get_slack_values(inputs, num_inequality):

@@ -16,6 +16,7 @@ from fast_openmdao import (
     ElectricMotorPowerAvailable,
     FeasibleStep,
     GaussianEliminationPivot,
+    GradientBlock,
     HessianUpdate,
     HistoryArray,
     MeritFunction,
@@ -33,6 +34,7 @@ from fast_python.optimization import (
     feas_step,
     fill_split_values,
     gauss_elim,
+    as_gradient_block,
     history_array,
     hess_upd,
     merit_function,
@@ -257,6 +259,37 @@ def test_split_schedule_fill_matches_fast_python():
     )
 
     assert np.allclose(problem.get_val("filled_splits"), expected)
+
+
+def test_gradient_block_matches_fast_python():
+    """Check FAST gradient-block formatting parity for fixed shapes."""
+
+    cases = [
+        (np.asarray(2.5), 3),
+        (np.asarray([0.1, 0.2, 0.3]), 3),
+        (np.asarray([0.4, 0.5]), 3),
+        (np.asarray([[0.6], [0.7]]), 2),
+        (np.asarray([[0.8, 0.9, 1.0], [1.1, 1.2, 1.3]]), 3),
+    ]
+
+    for gradient_values, num_design_vars in cases:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "gradient",
+            GradientBlock(
+                input_shape=gradient_values.shape,
+                num_design_vars=num_design_vars,
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("gradient_values", gradient_values)
+        problem.run_model()
+
+        assert np.allclose(
+            problem.get_val("gradient_block"),
+            as_gradient_block(gradient_values, num_design_vars),
+        )
 
 
 def test_merit_function_matches_fast_python():
@@ -561,6 +594,13 @@ def test_optimization_helpers_declare_analytic_partials():
                 "optimized_splits": make_split_schedule_fill_case()[
                     "optimized_splits"
                 ],
+            },
+        ),
+        (
+            "gradient_block",
+            GradientBlock(input_shape=(2,), num_design_vars=3),
+            {
+                "gradient_values": np.asarray([0.4, 0.5]),
             },
         ),
         (
