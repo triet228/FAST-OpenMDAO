@@ -26,6 +26,7 @@ from fast_openmdao import (
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
     TurboelectricArchitecture,
+    TurbofanEngineWeightForSizing,
     TurbopropEngineWeightForSizing,
 )
 from fast_python.propulsion import (
@@ -47,6 +48,7 @@ from fast_python.propulsion import (
     turboelectric_architecture,
     update_battery_energy,
 )
+from fast_python.regression import prior_calculation, reg_processing
 
 
 def test_engine_lapse_matches_fast_python():
@@ -488,6 +490,47 @@ def test_turboprop_engine_weight_for_sizing_matches_fast_python():
     assert np.allclose(problem.get_val("engine_weight", units="kg"), expected)
 
 
+def test_turbofan_engine_weight_for_sizing_matches_fast_python():
+    """Check turbofan engine sizing weight GPR parity."""
+
+    aircraft, engines, downstream_thrust = make_turbofan_engine_weight_case()
+    io_space = [["Thrust_Max"], ["DryWeight"]]
+    prior = prior_calculation(aircraft["HistData"]["Eng"], io_space)
+    data_matrix, hyperparams, inverse_term = reg_processing(
+        aircraft["HistData"]["Eng"],
+        io_space,
+        [prior],
+        [1],
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "engine_weight",
+        TurbofanEngineWeightForSizing(
+            engines=engines,
+            data_matrix=data_matrix,
+            hyperparams=hyperparams,
+            inverse_term=inverse_term,
+            prior=prior,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("downstream_thrust", downstream_thrust, units="N")
+    problem.run_model()
+
+    expected = engine_weights_for_sizing(
+        aircraft,
+        "Turbofan",
+        engines,
+        np.zeros_like(downstream_thrust),
+        downstream_thrust,
+        np.zeros_like(downstream_thrust),
+        np.zeros_like(downstream_thrust),
+    )
+
+    assert np.allclose(problem.get_val("engine_weight", units="kg"), expected)
+
+
 def test_cable_weight_for_sizing_matches_fast_python():
     """Check cable sizing weight parity with FAST-Python."""
 
@@ -613,6 +656,22 @@ def test_propulsion_primitives_declare_analytic_partials():
     thrust_architecture, thrust_type, thrust_output = make_engine_thrust_case()
     cable_aircraft, cables, downstream_power = make_cable_weight_case()
     _, engines, engine_downstream_power = make_turboprop_engine_weight_case()
+    turbofan_aircraft, turbofan_engines, turbofan_downstream_thrust = (
+        make_turbofan_engine_weight_case()
+    )
+    turbofan_io_space = [["Thrust_Max"], ["DryWeight"]]
+    turbofan_prior = prior_calculation(
+        turbofan_aircraft["HistData"]["Eng"],
+        turbofan_io_space,
+    )
+    turbofan_data_matrix, turbofan_hyperparams, turbofan_inverse_term = (
+        reg_processing(
+            turbofan_aircraft["HistData"]["Eng"],
+            turbofan_io_space,
+            [turbofan_prior],
+            [1],
+        )
+    )
     cable_architecture = cable_aircraft["Specs"]["Propulsion"]["PropArch"]
     available_aircraft = make_power_available_aircraft()
     available_arch = available_aircraft["Specs"]["Propulsion"]["PropArch"]
@@ -786,6 +845,17 @@ def test_propulsion_primitives_declare_analytic_partials():
                 dry_weight=[10.0, 20.0, 30.0],
             ),
             {"downstream_power": engine_downstream_power},
+        ),
+        (
+            "turbofan_engine_weight",
+            TurbofanEngineWeightForSizing(
+                engines=turbofan_engines,
+                data_matrix=turbofan_data_matrix,
+                hyperparams=turbofan_hyperparams,
+                inverse_term=turbofan_inverse_term,
+                prior=turbofan_prior,
+            ),
+            {"downstream_thrust": turbofan_downstream_thrust},
         ),
         (
             "cables",
@@ -1168,6 +1238,67 @@ def make_turboprop_engine_weight_case():
     engines = np.asarray([True, True, False])
     downstream_power = np.asarray([100000.0, 200000.0, 0.0, 0.0])
     return aircraft, engines, downstream_power
+
+
+def make_turbofan_engine_weight_case():
+    """Return FAST-Python aircraft data for turbofan engine-weight sizing."""
+
+    aircraft = {
+        "Specs": {
+            "Propulsion": {
+                "Engine": {
+                    "Mach": 0.05,
+                    "Alt": 0.0,
+                    "OPR": 30.0,
+                    "BPR": 5.0,
+                    "FPR": 1.5,
+                    "Tt4Max": 1600.0,
+                    "DesignThrust": 120000.0,
+                    "NoSpools": 2,
+                    "RPMs": [7400.0, 17820.0],
+                    "FanGearRatio": np.nan,
+                    "FanBoosters": False,
+                    "MaxIter": 300,
+                    "CoreFlow": {
+                        "PaxBleed": 0.03,
+                        "Leakage": 0.01,
+                        "Cooling": 0.0,
+                    },
+                    "EtaPoly": {
+                        "Inlet": 0.99,
+                        "Diffusers": 0.99,
+                        "Fan": 0.92,
+                        "Compressors": 0.9,
+                        "BypassNozzle": 0.98,
+                        "Combustor": 0.99,
+                        "Turbines": 0.9,
+                        "CoreNozzle": 0.98,
+                        "Nozzles": 0.99,
+                        "Mixing": 0.0,
+                    },
+                },
+            },
+        },
+        "HistData": {
+            "Eng": {
+                "E1": {
+                    "Thrust_Max": 80000.0,
+                    "DryWeight": 1000.0,
+                },
+                "E2": {
+                    "Thrust_Max": 120000.0,
+                    "DryWeight": 1500.0,
+                },
+                "E3": {
+                    "Thrust_Max": 160000.0,
+                    "DryWeight": 2200.0,
+                },
+            }
+        },
+    }
+    engines = np.asarray([True, False, False])
+    downstream_thrust = np.asarray([120000.0, 0.0, 0.0, 0.0])
+    return aircraft, engines, downstream_thrust
 
 
 def make_cable_weight_case():

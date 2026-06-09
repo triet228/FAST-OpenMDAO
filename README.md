@@ -99,6 +99,8 @@ derivative-native FAST equation components:
   process posterior prediction with analytical partial derivatives.
 - OEW turboprop linear fit, turbofan airframe GPR weight, and numeric-sum
   helpers with analytical partial derivatives.
+- Propulsion turboprop/piston linear and turbofan GPR engine sizing-weight
+  helpers with analytical partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
   design variables, objective, constraints, and an SLSQP driver by default.
 - Path-based scalar input specs that write OpenMDAO values into nested FAST
@@ -154,7 +156,8 @@ The public `fast_openmdao` package currently exports:
   `PowerSupplementCheck`, `SafeComponentWeight`, `SeriesHybridArchitecture`,
   `SimpleSourceTransmitterArchitecture`, `ThrustSinkEfficiency`,
   `TransmitterFanEfficiency`,
-  `TurboelectricArchitecture`, `TurbopropEngineWeightForSizing`
+  `TurboelectricArchitecture`, `TurbofanEngineWeightForSizing`,
+  `TurbopropEngineWeightForSizing`
 - Regression: `GaussianProcessPrediction`, `SquaredExponentialKernel`
 - Units: `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,

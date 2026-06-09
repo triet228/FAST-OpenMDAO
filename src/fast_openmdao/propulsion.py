@@ -6,6 +6,7 @@ import numpy as np
 import openmdao.api as om
 
 from fast_python.atmosphere import standard_atmosphere
+from fast_openmdao.regression import gaussian_process_prediction_values
 
 
 RHO_SL_STD = standard_atmosphere(0.0)[2]
@@ -794,6 +795,66 @@ class TurbopropEngineWeightForSizing(om.ExplicitComponent):
         )
         partials["engine_weight", "downstream_power"] = values[
             "dengine_weight_ddownstream_power"
+        ]
+
+
+class TurbofanEngineWeightForSizing(om.ExplicitComponent):
+    """Compute FAST turbofan engine dry weights from sizing thrust GPR.
+
+    Inputs:
+        downstream_thrust: Downstream component thrust vector in N.
+
+    Outputs:
+        engine_weight: Per-engine dry weight estimate in kg.
+
+    Assumptions:
+        This component represents the GPR weight output from FAST
+        ``engine_weights_for_sizing`` for turbofan aircraft. The separate
+        ``SizedEngine`` mutation and nonlinear thermodynamic sizing remain
+        orchestration responsibilities.
+    """
+
+    def initialize(self):
+        self.options.declare("engines")
+        self.options.declare("data_matrix")
+        self.options.declare("hyperparams")
+        self.options.declare("inverse_term")
+        self.options.declare("prior", default=1.0)
+
+    def setup(self):
+        engines = np.asarray(self.options["engines"], dtype=bool).reshape(-1)
+        num_components = len(engines) + 1
+        num_engines = max(1, np.count_nonzero(engines))
+
+        self.add_input(
+            "downstream_thrust",
+            val=np.zeros(num_components),
+            units="N",
+        )
+        self.add_output("engine_weight", val=np.zeros(num_engines), units="kg")
+        self.declare_partials(of="engine_weight", wrt="downstream_thrust")
+
+    def compute(self, inputs, outputs):
+        outputs["engine_weight"] = turbofan_engine_weight_for_sizing_values(
+            inputs["downstream_thrust"],
+            self.options["engines"],
+            self.options["data_matrix"],
+            self.options["hyperparams"],
+            self.options["inverse_term"],
+            self.options["prior"],
+        )["engine_weight"]
+
+    def compute_partials(self, inputs, partials):
+        values = turbofan_engine_weight_for_sizing_values(
+            inputs["downstream_thrust"],
+            self.options["engines"],
+            self.options["data_matrix"],
+            self.options["hyperparams"],
+            self.options["inverse_term"],
+            self.options["prior"],
+        )
+        partials["engine_weight", "downstream_thrust"] = values[
+            "dengine_weight_ddownstream_thrust"
         ]
 
 
@@ -2330,6 +2391,40 @@ def turboprop_engine_weight_for_sizing_values(
     return {
         "engine_weight": engine_weight,
         "dengine_weight_ddownstream_power": derivatives,
+    }
+
+
+def turbofan_engine_weight_for_sizing_values(
+    downstream_thrust,
+    engines,
+    data_matrix,
+    hyperparams,
+    inverse_term,
+    prior,
+):
+    """Return FAST turbofan sizing engine weights and derivatives."""
+
+    downstream_thrust = np.asarray(downstream_thrust, dtype=float).reshape(-1)
+    engines = np.asarray(engines, dtype=bool).reshape(-1)
+    active_columns = np.flatnonzero(engines)
+    row_count = max(1, len(active_columns))
+    engine_weight = np.zeros(row_count)
+    derivatives = np.zeros((row_count, downstream_thrust.size))
+
+    for row, column in enumerate(active_columns):
+        prediction = gaussian_process_prediction_values(
+            data_matrix,
+            hyperparams,
+            inverse_term,
+            [downstream_thrust[column]],
+            prior,
+        )
+        engine_weight[row] = prediction["posterior_mean"]
+        derivatives[row, column] = prediction["dposterior_mean_dtarget"][0]
+
+    return {
+        "engine_weight": engine_weight,
+        "dengine_weight_ddownstream_thrust": derivatives,
     }
 
 
