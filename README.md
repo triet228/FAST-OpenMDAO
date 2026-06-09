@@ -148,11 +148,38 @@ problem.run_driver()
 
 ## Split Matrix Optimization
 
-Use `make_fast_split_optimization_problem` when a custom propulsion
+Use `make_fast_auto_split_optimization_problem` when a custom propulsion
 architecture stores operational split matrices directly in the FAST aircraft
-dictionary. The helper discovers active branching entries, exposes each entry
-as a scalar OpenMDAO design variable, and adds equality constraints so each
-branching row or column sums to one.
+dictionary. The helper inspects `Specs.Propulsion.PropArch`, finds editable
+`OperDwn` or `OperUps` split matrices, infers row or column normalization, and
+then exposes each active branching entry as a scalar OpenMDAO design variable.
+It fails closed if the split matrix choice or normalization direction is
+ambiguous.
+
+```python
+from fast_openmdao import make_fast_auto_split_optimization_problem
+
+problem = make_fast_auto_split_optimization_problem(
+    aircraft=aircraft,
+    mission=mission,
+    preferred_matrix="OperDwn",
+    output_specs=[
+        {
+            "name": "fuel_burn",
+            "path": ("aircraft", "Mission", "History", "SI", "Weight", "Fburn", -1),
+            "units": "kg",
+        },
+    ],
+    objective={"name": "fuel_burn"},
+)
+
+problem.setup()
+problem.run_driver()
+```
+
+When both `OperDwn` and `OperUps` are editable and valid, pass
+`preferred_matrix` so the optimizer does not guess. Use
+`make_fast_split_optimization_problem` for explicit matrix control:
 
 ```python
 from fast_openmdao import make_fast_split_optimization_problem
@@ -168,8 +195,6 @@ problem = make_fast_split_optimization_problem(
             "matrix_path": ("Specs", "Propulsion", "PropArch", "OperDwn"),
             "architecture_path": ("Specs", "Propulsion", "PropArch", "Arch"),
             "axis": "row",
-            "lower": 0.0,
-            "upper": 1.0,
         },
     ],
     output_specs=[

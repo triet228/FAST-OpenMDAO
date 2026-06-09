@@ -182,7 +182,10 @@ from fast_openmdao.specs import (
 )
 from fast_openmdao.split_optimization import (
     SplitGroupSums,
+    infer_propulsion_split_specs,
+    make_fast_auto_split_optimization_problem,
     make_fast_split_optimization_problem,
+    propulsion_split_diagnostics,
     split_matrix_design_specs,
 )
 from fast_openmdao.propulsion import (
@@ -367,6 +370,9 @@ __all__ = [
     "SimpleOffDesignTurbofan",
     "SimplexPostSplitHistory",
     "SplitGroupSums",
+    "infer_propulsion_split_specs",
+    "make_fast_auto_split_optimization_problem",
+    "propulsion_split_diagnostics",
     "split_matrix_design_specs",
     "SimpleSourceTransmitterArchitecture",
     "SplitScalar",

@@ -11,7 +11,10 @@ import openmdao.api as om
 
 from fast_openmdao import (
     SplitGroupSums,
+    infer_propulsion_split_specs,
+    make_fast_auto_split_optimization_problem,
     make_fast_split_optimization_problem,
+    propulsion_split_diagnostics,
     split_matrix_design_specs,
 )
 
@@ -106,6 +109,84 @@ def test_fast_split_optimization_problem_optimizes_matrix_entries():
     assert abs(problem.get_val("downstream_1_2")[0] - 0.65) < 1.0e-5
     assert abs(problem.get_val("downstream_1_3")[0] - 0.35) < 1.0e-5
     assert problem.get_val("split_objective")[0] < 1.0e-10
+
+
+def test_infer_propulsion_split_specs_selects_oper_dwn_rows():
+    """Check auto inference chooses the editable downstream row split."""
+
+    specs = infer_propulsion_split_specs(make_split_aircraft())
+
+    assert len(specs) == 1
+    assert specs[0]["matrix_path"] == (
+        "Specs",
+        "Propulsion",
+        "PropArch",
+        "OperDwn",
+    )
+    assert specs[0]["axis"] == "row"
+
+
+def test_auto_split_optimization_problem_uses_inferred_spec():
+    """Check no-spec auto mode optimizes the discovered split matrix."""
+
+    problem = make_fast_auto_split_optimization_problem(
+        aircraft=make_split_aircraft(),
+        output_specs=[
+            {
+                "name": "split_objective",
+                "path": ("split_objective",),
+            },
+        ],
+        runner=split_objective_runner,
+        objective={
+            "name": "split_objective",
+        },
+        driver_options={
+            "maxiter": 40,
+            "tol": 1.0e-10,
+        },
+    )
+    problem.setup()
+    result = problem.run_driver()
+
+    assert result.success
+    assert problem.fast_auto_split_specs[0]["axis"] == "row"
+    assert abs(problem.get_val("operdwn_0_1")[0] - 0.2) < 1.0e-5
+    assert abs(problem.get_val("operdwn_0_2")[0] - 0.8) < 1.0e-5
+
+
+def test_auto_split_inference_requires_preferred_matrix_when_ambiguous():
+    """Check auto mode refuses to guess between valid split matrices."""
+
+    aircraft = make_split_aircraft()
+    aircraft["Specs"]["Propulsion"]["PropArch"]["OperUps"] = [
+        [0.0, 0.5, 0.5, 0.0],
+        [0.0, 0.0, 0.5, 0.5],
+        [0.0, 0.0, 0.0, 1.0],
+        [0.0, 0.0, 0.0, 0.0],
+    ]
+
+    try:
+        infer_propulsion_split_specs(aircraft)
+    except ValueError as error:
+        assert "Several editable split matrices" in str(error)
+    else:
+        raise AssertionError("Expected ambiguous split inference to fail.")
+
+    specs = infer_propulsion_split_specs(aircraft, preferred_matrix="OperDwn")
+    assert specs[0]["matrix_path"][-1] == "OperDwn"
+
+
+def test_auto_split_diagnostics_reports_callable_generators():
+    """Check callable split generators are reported instead of guessed."""
+
+    aircraft = make_split_aircraft()
+    aircraft["Specs"]["Propulsion"]["PropArch"]["OperDwn"] = lambda: []
+    diagnostics = propulsion_split_diagnostics(aircraft)
+
+    assert diagnostics[0]["matrix_name"] == "OperDwn"
+    assert not diagnostics[0]["usable"]
+    assert "callable" in diagnostics[0]["reason"]
 
 
 def make_downstream_split_spec():

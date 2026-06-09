@@ -146,6 +146,348 @@ def make_fast_split_optimization_problem(
     return problem
 
 
+def make_fast_auto_split_optimization_problem(
+    aircraft,
+    mission=None,
+    input_specs=(),
+    output_specs=None,
+    runner=None,
+    partial_derivatives=None,
+    component_name="fast",
+    promotes=None,
+    design_vars=(),
+    objective=None,
+    constraints=(),
+    driver=None,
+    driver_options=None,
+    prop_arch_path=("Specs", "Propulsion", "PropArch"),
+    preferred_matrix=None,
+    lower=0.0,
+    upper=1.0,
+    active_tol=1.0e-12,
+    sum_tol=1.0e-8,
+    strict=True,
+    constraint_component_name="split_constraints",
+):
+    """Create a FAST split optimization problem by inspecting PropArch.
+
+    Inputs:
+        aircraft: Baseline FAST aircraft dictionary.
+        mission: Optional baseline FAST mission/profile dictionary.
+        input_specs: Additional scalar FAST path input specs.
+        output_specs: Scalar FAST result outputs.
+        runner: Optional FAST-compatible runner.
+        partial_derivatives: Optional analytic partial derivative mapping.
+        component_name: FAST wrapper subsystem name.
+        promotes: OpenMDAO promotions list for the FAST wrapper.
+        design_vars: Additional OpenMDAO design-variable specs.
+        objective: Objective spec. Defaults to FAST MTOW.
+        constraints: Additional OpenMDAO constraint specs.
+        driver: Optional OpenMDAO driver.
+        driver_options: Driver options.
+        prop_arch_path: Path to the FAST propulsion architecture dictionary.
+        preferred_matrix: Optional matrix name, such as ``"OperDwn"``.
+        lower: Lower bound for generated split design variables.
+        upper: Upper bound for generated split design variables.
+        active_tol: Absolute tolerance for active architecture entries.
+        sum_tol: Tolerance for recognizing normalized split groups.
+        strict: If True, fail when normalization or matrix choice is ambiguous.
+        constraint_component_name: Name for the split-sum constraint subsystem.
+
+    Outputs:
+        Unsetup OpenMDAO Problem with automatically generated split controls.
+
+    Assumptions:
+        Auto mode only optimizes editable matrix data already stored in
+        ``PropArch``. Callable split generators and scalar split schedules are
+        reported as diagnostics instead of guessed.
+    """
+
+    split_specs = infer_propulsion_split_specs(
+        aircraft,
+        prop_arch_path=prop_arch_path,
+        preferred_matrix=preferred_matrix,
+        lower=lower,
+        upper=upper,
+        active_tol=active_tol,
+        sum_tol=sum_tol,
+        strict=strict,
+    )
+    problem = make_fast_split_optimization_problem(
+        aircraft=aircraft,
+        mission=mission,
+        split_specs=split_specs,
+        input_specs=input_specs,
+        output_specs=output_specs,
+        runner=runner,
+        partial_derivatives=partial_derivatives,
+        component_name=component_name,
+        promotes=promotes,
+        design_vars=design_vars,
+        objective=objective,
+        constraints=constraints,
+        driver=driver,
+        driver_options=driver_options,
+        constraint_component_name=constraint_component_name,
+    )
+    problem.fast_auto_split_specs = split_specs
+    return problem
+
+
+def infer_propulsion_split_specs(
+    aircraft,
+    prop_arch_path=("Specs", "Propulsion", "PropArch"),
+    preferred_matrix=None,
+    lower=0.0,
+    upper=1.0,
+    active_tol=1.0e-12,
+    sum_tol=1.0e-8,
+    strict=True,
+):
+    """Infer editable split matrix specs from a FAST PropArch dictionary.
+
+    Inputs:
+        aircraft: Baseline FAST aircraft dictionary.
+        prop_arch_path: Path to the propulsion architecture dictionary.
+        preferred_matrix: Optional matrix name to select when several exist.
+        lower: Lower bound for generated split variables.
+        upper: Upper bound for generated split variables.
+        active_tol: Absolute tolerance for active architecture entries.
+        sum_tol: Normalized group-sum tolerance.
+        strict: If True, reject ambiguous or currently invalid matrices.
+
+    Outputs:
+        Tuple of split specs accepted by ``make_fast_split_optimization_problem``.
+    """
+
+    diagnostics = propulsion_split_diagnostics(
+        aircraft,
+        prop_arch_path=prop_arch_path,
+        active_tol=active_tol,
+        sum_tol=sum_tol,
+    )
+    valid = [item for item in diagnostics if item["usable"]]
+
+    if preferred_matrix is not None:
+        valid = [
+            item
+            for item in valid
+            if item["matrix_name"].lower() == preferred_matrix.lower()
+        ]
+
+    if not valid:
+        raise ValueError(split_diagnostic_message(diagnostics, preferred_matrix))
+
+    if strict:
+        invalid_selected = [
+            item
+            for item in diagnostics
+            if (
+                preferred_matrix is None
+                or item["matrix_name"].lower() == preferred_matrix.lower()
+            )
+            and not item["usable"]
+            and item["exists"]
+        ]
+
+        if invalid_selected and preferred_matrix is not None:
+            raise ValueError(split_diagnostic_message(diagnostics, preferred_matrix))
+
+    if len(valid) > 1 and preferred_matrix is None:
+        names = ", ".join(item["matrix_name"] for item in valid)
+        raise ValueError(
+            "Several editable split matrices are usable (%s). Pass "
+            "preferred_matrix to select the intended control." % names
+        )
+
+    return tuple(
+        {
+            "label": item["matrix_name"],
+            "prefix": safe_name(item["matrix_name"]),
+            "target": "aircraft",
+            "matrix_path": item["matrix_path"],
+            "architecture_path": item["architecture_path"],
+            "axis": item["axis"],
+            "lower": lower,
+            "upper": upper,
+            "active_tol": active_tol,
+        }
+        for item in valid
+    )
+
+
+def propulsion_split_diagnostics(
+    aircraft,
+    prop_arch_path=("Specs", "Propulsion", "PropArch"),
+    active_tol=1.0e-12,
+    sum_tol=1.0e-8,
+):
+    """Return diagnostics for known editable PropArch split matrices."""
+
+    candidates = []
+    prop_arch = get_path(aircraft, prop_arch_path)
+    architecture_path = tuple(prop_arch_path) + ("Arch",)
+
+    try:
+        architecture = np.asarray(prop_arch["Arch"], dtype=float)
+    except KeyError:
+        architecture = None
+
+    for matrix_name in ("OperDwn", "OperUps"):
+        item = {
+            "matrix_name": matrix_name,
+            "matrix_path": tuple(prop_arch_path) + (matrix_name,),
+            "architecture_path": architecture_path,
+            "exists": matrix_name in prop_arch,
+            "usable": False,
+            "axis": None,
+            "reason": "",
+            "row_groups": 0,
+            "column_groups": 0,
+        }
+
+        if matrix_name not in prop_arch:
+            item["reason"] = "missing"
+            candidates.append(item)
+            continue
+
+        matrix_value = prop_arch[matrix_name]
+
+        if callable(matrix_value):
+            item["reason"] = "callable split generator is not an editable matrix"
+            candidates.append(item)
+            continue
+
+        try:
+            matrix = np.asarray(matrix_value, dtype=float)
+        except (TypeError, ValueError):
+            item["reason"] = "not numeric"
+            candidates.append(item)
+            continue
+
+        if matrix.ndim != 2:
+            item["reason"] = "not two-dimensional"
+            candidates.append(item)
+            continue
+
+        if architecture is None:
+            item["reason"] = "missing architecture matrix"
+            candidates.append(item)
+            continue
+
+        if architecture.shape != matrix.shape:
+            item["reason"] = "architecture and split matrix shapes differ"
+            candidates.append(item)
+            continue
+
+        axis = infer_split_axis(architecture, matrix, active_tol, sum_tol)
+        item.update(axis)
+        item["usable"] = axis["axis"] is not None
+        item["reason"] = axis["reason"]
+        candidates.append(item)
+
+    return tuple(candidates)
+
+
+def infer_split_axis(architecture, matrix, active_tol, sum_tol):
+    """Infer whether a split matrix is normalized by rows or columns."""
+
+    row = split_axis_score(architecture, matrix, "row", active_tol, sum_tol)
+    column = split_axis_score(architecture, matrix, "column", active_tol, sum_tol)
+
+    if row["valid"] and not column["valid"]:
+        return {
+            "axis": "row",
+            "reason": "row-normalized branching groups",
+            "row_groups": row["groups"],
+            "column_groups": column["groups"],
+        }
+
+    if column["valid"] and not row["valid"]:
+        return {
+            "axis": "column",
+            "reason": "column-normalized branching groups",
+            "row_groups": row["groups"],
+            "column_groups": column["groups"],
+        }
+
+    if row["valid"] and column["valid"]:
+        return {
+            "axis": None,
+            "reason": "row and column normalization are both plausible",
+            "row_groups": row["groups"],
+            "column_groups": column["groups"],
+        }
+
+    if row["groups"] == 0 and column["groups"] == 0:
+        reason = "no branching split groups"
+    else:
+        reason = "branching split groups are not normalized"
+
+    return {
+        "axis": None,
+        "reason": reason,
+        "row_groups": row["groups"],
+        "column_groups": column["groups"],
+    }
+
+
+def split_axis_score(architecture, matrix, axis, active_tol, sum_tol):
+    """Return whether active split groups along an axis are normalized."""
+
+    active = np.abs(architecture) > active_tol
+    group_count = 0
+    valid_count = 0
+
+    if axis == "row":
+        for row in range(active.shape[0]):
+            indexes = np.where(active[row, :])[0]
+
+            if len(indexes) <= 1:
+                continue
+
+            group_count += 1
+            total = np.sum(matrix[row, indexes])
+
+            if abs(total - 1.0) <= sum_tol:
+                valid_count += 1
+    else:
+        for col in range(active.shape[1]):
+            indexes = np.where(active[:, col])[0]
+
+            if len(indexes) <= 1:
+                continue
+
+            group_count += 1
+            total = np.sum(matrix[indexes, col])
+
+            if abs(total - 1.0) <= sum_tol:
+                valid_count += 1
+
+    return {
+        "groups": group_count,
+        "valid": group_count > 0 and group_count == valid_count,
+    }
+
+
+def split_diagnostic_message(diagnostics, preferred_matrix):
+    """Return a compact error message for failed auto split inference."""
+
+    selected = []
+
+    for item in diagnostics:
+        if (
+            preferred_matrix is None
+            or item["matrix_name"].lower() == preferred_matrix.lower()
+        ):
+            selected.append("%s: %s" % (item["matrix_name"], item["reason"]))
+
+    if not selected:
+        selected.append("no matching split matrix candidate")
+
+    return "No unambiguous editable split matrix found. " + "; ".join(selected)
+
+
 def split_matrix_design_specs(aircraft, mission=None, split_specs=()):
     """Return generated input specs, design variables, and split groups.
 
