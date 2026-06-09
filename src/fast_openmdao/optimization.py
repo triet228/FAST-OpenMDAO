@@ -183,6 +183,49 @@ class HessianUpdate(om.ExplicitComponent):
         ]
 
 
+class OneBasedHistoryValues(om.ExplicitComponent):
+    """Select FAST mission-history values using fixed MATLAB one-based indices.
+
+    Inputs:
+        history_values: Flattened mission-history vector.
+
+    Outputs:
+        selected_values: Values at the configured one-based indices.
+
+    Assumptions:
+        Indices are fixed OpenMDAO options, matching FAST-Python optimization
+        setup. The mapping is linear, so the analytical derivative is a
+        constant selection matrix.
+    """
+
+    def initialize(self):
+        self.options.declare("history_size", default=1)
+        self.options.declare("indices", default=(1,))
+
+    def setup(self):
+        history_size = self.options["history_size"]
+        selected_size = len(np.asarray(self.options["indices"]).reshape(-1))
+        self.add_input("history_values", val=np.zeros(history_size))
+        self.add_output("selected_values", val=np.zeros(selected_size))
+        self.declare_partials(of="selected_values", wrt="history_values")
+
+    def compute(self, inputs, outputs):
+        values = one_based_history_values_component_values(
+            inputs["history_values"],
+            self.options["indices"],
+        )
+        outputs["selected_values"] = values["selected_values"]
+
+    def compute_partials(self, inputs, partials):
+        values = one_based_history_values_component_values(
+            inputs["history_values"],
+            self.options["indices"],
+        )
+        partials["selected_values", "history_values"] = values[
+            "dselected_values_dhistory_values"
+        ]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -810,6 +853,23 @@ def hessian_update_directional_derivative(data, dhessian, dstep, dgradient_delta
     dsecond = (dhs @ hs.T + hs @ dhs.T) / qterm
     dsecond = dsecond - hs @ hs.T * dqterm / qterm ** 2
     return dhessian + dfirst - dsecond
+
+
+def one_based_history_values_component_values(history_values, indices):
+    """Return fixed-index history values and the selection Jacobian."""
+
+    history = np.asarray(history_values, dtype=float).reshape(-1)
+    zero_based = np.asarray(indices, dtype=int).reshape(-1) - 1
+    selected = history[zero_based]
+    derivative = np.zeros((zero_based.size, history.size))
+
+    for row, column in enumerate(zero_based):
+        derivative[row, column] = 1.0
+
+    return {
+        "selected_values": selected,
+        "dselected_values_dhistory_values": derivative,
+    }
 
 
 def get_slack_values(inputs, num_inequality):

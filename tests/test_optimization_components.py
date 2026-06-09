@@ -18,6 +18,7 @@ from fast_openmdao import (
     GaussianEliminationPivot,
     HessianUpdate,
     MeritFunction,
+    OneBasedHistoryValues,
     OperationalObjective,
     OperationalSplitConstraints,
     PowerManagementObjective,
@@ -31,6 +32,7 @@ from fast_python.optimization import (
     gauss_elim,
     hess_upd,
     merit_function,
+    one_based_history_values,
     operational_objective_value,
     operational_split_constraint_blocks,
     power_management_objective,
@@ -172,6 +174,27 @@ def test_hessian_update_matches_fast_python():
     assert np.allclose(
         problem.get_val("updated_hessian"),
         hess_upd(hessian, step, gradient_delta),
+    )
+
+
+def test_one_based_history_values_match_fast_python():
+    """Check fixed-index mission-history extraction parity with FAST-Python."""
+
+    history_values = np.asarray([10.0, 20.0, 30.0, 40.0, 50.0])
+    indices = np.asarray([1, 3, 5])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "history",
+        OneBasedHistoryValues(history_size=history_values.size, indices=indices),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("history_values", history_values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("selected_values"),
+        one_based_history_values(history_values, indices),
     )
 
 
@@ -443,6 +466,13 @@ def test_optimization_helpers_declare_analytic_partials():
                 "hessian": make_hessian_update_case()[0],
                 "step": make_hessian_update_case()[1],
                 "gradient_delta": make_hessian_update_case()[2],
+            },
+        ),
+        (
+            "history",
+            OneBasedHistoryValues(history_size=5, indices=np.asarray([1, 3, 5])),
+            {
+                "history_values": np.asarray([10.0, 20.0, 30.0, 40.0, 50.0]),
             },
         ),
         (
