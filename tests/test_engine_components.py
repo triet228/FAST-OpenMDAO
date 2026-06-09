@@ -19,6 +19,7 @@ from fast_openmdao import (
     LocalEfficiency,
     LocalReynolds,
     MassFlowParameter,
+    OffDesignNozzleMach,
     StaticDensity,
     StaticPressure,
     StaticTemperature,
@@ -36,6 +37,7 @@ from fast_python.engine import (
     local_reynolds,
     mass_flow_parameter,
     new_gamma,
+    off_design_nozzle,
     ps_pt,
     pt_ps,
     rhos_rhot,
@@ -133,6 +135,20 @@ def test_engine_area_massflow_density_primitives_match_fast_python():
     assert np.isclose(
         mass_flow.get_val("mass_flow_parameter")[0],
         mass_flow_parameter(0.65, 1.4),
+    )
+
+    nozzle = om.Problem()
+    nozzle.model.add_subsystem("nozzle", OffDesignNozzleMach(), promotes=["*"])
+    nozzle.setup()
+    nozzle.set_val("area_1", 1.4, units="m**2")
+    nozzle.set_val("area_2", 1.8, units="m**2")
+    nozzle.set_val("mach_1", 0.65)
+    nozzle.set_val("gamma", 1.4)
+    nozzle.run_model()
+
+    assert np.isclose(
+        nozzle.get_val("mach_2")[0],
+        off_design_nozzle(1.4, 1.8, 0.65, 1.4),
     )
 
     density = om.Problem()
@@ -252,6 +268,7 @@ def test_engine_primitives_declare_analytic_partials():
         ("choked_area", ChokedArea(), {"area": 1.4, "mach": 0.65, "gamma": 1.4}),
         ("flow_area", FlowArea(), {"area_star": 0.9, "mach": 0.65, "gamma": 1.4}),
         ("mass_flow", MassFlowParameter(), {"mach": 0.65, "gamma": 1.4}),
+        ("nozzle", OffDesignNozzleMach(), {"area_1": 1.4, "area_2": 1.8, "mach_1": 0.65, "gamma": 1.4}),
         ("static_density", StaticDensity(), {"total_density": 1.3, "mach": 0.65, "gamma": 1.4}),
         ("cp", AirSpecificHeat(), {"temperature": 300.0}),
         ("cv", AirSpecificHeatVolume(), {"temperature": 300.0}),
@@ -294,4 +311,5 @@ def test_engine_primitives_declare_analytic_partials():
         )
 
         for partial_data in partials[name].values():
-            assert partial_data["abs error"].forward < 1.0e-4
+            tolerance = 1.0e-3 if name == "nozzle" else 1.0e-4
+            assert partial_data["abs error"].forward < tolerance

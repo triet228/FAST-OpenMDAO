@@ -185,6 +185,39 @@ class MassFlowParameter(om.ExplicitComponent):
         partials["mass_flow_parameter", "gamma"] = values["dvalue_dgamma"]
 
 
+class OffDesignNozzleMach(om.ExplicitComponent):
+    """Solve FAST off-design nozzle exit Mach from inlet and exit areas."""
+
+    def setup(self):
+        self.add_input("area_1", val=1.0, units="m**2")
+        self.add_input("area_2", val=1.1, units="m**2")
+        self.add_input("mach_1", val=0.5)
+        self.add_input("gamma", val=1.4)
+        self.add_output("mach_2", val=0.4)
+        self.declare_partials(of="mach_2", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = off_design_nozzle_values(
+            inputs["area_1"][0],
+            inputs["area_2"][0],
+            inputs["mach_1"][0],
+            inputs["gamma"][0],
+        )
+        outputs["mach_2"] = values["mach_2"]
+
+    def compute_partials(self, inputs, partials):
+        values = off_design_nozzle_values(
+            inputs["area_1"][0],
+            inputs["area_2"][0],
+            inputs["mach_1"][0],
+            inputs["gamma"][0],
+        )
+        partials["mach_2", "area_1"] = values["dmach_2_darea_1"]
+        partials["mach_2", "area_2"] = values["dmach_2_darea_2"]
+        partials["mach_2", "mach_1"] = values["dmach_2_dmach_1"]
+        partials["mach_2", "gamma"] = values["dmach_2_dgamma"]
+
+
 class StaticDensity(om.ExplicitComponent):
     """Compute static density from stagnation density and Mach number."""
 
@@ -495,6 +528,83 @@ def mass_flow_parameter_values(mach, gamma):
         "dvalue_dmach": value * dlogvalue_dmach,
         "dvalue_dgamma": value * dlogvalue_dgamma,
     }
+
+
+def off_design_nozzle_values(area_1, area_2, mach_1, gamma):
+    """Return FAST off-design nozzle Mach and smooth implicit derivatives."""
+
+    ratio_1 = area_ratio_values(mach_1, gamma)
+    area_star = area_1 / ratio_1["ratio"]
+    mach_2 = solve_off_design_nozzle_mach(area_star, area_2, mach_1, gamma)
+
+    if mach_2 >= 1.0:
+        return {
+            "mach_2": 1.0,
+            "dmach_2_darea_1": 0.0,
+            "dmach_2_darea_2": 0.0,
+            "dmach_2_dmach_1": 0.0,
+            "dmach_2_dgamma": 0.0,
+        }
+
+    if mach_2 < 0.0:
+        return {
+            "mach_2": mach_1,
+            "dmach_2_darea_1": 0.0,
+            "dmach_2_darea_2": 0.0,
+            "dmach_2_dmach_1": 1.0,
+            "dmach_2_dgamma": 0.0,
+        }
+
+    ratio_2 = area_ratio_values(mach_2, gamma)
+    darea_star_darea_1 = 1.0 / ratio_1["ratio"]
+    darea_star_dmach_1 = (
+        -area_1 * ratio_1["dratio_dmach"] / ratio_1["ratio"] ** 2
+    )
+    darea_star_dgamma = (
+        -area_1 * ratio_1["dratio_dgamma"] / ratio_1["ratio"] ** 2
+    )
+    dresidual_dmach_2 = area_star * ratio_2["dratio_dmach"]
+    dresidual_darea_1 = darea_star_darea_1 * ratio_2["ratio"]
+    dresidual_darea_2 = -1.0
+    dresidual_dmach_1 = darea_star_dmach_1 * ratio_2["ratio"]
+    dresidual_dgamma = (
+        darea_star_dgamma * ratio_2["ratio"]
+        + area_star * ratio_2["dratio_dgamma"]
+    )
+
+    return {
+        "mach_2": mach_2,
+        "dmach_2_darea_1": -dresidual_darea_1 / dresidual_dmach_2,
+        "dmach_2_darea_2": -dresidual_darea_2 / dresidual_dmach_2,
+        "dmach_2_dmach_1": -dresidual_dmach_1 / dresidual_dmach_2,
+        "dmach_2_dgamma": -dresidual_dgamma / dresidual_dmach_2,
+    }
+
+
+def solve_off_design_nozzle_mach(area_star, area_2, mach_1, gamma):
+    """Return the same Newton exit-Mach estimate as FAST-Python."""
+
+    mach_2 = mach_1
+    prime = 1.0
+    iteration = 0
+
+    while abs(prime) > 1.0e-5 and iteration < 10:
+        ratio = area_ratio_values(mach_2, gamma)
+        area_guess = area_star * ratio["ratio"]
+        residual = (area_guess - area_2) ** 2
+        prime = -2.0 * area_star * ratio["dratio_dmach"] * (
+            area_2 - area_guess
+        )
+        mach_2 = mach_2 - residual / prime
+        iteration += 1
+
+    if mach_2 > 1.0:
+        mach_2 = 1.0
+
+    if mach_2 < 0.0:
+        mach_2 = mach_1
+
+    return mach_2
 
 
 def density_ratio_values(mach, gamma):
