@@ -23,11 +23,16 @@ SUPPORT_STATUSES = {
 
 COVERAGE_ALIASES = {
     "aea_architecture_matrices": {"AEACustomArchitecture"},
+    "battery_specific_energy": {"BatterySpecificEnergyProjection"},
     "bms_cost_fraction": {"BMSCostFraction"},
+    "electric_motor_specific_power": {"ElectricMotorSpecificPowerProjection"},
+    "kpp_projection": {"KPPProjection"},
     "lm100j_hybrid_architecture": {"LM100JHybridArchitecture"},
     "lm100j_hybrid_oper_dwn": {"LM100JHybridOperationMatrices"},
     "lm100j_hybrid_oper_ups": {"LM100JHybridOperationMatrices"},
+    "regression_airframe_weight": {"TurbofanAirframeWeight"},
     "split_scalar": {"SplitScalar"},
+    "turboprop_airframe_fit": {"TurbopropAirframeWeight"},
     "zero_segment_splits": {"ZeroSegmentSplits"},
 }
 
