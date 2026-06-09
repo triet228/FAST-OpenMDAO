@@ -103,6 +103,8 @@ derivative-native FAST equation components:
   weight with analytical partial derivatives.
 - Battery fixed-shape vector and history-matrix normalization helpers with
   analytical partial derivatives.
+- Battery fixed-shape scalar/list restoration helper with analytical partial
+  derivatives.
 - Battery requested-power/time broadcast and initial-SOC normalization helpers
   with analytical partial derivatives for fixed shapes.
 - Analysis source-weight vectorization/restoration plus analysis and OEW
@@ -161,7 +163,8 @@ The public `fast_openmdao` package currently exports:
   `BatteryCurrent`, `BatteryHistoryColumnMatrix`, `BatteryHistoryMatrix`,
   `BatteryInitialSOC`, `BatteryNonzeroMean`, `BatteryPowerHistory`,
   `BatteryPowerStep`, `BatteryPowerTimeBroadcast`, `BatteryVector`,
-  `DetailedBatterySizing`, `BatteryWeightFromEnergy`
+  `BatteryScalarOrListRestore`, `DetailedBatterySizing`,
+  `BatteryWeightFromEnergy`
 - Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
   `FAR25EngineGradient`, `JetAEOClimbConstraint`, `JetApproachConstraint`,
   `JetCeilingConstraint`, `JetCruiseConstraint`, `JetFAR25NamedClimbConstraint`,

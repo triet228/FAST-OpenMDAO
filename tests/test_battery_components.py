@@ -22,6 +22,7 @@ from fast_openmdao import (
     BatteryPowerHistory,
     BatteryPowerStep,
     BatteryPowerTimeBroadcast,
+    BatteryScalarOrListRestore,
     BatteryVector,
     BatteryWeightFromEnergy,
 )
@@ -37,6 +38,7 @@ from fast_python.battery import (
     nonzero_mean,
     prepare_initial_soc,
     prepare_power_time,
+    restore_scalar_or_list,
     resize_battery,
     solve_battery_current,
 )
@@ -211,6 +213,41 @@ def test_battery_shape_normalizers_match_fast_python():
     assert np.allclose(
         history_problem.get_val("history_matrix"),
         history_matrix(history_values, 3),
+    )
+
+
+def test_battery_scalar_or_list_restore_matches_fast_python():
+    """Check FAST battery scalar/list restoration parity."""
+
+    scalar_problem = om.Problem()
+    scalar_problem.model.add_subsystem(
+        "restore",
+        BatteryScalarOrListRestore(value_size=1),
+        promotes=["*"],
+    )
+    scalar_problem.setup()
+    scalar_problem.set_val("values", [11.0])
+    scalar_problem.run_model()
+
+    assert np.isclose(
+        scalar_problem.get_val("restored_values")[0],
+        restore_scalar_or_list([11.0]),
+    )
+
+    vector = np.asarray([11.0, 3.0, 4.0])
+    vector_problem = om.Problem()
+    vector_problem.model.add_subsystem(
+        "restore",
+        BatteryScalarOrListRestore(value_size=3),
+        promotes=["*"],
+    )
+    vector_problem.setup()
+    vector_problem.set_val("values", vector)
+    vector_problem.run_model()
+
+    assert np.allclose(
+        vector_problem.get_val("restored_values"),
+        restore_scalar_or_list(vector),
     )
 
 
@@ -465,6 +502,11 @@ def test_battery_primitives_declare_analytic_partials():
             "battery_history_matrix",
             BatteryHistoryMatrix(input_shape=(3,), columns=3),
             {"values": np.asarray([8.0, 9.0, 10.0])},
+        ),
+        (
+            "battery_restore",
+            BatteryScalarOrListRestore(value_size=3),
+            {"values": np.asarray([11.0, 3.0, 4.0])},
         ),
         (
             "power_time_broadcast_power",

@@ -25,6 +25,7 @@ from fast_openmdao.battery import (
     BatteryPowerHistory,
     BatteryPowerStep,
     BatteryPowerTimeBroadcast,
+    BatteryScalarOrListRestore,
     BatteryVector,
     BatteryWeightFromEnergy,
 )
@@ -214,6 +215,7 @@ __all__ = [
     "BatteryPowerHistory",
     "BatteryPowerStep",
     "BatteryPowerTimeBroadcast",
+    "BatteryScalarOrListRestore",
     "BatteryVector",
     "BatteryWeightFromEnergy",
     "BMSCostFraction",
