@@ -23,6 +23,7 @@ SUPPORT_STATUSES = {
 
 COVERAGE_ALIASES = {
     "aea_architecture_matrices": {"AEACustomArchitecture"},
+    "bms_cost_fraction": {"BMSCostFraction"},
     "lm100j_hybrid_architecture": {"LM100JHybridArchitecture"},
     "lm100j_hybrid_oper_dwn": {"LM100JHybridOperationMatrices"},
     "lm100j_hybrid_oper_ups": {"LM100JHybridOperationMatrices"},
