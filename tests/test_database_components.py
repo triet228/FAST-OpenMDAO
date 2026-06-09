@@ -10,7 +10,9 @@ import numpy as np
 import openmdao.api as om
 
 from fast_openmdao import (
+    DatabaseFanThrustNormalization,
     DatabaseGeometryLoads,
+    DatabasePropPowerNormalization,
     DatabaseWeightFractions,
     MacLiftDragEstimate,
     TurbopropCruiseLiftDragEstimate,
@@ -276,6 +278,106 @@ def test_database_geometry_loads_declares_analytic_partials():
         )
 
 
+def test_database_fan_thrust_normalization_matches_fast_python_calc_fan_vals():
+    """Check FAST turbofan database thrust normalization parity."""
+
+    plane = make_fan_plane()
+    expected = calc_fan_vals(plane, "Vals")["Specs"]["Propulsion"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "thrust",
+        DatabaseFanThrustNormalization(
+            num_engines=plane["Specs"]["Propulsion"]["NumEngines"],
+            thrust_source="engine",
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_database_fan_thrust_values(problem, plane)
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("thrust_loading_sls")[0],
+        expected["T_W"]["SLS"],
+    )
+    assert np.isclose(problem.get_val("thrust_sls", units="N")[0], expected["Thrust"]["SLS"])
+    assert np.isclose(problem.get_val("thrust_max", units="N")[0], expected["Thrust"]["Max"])
+    assert np.isclose(
+        problem.get_val("thrust_cruise", units="N")[0],
+        expected["Thrust"]["Crs"],
+    )
+
+
+def test_database_prop_power_normalization_matches_fast_python_calc_prop_vals():
+    """Check FAST turboprop database power normalization parity."""
+
+    plane = make_prop_plane()
+    expected = calc_prop_vals(plane, "Vals")["Specs"]["Power"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "power",
+        DatabasePropPowerNormalization(
+            num_engines=plane["Specs"]["Propulsion"]["NumEngines"],
+            sls_power_source="engine",
+            continuous_power_source="engine_equivalent",
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_database_prop_power_values(problem, plane)
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("sea_level_power", units="W")[0], expected["SLS"])
+    assert np.isclose(problem.get_val("continuous_power", units="W")[0], expected["Cont"])
+    assert np.isclose(problem.get_val("climb_power_total", units="W")[0], expected["Clb"])
+    assert np.isclose(problem.get_val("cruise_power_total", units="W")[0], expected["Crs"])
+    assert np.isclose(
+        problem.get_val("sea_level_power_loading", units="kW/kg")[0],
+        expected["P_W"]["SLS"],
+    )
+
+
+def test_database_propulsion_normalization_declares_analytic_partials():
+    """Check database propulsion-normalization derivatives."""
+
+    fan_plane = make_fan_plane()
+    prop_plane = make_prop_plane()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "thrust",
+        DatabaseFanThrustNormalization(
+            num_engines=fan_plane["Specs"]["Propulsion"]["NumEngines"],
+            thrust_source="engine",
+        ),
+    )
+    problem.model.add_subsystem(
+        "power",
+        DatabasePropPowerNormalization(
+            num_engines=prop_plane["Specs"]["Propulsion"]["NumEngines"],
+            sls_power_source="engine",
+            continuous_power_source="engine_equivalent",
+        ),
+    )
+    problem.setup()
+    set_database_fan_thrust_values(problem, fan_plane, prefix="thrust.")
+    set_database_prop_power_values(problem, prop_plane, prefix="power.")
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-4,
+    )
+
+    for component_name in ("thrust", "power"):
+        for partial_data in partials[component_name].values():
+            assert (
+                partial_data["abs error"].forward < 1.0e-6
+                or partial_data["rel error"].forward < 1.0e-6
+            )
+
+
 def set_database_weight_fraction_values(problem, plane):
     """Set OpenMDAO inputs from the shared turboprop database fixture."""
 
@@ -315,6 +417,68 @@ def set_database_geometry_load_values(problem, plane, max_payload):
     problem.set_val("wing_area", specs["Aero"]["S"], units="m**2")
     problem.set_val("tip_chord", specs["Aero"]["TipChord"], units="m")
     problem.set_val("root_chord", specs["Aero"]["RootChord"], units="m")
+
+
+def set_database_fan_thrust_values(problem, plane, prefix=""):
+    """Set OpenMDAO inputs for database fan thrust normalization."""
+
+    specs = plane["Specs"]
+    engine = specs["Propulsion"]["Engine"]
+    thrust = specs["Propulsion"]["Thrust"]
+    problem.set_val(f"{prefix}mtow", specs["Weight"]["MTOW"], units="kg")
+    problem.set_val(f"{prefix}engine_thrust_sls", engine["Thrust_SLS"], units="N")
+    problem.set_val(f"{prefix}engine_thrust_max", engine["Thrust_Max"], units="N")
+    problem.set_val(f"{prefix}engine_thrust_cruise", engine["Thrust_Crs"], units="N")
+    problem.set_val(f"{prefix}specified_thrust_sls", 0.0, units="N")
+    problem.set_val(f"{prefix}specified_thrust_max", 0.0, units="N")
+
+    if not np.isnan(thrust["SLS"]):
+        problem.set_val(f"{prefix}specified_thrust_sls", thrust["SLS"], units="N")
+
+    if not np.isnan(thrust["Max"]):
+        problem.set_val(f"{prefix}specified_thrust_max", thrust["Max"], units="N")
+
+
+def set_database_prop_power_values(problem, plane, prefix=""):
+    """Set OpenMDAO inputs for database prop power normalization."""
+
+    specs = plane["Specs"]
+    engine = specs["Propulsion"]["Engine"]
+    power = specs["Power"]
+    problem.set_val(f"{prefix}mtow", specs["Weight"]["MTOW"], units="kg")
+    problem.set_val(f"{prefix}engine_power_sls", engine["Power_SLS"], units="kW")
+    problem.set_val(
+        f"{prefix}engine_power_sls_equivalent",
+        0.0,
+        units="kW",
+    )
+
+    if not np.isnan(engine["Power_SLS_Eq"]):
+        problem.set_val(
+            f"{prefix}engine_power_sls_equivalent",
+            engine["Power_SLS_Eq"],
+            units="kW",
+        )
+
+    problem.set_val(
+        f"{prefix}engine_power_continuous_equivalent",
+        engine["Power_Cont_Eq"],
+        units="kW",
+    )
+    problem.set_val(f"{prefix}specified_power_sls", 0.0, units="kW")
+    problem.set_val(f"{prefix}specified_power_continuous", 0.0, units="kW")
+    problem.set_val(f"{prefix}climb_power", power["Clb"], units="kW")
+    problem.set_val(f"{prefix}cruise_power", power["Crs"], units="kW")
+
+    if not np.isnan(power["SLS"]):
+        problem.set_val(f"{prefix}specified_power_sls", power["SLS"], units="kW")
+
+    if not np.isnan(power["Cont"]):
+        problem.set_val(
+            f"{prefix}specified_power_continuous",
+            power["Cont"],
+            units="kW",
+        )
 
 
 def make_fan_plane():

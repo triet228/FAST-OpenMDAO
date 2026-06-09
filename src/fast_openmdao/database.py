@@ -259,6 +259,124 @@ class DatabaseGeometryLoads(om.ExplicitComponent):
                 ]
 
 
+class DatabaseFanThrustNormalization(om.ExplicitComponent):
+    """Compute FAST turbofan database thrust totals and thrust loading."""
+
+    def initialize(self):
+        self.options.declare("num_engines", default=1)
+        self.options.declare("thrust_source", default="engine")
+
+    def setup(self):
+        self.add_input("mtow", val=70000.0, units="kg")
+        self.add_input("engine_thrust_sls", val=100000.0, units="N")
+        self.add_input("engine_thrust_max", val=120000.0, units="N")
+        self.add_input("engine_thrust_cruise", val=60000.0, units="N")
+        self.add_input("specified_thrust_sls", val=100000.0, units="N")
+        self.add_input("specified_thrust_max", val=120000.0, units="N")
+        self.add_output("thrust_loading_sls", val=0.3)
+        self.add_output("thrust_sls", val=200000.0, units="N")
+        self.add_output("thrust_max", val=240000.0, units="N")
+        self.add_output("thrust_cruise", val=120000.0, units="N")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = database_fan_thrust_normalization_values(
+            inputs["mtow"][0],
+            inputs["engine_thrust_sls"][0],
+            inputs["engine_thrust_max"][0],
+            inputs["engine_thrust_cruise"][0],
+            inputs["specified_thrust_sls"][0],
+            inputs["specified_thrust_max"][0],
+            self.options["num_engines"],
+            self.options["thrust_source"],
+        )
+
+        for name in database_fan_thrust_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = database_fan_thrust_normalization_values(
+            inputs["mtow"][0],
+            inputs["engine_thrust_sls"][0],
+            inputs["engine_thrust_max"][0],
+            inputs["engine_thrust_cruise"][0],
+            inputs["specified_thrust_sls"][0],
+            inputs["specified_thrust_max"][0],
+            self.options["num_engines"],
+            self.options["thrust_source"],
+        )
+
+        for output_name in database_fan_thrust_output_names():
+            for input_name in database_fan_thrust_input_names():
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
+class DatabasePropPowerNormalization(om.ExplicitComponent):
+    """Compute FAST turboprop database power totals and SLS power loading."""
+
+    def initialize(self):
+        self.options.declare("num_engines", default=1)
+        self.options.declare("sls_power_source", default="engine")
+        self.options.declare("continuous_power_source", default="engine_equivalent")
+
+    def setup(self):
+        self.add_input("mtow", val=18500.0, units="kg")
+        self.add_input("engine_power_sls", val=1200.0, units="kW")
+        self.add_input("engine_power_sls_equivalent", val=1200.0, units="kW")
+        self.add_input("engine_power_continuous_equivalent", val=1000.0, units="kW")
+        self.add_input("specified_power_sls", val=1200.0, units="kW")
+        self.add_input("specified_power_continuous", val=1000.0, units="kW")
+        self.add_input("climb_power", val=900.0, units="kW")
+        self.add_input("cruise_power", val=800.0, units="kW")
+        self.add_output("sea_level_power", val=2400000.0, units="W")
+        self.add_output("continuous_power", val=2000000.0, units="W")
+        self.add_output("climb_power_total", val=1800000.0, units="W")
+        self.add_output("cruise_power_total", val=1600000.0, units="W")
+        self.add_output("sea_level_power_loading", val=0.13, units="kW/kg")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = database_prop_power_normalization_values(
+            inputs["mtow"][0],
+            inputs["engine_power_sls"][0],
+            inputs["engine_power_sls_equivalent"][0],
+            inputs["engine_power_continuous_equivalent"][0],
+            inputs["specified_power_sls"][0],
+            inputs["specified_power_continuous"][0],
+            inputs["climb_power"][0],
+            inputs["cruise_power"][0],
+            self.options["num_engines"],
+            self.options["sls_power_source"],
+            self.options["continuous_power_source"],
+        )
+
+        for name in database_prop_power_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = database_prop_power_normalization_values(
+            inputs["mtow"][0],
+            inputs["engine_power_sls"][0],
+            inputs["engine_power_sls_equivalent"][0],
+            inputs["engine_power_continuous_equivalent"][0],
+            inputs["specified_power_sls"][0],
+            inputs["specified_power_continuous"][0],
+            inputs["climb_power"][0],
+            inputs["cruise_power"][0],
+            self.options["num_engines"],
+            self.options["sls_power_source"],
+            self.options["continuous_power_source"],
+        )
+
+        for output_name in database_prop_power_output_names():
+            for input_name in database_prop_power_input_names():
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
 def mac_lift_drag_values(aspect_ratio, reynolds):
     """Return FAST MAC L/D estimate and analytical derivatives."""
 
@@ -483,4 +601,238 @@ def database_geometry_load_values(
     )
     values["dmzfw_mtow_dmzfw"] = 1.0 / mtow
     values["dmzfw_mtow_dmtow"] = -mzfw / mtow ** 2
+    return values
+
+
+def database_fan_thrust_input_names():
+    """Return turbofan thrust-normalization input names."""
+
+    return [
+        "mtow",
+        "engine_thrust_sls",
+        "engine_thrust_max",
+        "engine_thrust_cruise",
+        "specified_thrust_sls",
+        "specified_thrust_max",
+    ]
+
+
+def database_fan_thrust_output_names():
+    """Return turbofan thrust-normalization output names."""
+
+    return [
+        "thrust_loading_sls",
+        "thrust_sls",
+        "thrust_max",
+        "thrust_cruise",
+    ]
+
+
+def database_fan_thrust_normalization_values(
+    mtow,
+    engine_thrust_sls,
+    engine_thrust_max,
+    engine_thrust_cruise,
+    specified_thrust_sls,
+    specified_thrust_max,
+    num_engines,
+    thrust_source,
+):
+    """Return FAST turbofan thrust totals/loading and derivatives."""
+
+    mtow = float(mtow)
+    engine_thrust_sls = float(engine_thrust_sls)
+    engine_thrust_max = float(engine_thrust_max)
+    engine_thrust_cruise = float(engine_thrust_cruise)
+    specified_thrust_sls = float(specified_thrust_sls)
+    specified_thrust_max = float(specified_thrust_max)
+    num_engines = float(num_engines)
+
+    if thrust_source == "engine":
+        loading_reference = engine_thrust_max
+        thrust_sls_reference = engine_thrust_sls
+        thrust_max_reference = engine_thrust_max
+        dloading_reference_dengine_thrust_max = 1.0
+        dloading_reference_dspecified_thrust_max = 0.0
+        dsls_reference_dengine_thrust_sls = 1.0
+        dsls_reference_dspecified_thrust_sls = 0.0
+        dmax_reference_dengine_thrust_max = 1.0
+        dmax_reference_dspecified_thrust_max = 0.0
+    elif thrust_source == "specified":
+        loading_reference = specified_thrust_max
+        thrust_sls_reference = specified_thrust_sls
+        thrust_max_reference = specified_thrust_max
+        dloading_reference_dengine_thrust_max = 0.0
+        dloading_reference_dspecified_thrust_max = 1.0
+        dsls_reference_dengine_thrust_sls = 0.0
+        dsls_reference_dspecified_thrust_sls = 1.0
+        dmax_reference_dengine_thrust_max = 0.0
+        dmax_reference_dspecified_thrust_max = 1.0
+    else:
+        raise ValueError("thrust_source must be 'engine' or 'specified'")
+
+    thrust_loading_sls = loading_reference * num_engines / mtow / 9.81
+    values = {
+        "thrust_loading_sls": thrust_loading_sls,
+        "thrust_sls": thrust_sls_reference * num_engines,
+        "thrust_max": thrust_max_reference * num_engines,
+        "thrust_cruise": engine_thrust_cruise * num_engines,
+    }
+
+    for output_name in database_fan_thrust_output_names():
+        for input_name in database_fan_thrust_input_names():
+            values[f"d{output_name}_d{input_name}"] = 0.0
+
+    loading_scale = num_engines / mtow / 9.81
+    values["dthrust_loading_sls_dmtow"] = -thrust_loading_sls / mtow
+    values["dthrust_loading_sls_dengine_thrust_max"] = (
+        dloading_reference_dengine_thrust_max * loading_scale
+    )
+    values["dthrust_loading_sls_dspecified_thrust_max"] = (
+        dloading_reference_dspecified_thrust_max * loading_scale
+    )
+    values["dthrust_sls_dengine_thrust_sls"] = (
+        dsls_reference_dengine_thrust_sls * num_engines
+    )
+    values["dthrust_sls_dspecified_thrust_sls"] = (
+        dsls_reference_dspecified_thrust_sls * num_engines
+    )
+    values["dthrust_max_dengine_thrust_max"] = (
+        dmax_reference_dengine_thrust_max * num_engines
+    )
+    values["dthrust_max_dspecified_thrust_max"] = (
+        dmax_reference_dspecified_thrust_max * num_engines
+    )
+    values["dthrust_cruise_dengine_thrust_cruise"] = num_engines
+    return values
+
+
+def database_prop_power_input_names():
+    """Return turboprop power-normalization input names."""
+
+    return [
+        "mtow",
+        "engine_power_sls",
+        "engine_power_sls_equivalent",
+        "engine_power_continuous_equivalent",
+        "specified_power_sls",
+        "specified_power_continuous",
+        "climb_power",
+        "cruise_power",
+    ]
+
+
+def database_prop_power_output_names():
+    """Return turboprop power-normalization output names."""
+
+    return [
+        "sea_level_power",
+        "continuous_power",
+        "climb_power_total",
+        "cruise_power_total",
+        "sea_level_power_loading",
+    ]
+
+
+def database_prop_power_normalization_values(
+    mtow,
+    engine_power_sls,
+    engine_power_sls_equivalent,
+    engine_power_continuous_equivalent,
+    specified_power_sls,
+    specified_power_continuous,
+    climb_power,
+    cruise_power,
+    num_engines,
+    sls_power_source,
+    continuous_power_source,
+):
+    """Return FAST turboprop power totals/loading and derivatives."""
+
+    mtow = float(mtow)
+    engine_power_sls = float(engine_power_sls)
+    engine_power_sls_equivalent = float(engine_power_sls_equivalent)
+    engine_power_continuous_equivalent = float(engine_power_continuous_equivalent)
+    specified_power_sls = float(specified_power_sls)
+    specified_power_continuous = float(specified_power_continuous)
+    climb_power = float(climb_power)
+    cruise_power = float(cruise_power)
+    num_engines = float(num_engines)
+
+    if sls_power_source == "engine":
+        sls_reference = engine_power_sls
+        dsls_dengine_power_sls = 1.0
+        dsls_dengine_power_sls_equivalent = 0.0
+        dsls_dspecified_power_sls = 0.0
+    elif sls_power_source == "engine_equivalent":
+        sls_reference = engine_power_sls_equivalent
+        dsls_dengine_power_sls = 0.0
+        dsls_dengine_power_sls_equivalent = 1.0
+        dsls_dspecified_power_sls = 0.0
+    elif sls_power_source == "specified":
+        sls_reference = specified_power_sls
+        dsls_dengine_power_sls = 0.0
+        dsls_dengine_power_sls_equivalent = 0.0
+        dsls_dspecified_power_sls = 1.0
+    else:
+        raise ValueError(
+            "sls_power_source must be 'engine', 'engine_equivalent', or 'specified'"
+        )
+
+    if continuous_power_source == "engine_equivalent":
+        continuous_reference = engine_power_continuous_equivalent
+        dcont_dengine_power_continuous_equivalent = 1.0
+        dcont_dspecified_power_continuous = 0.0
+    elif continuous_power_source == "specified":
+        continuous_reference = specified_power_continuous
+        dcont_dengine_power_continuous_equivalent = 0.0
+        dcont_dspecified_power_continuous = 1.0
+    else:
+        raise ValueError(
+            "continuous_power_source must be 'engine_equivalent' or 'specified'"
+        )
+
+    total_scale = 1000.0 * num_engines
+    sea_level_power = sls_reference * total_scale
+    values = {
+        "sea_level_power": sea_level_power,
+        "continuous_power": continuous_reference * total_scale,
+        "climb_power_total": climb_power * total_scale,
+        "cruise_power_total": cruise_power * total_scale,
+        "sea_level_power_loading": sea_level_power / mtow / 1000.0,
+    }
+
+    for output_name in database_prop_power_output_names():
+        for input_name in database_prop_power_input_names():
+            values[f"d{output_name}_d{input_name}"] = 0.0
+
+    values["dsea_level_power_dengine_power_sls"] = (
+        dsls_dengine_power_sls * total_scale
+    )
+    values["dsea_level_power_dengine_power_sls_equivalent"] = (
+        dsls_dengine_power_sls_equivalent * total_scale
+    )
+    values["dsea_level_power_dspecified_power_sls"] = (
+        dsls_dspecified_power_sls * total_scale
+    )
+    values["dcontinuous_power_dengine_power_continuous_equivalent"] = (
+        dcont_dengine_power_continuous_equivalent * total_scale
+    )
+    values["dcontinuous_power_dspecified_power_continuous"] = (
+        dcont_dspecified_power_continuous * total_scale
+    )
+    values["dclimb_power_total_dclimb_power"] = total_scale
+    values["dcruise_power_total_dcruise_power"] = total_scale
+    values["dsea_level_power_loading_dmtow"] = (
+        -values["sea_level_power_loading"] / mtow
+    )
+    values["dsea_level_power_loading_dengine_power_sls"] = (
+        dsls_dengine_power_sls * num_engines / mtow
+    )
+    values["dsea_level_power_loading_dengine_power_sls_equivalent"] = (
+        dsls_dengine_power_sls_equivalent * num_engines / mtow
+    )
+    values["dsea_level_power_loading_dspecified_power_sls"] = (
+        dsls_dspecified_power_sls * num_engines / mtow
+    )
     return values
