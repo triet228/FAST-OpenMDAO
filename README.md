@@ -27,6 +27,8 @@ derivative-native FAST equation components:
 - Engine primitives for isentropic pressure, temperature, area-Mach,
   mass-flow parameter, and static-density equations with analytical partial
   derivatives.
+- Engine specific-heat components for air Cp, air Cv, integrated air heat, and
+  integrated Jet-A heat with analytical partial derivatives.
 - Propulsion scalar primitives for engine lapse, safe component weight, and
   efficiency selection with analytical partial derivatives.
 - Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
@@ -196,7 +198,8 @@ fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40
    analytical partial derivatives. Done.
 10. Convert scalar mission flight-condition primitive with analytical partial
    derivatives. Done.
-11. Convert scalar engine primitive equations with analytical partial
+11. Convert scalar engine primitive equations and fitted specific-heat
+   equations with analytical partial
    derivatives. Done.
 12. Convert scalar propulsion primitive equations with analytical partial
    derivatives. Done.

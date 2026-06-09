@@ -207,6 +207,130 @@ class StaticDensity(om.ExplicitComponent):
         partials["static_density", "gamma"] = total_density * values["dratio_dgamma"]
 
 
+class AirSpecificHeat(om.ExplicitComponent):
+    """Compute FAST fitted air Cp at one temperature."""
+
+    def setup(self):
+        self.add_input("temperature", val=300.0, units="K")
+        self.add_output("cp_air", val=1007.0)
+        self.declare_partials(of="cp_air", wrt="temperature")
+
+    def compute(self, inputs, outputs):
+        outputs["cp_air"] = sigmoid_heat_value(
+            inputs["temperature"][0],
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+
+    def compute_partials(self, inputs, partials):
+        partials["cp_air", "temperature"] = sigmoid_heat_derivative(
+            inputs["temperature"][0],
+            233.0,
+            1.0 / 210.0,
+            875.0,
+        )
+
+
+class AirSpecificHeatVolume(om.ExplicitComponent):
+    """Compute FAST fitted air Cv at one temperature."""
+
+    def setup(self):
+        self.add_input("temperature", val=300.0, units="K")
+        self.add_output("cv_air", val=720.0)
+        self.declare_partials(of="cv_air", wrt="temperature")
+
+    def compute(self, inputs, outputs):
+        outputs["cv_air"] = sigmoid_heat_value(
+            inputs["temperature"][0],
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0 - 287.0,
+        )
+
+    def compute_partials(self, inputs, partials):
+        partials["cv_air", "temperature"] = sigmoid_heat_derivative(
+            inputs["temperature"][0],
+            233.0,
+            1.0 / 210.0,
+            875.0,
+        )
+
+
+class AirIntegratedHeat(om.ExplicitComponent):
+    """Compute FAST integrated air specific heat between two temperatures."""
+
+    def setup(self):
+        self.add_input("temperature_low", val=300.0, units="K")
+        self.add_input("temperature_high", val=1200.0, units="K")
+        self.add_output("integrated_cp_air", val=1.0e6)
+        self.declare_partials(of="integrated_cp_air", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["integrated_cp_air"] = integrated_heat_value(
+            inputs["temperature_low"][0],
+            inputs["temperature_high"][0],
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+
+    def compute_partials(self, inputs, partials):
+        partials["integrated_cp_air", "temperature_low"] = -sigmoid_heat_value(
+            inputs["temperature_low"][0],
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+        partials["integrated_cp_air", "temperature_high"] = sigmoid_heat_value(
+            inputs["temperature_high"][0],
+            233.0,
+            1.0 / 210.0,
+            875.0,
+            993.0,
+        )
+
+
+class JetAIntegratedHeat(om.ExplicitComponent):
+    """Compute FAST integrated Jet-A specific heat between two temperatures."""
+
+    def setup(self):
+        self.add_input("temperature_low", val=300.0, units="K")
+        self.add_input("temperature_high", val=1200.0, units="K")
+        self.add_output("integrated_cp_jeta", val=2.7e6)
+        self.declare_partials(of="integrated_cp_jeta", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["integrated_cp_jeta"] = integrated_heat_value(
+            inputs["temperature_low"][0],
+            inputs["temperature_high"][0],
+            4600.0,
+            1.0 / 410.0,
+            500.0,
+            100.0,
+        )
+
+    def compute_partials(self, inputs, partials):
+        partials["integrated_cp_jeta", "temperature_low"] = -sigmoid_heat_value(
+            inputs["temperature_low"][0],
+            4600.0,
+            1.0 / 410.0,
+            500.0,
+            100.0,
+        )
+        partials["integrated_cp_jeta", "temperature_high"] = sigmoid_heat_value(
+            inputs["temperature_high"][0],
+            4600.0,
+            1.0 / 410.0,
+            500.0,
+            100.0,
+        )
+
+
 def isentropic_q(mach, gamma):
     """Return FAST isentropic ``1 + (gamma - 1) / 2 * mach ** 2`` term."""
 
@@ -289,3 +413,33 @@ def density_ratio_values(mach, gamma):
         "dratio_dmach": ratio * dlogratio_dmach,
         "dratio_dgamma": ratio * dlogratio_dgamma,
     }
+
+
+def sigmoid_heat_value(temperature, length, rate, midpoint, offset):
+    """Return FAST fitted S-curve heat capacity."""
+
+    return length / (1.0 + math.exp(-rate * (temperature - midpoint))) + offset
+
+
+def sigmoid_heat_derivative(temperature, length, rate, midpoint):
+    """Return temperature derivative of FAST fitted heat capacity."""
+
+    exponential = math.exp(-rate * (temperature - midpoint))
+    return length * rate * exponential / (1.0 + exponential) ** 2
+
+
+def integrated_heat_value(t_low, t_high, length, rate, midpoint, offset):
+    """Return FAST integrated heat from the fitted antiderivative."""
+
+    return (
+        heat_antiderivative(t_high, length, rate, midpoint, offset)
+        - heat_antiderivative(t_low, length, rate, midpoint, offset)
+    )
+
+
+def heat_antiderivative(temperature, length, rate, midpoint, offset):
+    """Return FAST fitted heat-capacity antiderivative."""
+
+    return temperature * (offset + length) + length * math.log1p(
+        math.exp(rate * (midpoint - temperature))
+    ) / rate

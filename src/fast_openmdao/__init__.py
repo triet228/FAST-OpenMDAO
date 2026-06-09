@@ -18,8 +18,12 @@ from fast_openmdao.constraint import (
 )
 from fast_openmdao.cost import BatteryReplacementCost
 from fast_openmdao.engine import (
+    AirIntegratedHeat,
+    AirSpecificHeat,
+    AirSpecificHeatVolume,
     ChokedArea,
     FlowArea,
+    JetAIntegratedHeat,
     MassFlowParameter,
     StaticDensity,
     StaticPressure,
@@ -45,6 +49,9 @@ from fast_openmdao.units import UnitConversion
 __version__ = "0.1.0"
 
 __all__ = [
+    "AirIntegratedHeat",
+    "AirSpecificHeat",
+    "AirSpecificHeatVolume",
     "BatteryReplacementCost",
     "BatterySpecificEnergyProjection",
     "AvailableCellCapacity",
@@ -60,6 +67,7 @@ __all__ = [
     "FlowArea",
     "Gravity",
     "JetApproachConstraint",
+    "JetAIntegratedHeat",
     "JetCruiseConstraint",
     "JetLandingFieldLengthConstraint",
     "JetTakeoffFieldLengthConstraint",

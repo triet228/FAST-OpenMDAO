@@ -10,8 +10,12 @@ import numpy as np
 import openmdao.api as om
 
 from fast_openmdao import (
+    AirIntegratedHeat,
+    AirSpecificHeat,
+    AirSpecificHeatVolume,
     ChokedArea,
     FlowArea,
+    JetAIntegratedHeat,
     MassFlowParameter,
     StaticDensity,
     StaticPressure,
@@ -22,6 +26,9 @@ from fast_openmdao import (
 from fast_python.engine import (
     a_astar,
     astar_a,
+    cp_air,
+    cp_jeta,
+    cv_air,
     mass_flow_parameter,
     ps_pt,
     pt_ps,
@@ -136,6 +143,44 @@ def test_engine_area_massflow_density_primitives_match_fast_python():
     )
 
 
+def test_engine_specific_heat_components_match_fast_python():
+    """Check FAST fitted specific heat component parity."""
+
+    cp_problem = om.Problem()
+    cp_problem.model.add_subsystem("cp", AirSpecificHeat(), promotes=["*"])
+    cp_problem.setup()
+    cp_problem.set_val("temperature", 300.0, units="K")
+    cp_problem.run_model()
+
+    assert np.isclose(cp_problem.get_val("cp_air")[0], cp_air(300.0))
+
+    cv_problem = om.Problem()
+    cv_problem.model.add_subsystem("cv", AirSpecificHeatVolume(), promotes=["*"])
+    cv_problem.setup()
+    cv_problem.set_val("temperature", 300.0, units="K")
+    cv_problem.run_model()
+
+    assert np.isclose(cv_problem.get_val("cv_air")[0], cv_air(300.0))
+
+    air_heat = om.Problem()
+    air_heat.model.add_subsystem("heat", AirIntegratedHeat(), promotes=["*"])
+    air_heat.setup()
+    air_heat.set_val("temperature_low", 300.0, units="K")
+    air_heat.set_val("temperature_high", 1200.0, units="K")
+    air_heat.run_model()
+
+    assert np.isclose(air_heat.get_val("integrated_cp_air")[0], cp_air(300.0, 1200.0))
+
+    jeta_heat = om.Problem()
+    jeta_heat.model.add_subsystem("heat", JetAIntegratedHeat(), promotes=["*"])
+    jeta_heat.setup()
+    jeta_heat.set_val("temperature_low", 300.0, units="K")
+    jeta_heat.set_val("temperature_high", 1200.0, units="K")
+    jeta_heat.run_model()
+
+    assert np.isclose(jeta_heat.get_val("integrated_cp_jeta")[0], cp_jeta(300.0, 1200.0))
+
+
 def test_engine_primitives_declare_analytic_partials():
     """Check engine primitive derivatives against finite difference."""
 
@@ -148,6 +193,10 @@ def test_engine_primitives_declare_analytic_partials():
         ("flow_area", FlowArea(), {"area_star": 0.9, "mach": 0.65, "gamma": 1.4}),
         ("mass_flow", MassFlowParameter(), {"mach": 0.65, "gamma": 1.4}),
         ("static_density", StaticDensity(), {"total_density": 1.3, "mach": 0.65, "gamma": 1.4}),
+        ("cp", AirSpecificHeat(), {"temperature": 300.0}),
+        ("cv", AirSpecificHeatVolume(), {"temperature": 300.0}),
+        ("air_heat", AirIntegratedHeat(), {"temperature_low": 300.0, "temperature_high": 1200.0}),
+        ("jeta_heat", JetAIntegratedHeat(), {"temperature_low": 300.0, "temperature_high": 1200.0}),
     ]
 
     for name, component, values in cases:
