@@ -13,6 +13,7 @@ from fast_openmdao import (
     CableWeightForSizing,
     EngineLapse,
     EngineThrustRequirement,
+    FuelUseHistory,
     PowerAvailable,
     PowerFlow,
     PowerSupplementCheck,
@@ -26,6 +27,7 @@ from fast_python.propulsion import (
     engine_lapse,
     engine_thrust_requirement,
     engine_weights_for_sizing,
+    estimate_fuel_use,
     get_thrust_sink_efficiency,
     power_available,
     power_flow,
@@ -311,6 +313,61 @@ def test_cable_weight_for_sizing_matches_fast_python():
     assert np.isclose(problem.get_val("cable_weight", units="kg")[0], expected)
 
 
+def test_fuel_use_history_matches_fast_python_custom_model():
+    """Check fuel-use accumulation parity with FAST-Python."""
+
+    case = make_fuel_use_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "fuel",
+        FuelUseHistory(
+            num_steps=len(case["time_step"]),
+            num_engines=case["fuel_mass_flow"].shape[1],
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("fuel_mass_flow", case["fuel_mass_flow"], units="kg/s")
+    problem.set_val("specific_fuel_consumption", case["sfc"])
+    problem.set_val("time_step", case["time_step"], units="s")
+    problem.set_val("fuel_specific_energy", case["fuel_specific_energy"], units="J/kg")
+    problem.set_val("initial_fuel_burn", case["initial_fuel_burn"], units="kg")
+    problem.set_val("initial_mass", case["initial_mass"], units="kg")
+    problem.set_val("initial_fuel_energy", case["initial_fuel_energy"], units="J")
+    problem.set_val(
+        "initial_fuel_energy_left",
+        case["initial_fuel_energy_left"],
+        units="J",
+    )
+    problem.set_val("mass_flow_correction", case["mass_flow_correction"])
+    problem.run_model()
+
+    expected = evaluate_fast_python_fuel_use_case(case)
+
+    assert np.allclose(
+        problem.get_val("corrected_fuel_mass_flow", units="kg/s"),
+        expected["mdot_fuel"],
+    )
+    assert np.allclose(
+        problem.get_val("corrected_specific_fuel_consumption"),
+        expected["sfc"],
+    )
+    assert np.allclose(
+        problem.get_val("source_mass_flow", units="kg/s"),
+        expected["dmdt"][:, 0],
+    )
+    assert np.allclose(problem.get_val("fuel_burn", units="kg"), expected["fburn"])
+    assert np.allclose(problem.get_val("mass", units="kg"), expected["mass"])
+    assert np.allclose(
+        problem.get_val("fuel_energy", units="J"),
+        expected["fuel_energy"],
+    )
+    assert np.allclose(
+        problem.get_val("fuel_energy_left", units="J"),
+        expected["fuel_energy_left"],
+    )
+
+
 def test_propulsion_primitives_declare_analytic_partials():
     """Check propulsion primitive derivatives against finite difference."""
 
@@ -328,7 +385,38 @@ def test_propulsion_primitives_declare_analytic_partials():
     available_split = np.asarray([available_arch["OperUps"]() for _ in range(2)])
     available_split_check = available_split.copy()
     available_split_check[available_split_check == 0.0] = -1.0e-3
+    fuel_case = make_fuel_use_case()
+    fuel_derivative_case = dict(fuel_case)
+    fuel_derivative_case["fuel_specific_energy"] = 1000.0
+    fuel_derivative_case["initial_fuel_energy"] = 5.0
+    fuel_derivative_case["initial_fuel_energy_left"] = 1000.0
     cases = [
+        (
+            "fuel",
+            FuelUseHistory(
+                num_steps=len(fuel_derivative_case["time_step"]),
+                num_engines=fuel_derivative_case["fuel_mass_flow"].shape[1],
+            ),
+            {
+                "fuel_mass_flow": fuel_derivative_case["fuel_mass_flow"],
+                "specific_fuel_consumption": fuel_derivative_case["sfc"],
+                "time_step": fuel_derivative_case["time_step"],
+                "fuel_specific_energy": fuel_derivative_case[
+                    "fuel_specific_energy"
+                ],
+                "initial_fuel_burn": fuel_derivative_case["initial_fuel_burn"],
+                "initial_mass": fuel_derivative_case["initial_mass"],
+                "initial_fuel_energy": fuel_derivative_case[
+                    "initial_fuel_energy"
+                ],
+                "initial_fuel_energy_left": fuel_derivative_case[
+                    "initial_fuel_energy_left"
+                ],
+                "mass_flow_correction": fuel_derivative_case[
+                    "mass_flow_correction"
+                ],
+            },
+        ),
         (
             "engine_weight",
             TurbopropEngineWeightForSizing(
@@ -656,6 +744,112 @@ def make_cable_weight_case():
     cables = np.asarray([False, True, False, True])
     downstream_power = np.asarray([0.0, 400000.0, 0.0, 250000.0, 0.0])
     return aircraft, cables, downstream_power
+
+
+def make_fuel_use_case():
+    """Return deterministic engine fuel-flow histories for fuel-use checks."""
+
+    return {
+        "fuel_mass_flow": np.asarray(
+            [
+                [0.12, 0.08],
+                [0.10, 0.07],
+                [0.09, 0.05],
+            ]
+        ),
+        "sfc": np.asarray(
+            [
+                [1.4, 1.2],
+                [1.3, 1.1],
+                [1.25, 1.05],
+            ]
+        ),
+        "time_step": np.asarray([60.0, 55.0, 50.0]),
+        "fuel_specific_energy": 43.0e6,
+        "initial_fuel_burn": 4.0,
+        "initial_mass": 1000.0,
+        "initial_fuel_energy": 10.0,
+        "initial_fuel_energy_left": 1.0e8,
+        "mass_flow_correction": 1.07,
+    }
+
+
+def evaluate_fast_python_fuel_use_case(case):
+    """Run FAST-Python fuel-use mutation path for one deterministic case."""
+
+    fuel_flow = case["fuel_mass_flow"]
+    sfc_input = case["sfc"]
+    time_step = case["time_step"]
+    num_steps, num_engines = fuel_flow.shape
+    num_sources = 1
+    num_transmitters = num_engines
+    num_components = num_sources + num_transmitters
+
+    def fuel_model(aircraft, ipnt, component, pout_value, psupp_value):
+        engine = component - num_sources
+        return fuel_flow[ipnt, engine], sfc_input[ipnt, engine]
+
+    aircraft = {
+        "Specs": {
+            "TLAR": {
+                "Class": "Turbofan",
+            },
+            "Propulsion": {
+                "FuelFlowModel": fuel_model,
+                "MDotCF": case["mass_flow_correction"],
+                "PropArch": {
+                    "Arch": np.eye(num_components),
+                    "TrnType": np.ones(num_transmitters),
+                },
+            },
+        },
+    }
+    pout = np.zeros((num_steps, num_components))
+    psupp = np.zeros((num_steps, num_components))
+    tout = np.zeros((num_steps, num_components))
+    fburn = np.zeros(num_steps + 1)
+    mass = np.zeros(num_steps + 1)
+    fuel_energy = np.zeros((num_steps + 1, num_sources))
+    fuel_energy_left = np.zeros((num_steps + 1, num_sources))
+    sfc = np.zeros((num_steps, num_engines))
+    mdot_fuel = np.zeros((num_steps, num_engines))
+    dmdt = np.zeros((num_steps, num_sources))
+    fburn[0] = case["initial_fuel_burn"]
+    mass[0] = case["initial_mass"]
+    fuel_energy[:, 0] = case["initial_fuel_energy"]
+    fuel_energy_left[0, 0] = case["initial_fuel_energy_left"]
+
+    estimate_fuel_use(
+        aircraft,
+        pout,
+        psupp,
+        time_step,
+        np.asarray([True]),
+        np.asarray([True] * num_engines),
+        num_sources,
+        num_transmitters,
+        case["fuel_specific_energy"],
+        np.zeros(num_steps),
+        np.zeros(num_steps),
+        tout,
+        fburn,
+        mass,
+        fuel_energy,
+        fuel_energy_left,
+        sfc,
+        mdot_fuel,
+        dmdt,
+    )
+
+    return {
+        "mdot_fuel": mdot_fuel,
+        "sfc": sfc,
+        "dmdt": dmdt,
+        "fburn": fburn,
+        "mass": mass,
+        "fuel_energy": fuel_energy[:, 0],
+        "fuel_energy_left": fuel_energy_left[:, 0],
+    }
 
 
 def make_power_available_aircraft():

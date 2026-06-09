@@ -59,6 +59,8 @@ derivative-native FAST equation components:
   requirement, turboprop/piston engine sizing weight, power-flow propagation,
   power-available propagation, safe component weight, efficiency selection, and
   supplemental transmitter power with analytical partial derivatives.
+- Propulsion fuel-use history accumulation for corrected fuel flow, fuel burn,
+  aircraft mass, and fuel-source energy with analytical partial derivatives.
 - Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
   engine-gradient selection, and cruise dynamic pressure with analytical
   partial derivatives.
@@ -132,9 +134,9 @@ The public `fast_openmdao` package currently exports:
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `CableWeightForSizing`, `EngineLapse`,
-  `EngineThrustRequirement`, `PowerAvailable`, `PowerFlow`, `PowerSupplementCheck`,
-  `SafeComponentWeight`, `ThrustSinkEfficiency`, `TransmitterFanEfficiency`,
-  `TurbopropEngineWeightForSizing`
+  `EngineThrustRequirement`, `FuelUseHistory`, `PowerAvailable`, `PowerFlow`,
+  `PowerSupplementCheck`, `SafeComponentWeight`, `ThrustSinkEfficiency`,
+  `TransmitterFanEfficiency`, `TurbopropEngineWeightForSizing`
 - Regression: `GaussianProcessPrediction`, `SquaredExponentialKernel`
 - Units: `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
@@ -343,42 +345,44 @@ residual functions.
    derivatives. Done.
 31. Convert simple off-design turbofan fuel-flow helper with analytical
    partial derivatives. Done.
-32. Convert one-step battery equivalent-circuit dynamics with analytical
+32. Convert propulsion fuel-use history accumulation with analytical partial
+   derivatives. Done.
+33. Convert one-step battery equivalent-circuit dynamics with analytical
    partial derivatives. Done.
-33. Convert Breguet cruise selector helpers with analytical partial
+34. Convert Breguet cruise selector helpers with analytical partial
    derivatives. Done.
-34. Convert named FAR 25 climb wrappers with analytical partial derivatives.
+35. Convert named FAR 25 climb wrappers with analytical partial derivatives.
    Done.
-35. Convert all-engines-operative climb residual with analytical partial
+36. Convert all-engines-operative climb residual with analytical partial
    derivatives. Done.
-36. Convert service-ceiling residual with analytical partial derivatives.
+37. Convert service-ceiling residual with analytical partial derivatives.
    Done.
-37. Convert turboprop engine-weight sizing helper with analytical partial
+38. Convert turboprop engine-weight sizing helper with analytical partial
    derivatives. Done.
-38. Convert optimization power-limit residual helper with analytical partial
+39. Convert optimization power-limit residual helper with analytical partial
    derivatives. Done.
-39. Convert optimization operational split bound helper with analytical
+40. Convert optimization operational split bound helper with analytical
    partial derivatives. Done.
-40. Convert optimization objective selector helpers with analytical partial
+41. Convert optimization objective selector helpers with analytical partial
    derivatives. Done.
-41. Convert analysis source-weight vectorization helper with analytical partial
+42. Convert analysis source-weight vectorization helper with analytical partial
    derivatives. Done.
-42. Convert thermally perfect gamma update helper with analytical partial
+43. Convert thermally perfect gamma update helper with analytical partial
    derivatives. Done.
-43. Convert supplemental transmitter power helper with analytical partial
+44. Convert supplemental transmitter power helper with analytical partial
    derivatives. Done.
-44. Convert propulsion power-flow propagation with analytical partial
+45. Convert propulsion power-flow propagation with analytical partial
    derivatives. Done.
-45. Convert engine thrust requirement selector with analytical partial
+46. Convert engine thrust requirement selector with analytical partial
    derivatives. Done.
-46. Convert cable sizing weight helper with analytical partial derivatives.
+47. Convert cable sizing weight helper with analytical partial derivatives.
    Done.
-47. Convert empirical battery cycling-aging SOH helper with analytical partial
+48. Convert empirical battery cycling-aging SOH helper with analytical partial
    derivatives. Done.
-48. Convert propulsion power-available propagation helper with analytical
+49. Convert propulsion power-available propagation helper with analytical
    partial derivatives. Done.
-49. Add complex-step derivative checks where supported by FAST-Python internals.
-50. Build reusable groups for mission, propulsion, weights, and objective
+50. Add complex-step derivative checks where supported by FAST-Python internals.
+51. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

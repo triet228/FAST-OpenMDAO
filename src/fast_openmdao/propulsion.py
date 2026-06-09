@@ -570,6 +570,80 @@ class CableWeightForSizing(om.ExplicitComponent):
         ]
 
 
+class FuelUseHistory(om.ExplicitComponent):
+    """Accumulate FAST fuel-flow history into fuel burn, mass, and source energy."""
+
+    def initialize(self):
+        self.options.declare("num_steps", default=1)
+        self.options.declare("num_engines", default=1)
+
+    def setup(self):
+        num_steps = self.options["num_steps"]
+        num_engines = self.options["num_engines"]
+        history_size = num_steps + 1
+        engine_shape = (num_steps, num_engines)
+
+        self.add_input("fuel_mass_flow", val=np.zeros(engine_shape), units="kg/s")
+        self.add_input("specific_fuel_consumption", val=np.zeros(engine_shape))
+        self.add_input("time_step", val=np.ones(num_steps), units="s")
+        self.add_input("fuel_specific_energy", val=43.0e6, units="J/kg")
+        self.add_input("initial_fuel_burn", val=0.0, units="kg")
+        self.add_input("initial_mass", val=1.0, units="kg")
+        self.add_input("initial_fuel_energy", val=0.0, units="J")
+        self.add_input("initial_fuel_energy_left", val=0.0, units="J")
+        self.add_input("mass_flow_correction", val=1.0)
+        self.add_output(
+            "corrected_fuel_mass_flow",
+            val=np.zeros(engine_shape),
+            units="kg/s",
+        )
+        self.add_output(
+            "corrected_specific_fuel_consumption",
+            val=np.zeros(engine_shape),
+        )
+        self.add_output("source_mass_flow", val=np.zeros(num_steps), units="kg/s")
+        self.add_output("fuel_burn", val=np.zeros(history_size), units="kg")
+        self.add_output("mass", val=np.ones(history_size), units="kg")
+        self.add_output("fuel_energy", val=np.zeros(history_size), units="J")
+        self.add_output("fuel_energy_left", val=np.zeros(history_size), units="J")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = fuel_use_history_values(
+            inputs["fuel_mass_flow"],
+            inputs["specific_fuel_consumption"],
+            inputs["time_step"],
+            inputs["fuel_specific_energy"][0],
+            inputs["initial_fuel_burn"][0],
+            inputs["initial_mass"][0],
+            inputs["initial_fuel_energy"][0],
+            inputs["initial_fuel_energy_left"][0],
+            inputs["mass_flow_correction"][0],
+        )
+
+        for output in fuel_use_history_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = fuel_use_history_values(
+            inputs["fuel_mass_flow"],
+            inputs["specific_fuel_consumption"],
+            inputs["time_step"],
+            inputs["fuel_specific_energy"][0],
+            inputs["initial_fuel_burn"][0],
+            inputs["initial_mass"][0],
+            inputs["initial_fuel_energy"][0],
+            inputs["initial_fuel_energy_left"][0],
+            inputs["mass_flow_correction"][0],
+        )
+
+        for output in fuel_use_history_output_names():
+            for variable in fuel_use_history_input_names():
+                partials[output, variable] = values[
+                    "d%s_d%s" % (output, variable)
+                ]
+
+
 def engine_lapse_value(sea_level_static, aircraft_class, density):
     """Return scalar FAST engine-lapse value."""
 
@@ -611,6 +685,256 @@ def safe_component_weight_value(power, power_to_weight):
         return 0.0
 
     return power / power_to_weight
+
+
+def fuel_use_history_input_names():
+    """Return FuelUseHistory input names for derivative packing."""
+
+    return (
+        "fuel_mass_flow",
+        "specific_fuel_consumption",
+        "time_step",
+        "fuel_specific_energy",
+        "initial_fuel_burn",
+        "initial_mass",
+        "initial_fuel_energy",
+        "initial_fuel_energy_left",
+        "mass_flow_correction",
+    )
+
+
+def fuel_use_history_output_names():
+    """Return FuelUseHistory output names."""
+
+    return (
+        "corrected_fuel_mass_flow",
+        "corrected_specific_fuel_consumption",
+        "source_mass_flow",
+        "fuel_burn",
+        "mass",
+        "fuel_energy",
+        "fuel_energy_left",
+    )
+
+
+def fuel_use_history_values(
+    fuel_mass_flow,
+    specific_fuel_consumption,
+    time_step,
+    fuel_specific_energy,
+    initial_fuel_burn,
+    initial_mass,
+    initial_fuel_energy,
+    initial_fuel_energy_left,
+    mass_flow_correction,
+):
+    """Return FAST fuel-use accumulation values and analytical derivatives."""
+
+    fuel_mass_flow = np.asarray(fuel_mass_flow, dtype=float)
+    sfc = np.asarray(specific_fuel_consumption, dtype=float)
+    dt = np.asarray(time_step, dtype=float).reshape(-1)
+    num_steps, num_engines = fuel_mass_flow.shape
+    engine_size = fuel_mass_flow.size
+    history_size = num_steps + 1
+
+    corrected_flow = fuel_mass_flow * mass_flow_correction
+    corrected_sfc = sfc * mass_flow_correction
+    source_flow = np.sum(corrected_flow, axis=1)
+    fuel_used = np.cumsum(source_flow * dt)
+    energy_used = np.cumsum(source_flow * fuel_specific_energy * dt)
+    fuel_burn = np.zeros(history_size)
+    mass = np.zeros(history_size)
+    fuel_energy = np.zeros(history_size)
+    fuel_energy_left = np.zeros(history_size)
+    fuel_burn[0] = initial_fuel_burn
+    mass[0] = initial_mass
+    fuel_energy[0] = initial_fuel_energy
+    fuel_energy_left[0] = initial_fuel_energy_left
+    fuel_burn[1:] = initial_fuel_burn + fuel_used
+    mass[1:] = initial_mass - fuel_used
+    fuel_energy[1:] = initial_fuel_energy + energy_used
+    fuel_energy_left[1:] = initial_fuel_energy_left - energy_used
+    result = {
+        "corrected_fuel_mass_flow": corrected_flow,
+        "corrected_specific_fuel_consumption": corrected_sfc,
+        "source_mass_flow": source_flow,
+        "fuel_burn": fuel_burn,
+        "mass": mass,
+        "fuel_energy": fuel_energy,
+        "fuel_energy_left": fuel_energy_left,
+    }
+    zeros_engine = np.zeros((engine_size, engine_size))
+    identity_engine = np.eye(engine_size)
+    dcorrected_flow_dflow = identity_engine * mass_flow_correction
+    dcorrected_flow_dcorrection = fuel_mass_flow.reshape(-1, 1)
+    dcorrected_sfc_dsfc = identity_engine * mass_flow_correction
+    dcorrected_sfc_dcorrection = sfc.reshape(-1, 1)
+    dsource_dflow = np.zeros((num_steps, engine_size))
+    dsource_dcorrection = np.sum(fuel_mass_flow, axis=1).reshape(-1, 1)
+
+    for step in range(num_steps):
+        start = step * num_engines
+        stop = start + num_engines
+        dsource_dflow[step, start:stop] = mass_flow_correction
+
+    dfuel_burn_dflow = np.zeros((history_size, engine_size))
+    dfuel_burn_ddt = np.zeros((history_size, num_steps))
+    dfuel_burn_dcorrection = np.zeros((history_size, 1))
+    dfuel_energy_dflow = np.zeros((history_size, engine_size))
+    dfuel_energy_ddt = np.zeros((history_size, num_steps))
+    dfuel_energy_defuel = np.zeros((history_size, 1))
+    dfuel_energy_dcorrection = np.zeros((history_size, 1))
+
+    for row in range(1, history_size):
+        active = row
+        for step in range(active):
+            start = step * num_engines
+            stop = start + num_engines
+            dfuel_burn_dflow[row, start:stop] = dt[step] * mass_flow_correction
+            dfuel_burn_ddt[row, step] = source_flow[step]
+            dfuel_burn_dcorrection[row, 0] += dt[step] * np.sum(
+                fuel_mass_flow[step, :]
+            )
+            dfuel_energy_dflow[row, start:stop] = (
+                dt[step] * mass_flow_correction * fuel_specific_energy
+            )
+            dfuel_energy_ddt[row, step] = source_flow[step] * fuel_specific_energy
+            dfuel_energy_defuel[row, 0] += source_flow[step] * dt[step]
+            dfuel_energy_dcorrection[row, 0] += (
+                dt[step] * np.sum(fuel_mass_flow[step, :]) * fuel_specific_energy
+            )
+
+    scalar_zero = np.zeros((history_size, 1))
+    engine_time_zero = np.zeros((engine_size, num_steps))
+    engine_scalar_zero = np.zeros((engine_size, 1))
+    source_engine_zero = np.zeros((num_steps, engine_size))
+    source_time_zero = np.zeros((num_steps, num_steps))
+    source_scalar_zero = np.zeros((num_steps, 1))
+    result.update(
+        {
+            "dcorrected_fuel_mass_flow_dfuel_mass_flow": dcorrected_flow_dflow,
+            "dcorrected_fuel_mass_flow_dspecific_fuel_consumption": zeros_engine,
+            "dcorrected_fuel_mass_flow_dtime_step": engine_time_zero,
+            "dcorrected_fuel_mass_flow_dfuel_specific_energy": engine_scalar_zero,
+            "dcorrected_fuel_mass_flow_dinitial_fuel_burn": engine_scalar_zero,
+            "dcorrected_fuel_mass_flow_dinitial_mass": engine_scalar_zero,
+            "dcorrected_fuel_mass_flow_dinitial_fuel_energy": engine_scalar_zero,
+            "dcorrected_fuel_mass_flow_dinitial_fuel_energy_left": engine_scalar_zero,
+            "dcorrected_fuel_mass_flow_dmass_flow_correction": (
+                dcorrected_flow_dcorrection
+            ),
+            "dcorrected_specific_fuel_consumption_dfuel_mass_flow": zeros_engine,
+            "dcorrected_specific_fuel_consumption_dspecific_fuel_consumption": (
+                dcorrected_sfc_dsfc
+            ),
+            "dcorrected_specific_fuel_consumption_dtime_step": engine_time_zero,
+            "dcorrected_specific_fuel_consumption_dfuel_specific_energy": (
+                engine_scalar_zero
+            ),
+            "dcorrected_specific_fuel_consumption_dinitial_fuel_burn": (
+                engine_scalar_zero
+            ),
+            "dcorrected_specific_fuel_consumption_dinitial_mass": (
+                engine_scalar_zero
+            ),
+            "dcorrected_specific_fuel_consumption_dinitial_fuel_energy": (
+                engine_scalar_zero
+            ),
+            "dcorrected_specific_fuel_consumption_dinitial_fuel_energy_left": (
+                engine_scalar_zero
+            ),
+            "dcorrected_specific_fuel_consumption_dmass_flow_correction": (
+                dcorrected_sfc_dcorrection
+            ),
+            "dsource_mass_flow_dfuel_mass_flow": dsource_dflow,
+            "dsource_mass_flow_dspecific_fuel_consumption": source_engine_zero,
+            "dsource_mass_flow_dtime_step": source_time_zero,
+            "dsource_mass_flow_dfuel_specific_energy": source_scalar_zero,
+            "dsource_mass_flow_dinitial_fuel_burn": source_scalar_zero,
+            "dsource_mass_flow_dinitial_mass": source_scalar_zero,
+            "dsource_mass_flow_dinitial_fuel_energy": source_scalar_zero,
+            "dsource_mass_flow_dinitial_fuel_energy_left": source_scalar_zero,
+            "dsource_mass_flow_dmass_flow_correction": dsource_dcorrection,
+        }
+    )
+    result.update(
+        fuel_history_derivative_pack(
+            "fuel_burn",
+            dfuel_burn_dflow,
+            dfuel_burn_ddt,
+            scalar_zero,
+            dfuel_burn_dcorrection,
+            history_size,
+        )
+    )
+    result["dfuel_burn_dinitial_fuel_burn"] = np.ones((history_size, 1))
+    result["dfuel_burn_dinitial_mass"] = scalar_zero
+    result["dfuel_burn_dinitial_fuel_energy"] = scalar_zero
+    result["dfuel_burn_dinitial_fuel_energy_left"] = scalar_zero
+    result.update(
+        fuel_history_derivative_pack(
+            "mass",
+            -dfuel_burn_dflow,
+            -dfuel_burn_ddt,
+            scalar_zero,
+            -dfuel_burn_dcorrection,
+            history_size,
+        )
+    )
+    result["dmass_dinitial_fuel_burn"] = scalar_zero
+    result["dmass_dinitial_mass"] = np.ones((history_size, 1))
+    result["dmass_dinitial_fuel_energy"] = scalar_zero
+    result["dmass_dinitial_fuel_energy_left"] = scalar_zero
+    result.update(
+        fuel_history_derivative_pack(
+            "fuel_energy",
+            dfuel_energy_dflow,
+            dfuel_energy_ddt,
+            dfuel_energy_defuel,
+            dfuel_energy_dcorrection,
+            history_size,
+        )
+    )
+    result["dfuel_energy_dinitial_fuel_burn"] = scalar_zero
+    result["dfuel_energy_dinitial_mass"] = scalar_zero
+    result["dfuel_energy_dinitial_fuel_energy"] = np.ones((history_size, 1))
+    result["dfuel_energy_dinitial_fuel_energy_left"] = scalar_zero
+    result.update(
+        fuel_history_derivative_pack(
+            "fuel_energy_left",
+            -dfuel_energy_dflow,
+            -dfuel_energy_ddt,
+            -dfuel_energy_defuel,
+            -dfuel_energy_dcorrection,
+            history_size,
+        )
+    )
+    result["dfuel_energy_left_dinitial_fuel_burn"] = scalar_zero
+    result["dfuel_energy_left_dinitial_mass"] = scalar_zero
+    result["dfuel_energy_left_dinitial_fuel_energy"] = scalar_zero
+    result["dfuel_energy_left_dinitial_fuel_energy_left"] = np.ones((history_size, 1))
+    return result
+
+
+def fuel_history_derivative_pack(
+    output,
+    dflow,
+    dtime,
+    dfuel_specific_energy,
+    dcorrection,
+    history_size,
+):
+    """Return common fuel history derivative entries for one output."""
+
+    return {
+        "d%s_dfuel_mass_flow" % output: dflow,
+        "d%s_dspecific_fuel_consumption" % output: np.zeros(
+            (history_size, dflow.shape[1])
+        ),
+        "d%s_dtime_step" % output: dtime,
+        "d%s_dfuel_specific_energy" % output: dfuel_specific_energy,
+        "d%s_dmass_flow_correction" % output: dcorrection,
+    }
 
 
 def power_available_values(
