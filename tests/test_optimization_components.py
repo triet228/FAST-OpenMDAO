@@ -16,6 +16,7 @@ from fast_openmdao import (
     ElectricMotorPowerAvailable,
     FeasibleStep,
     GaussianEliminationPivot,
+    HessianUpdate,
     MeritFunction,
     OperationalObjective,
     OperationalSplitConstraints,
@@ -28,6 +29,7 @@ from fast_python.optimization import (
     electric_motor_power_available,
     feas_step,
     gauss_elim,
+    hess_upd,
     merit_function,
     operational_objective_value,
     operational_split_constraint_blocks,
@@ -148,6 +150,28 @@ def test_gaussian_elimination_pivot_matches_fast_python():
     assert np.allclose(
         problem.get_val("eliminated_matrix"),
         gauss_elim(matrix, 2, 1),
+    )
+
+
+def test_hessian_update_matches_fast_python():
+    """Check FAST damped BFGS Hessian update parity with FAST-Python."""
+
+    hessian, step, gradient_delta = make_hessian_update_case()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "hessian",
+        HessianUpdate(size=step.size),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("hessian", hessian)
+    problem.set_val("step", step)
+    problem.set_val("gradient_delta", gradient_delta)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("updated_hessian"),
+        hess_upd(hessian, step, gradient_delta),
     )
 
 
@@ -413,6 +437,15 @@ def test_optimization_helpers_declare_analytic_partials():
             },
         ),
         (
+            "hessian",
+            HessianUpdate(size=3),
+            {
+                "hessian": make_hessian_update_case()[0],
+                "step": make_hessian_update_case()[1],
+                "gradient_delta": make_hessian_update_case()[2],
+            },
+        ),
+        (
             "merit",
             MeritFunction(num_inequality=2, num_equality=1, use_slack=True),
             {
@@ -575,6 +608,22 @@ def make_merit_constraints(g, h):
         return g, h, np.zeros((len(g), 1)), np.zeros((len(h), 1))
 
     return constraints
+
+
+def make_hessian_update_case():
+    """Return nonsingular values for FAST damped BFGS update checks."""
+
+    return (
+        np.asarray(
+            [
+                [3.0, 0.4, 0.2],
+                [0.4, 2.5, 0.3],
+                [0.2, 0.3, 1.8],
+            ]
+        ),
+        np.asarray([0.3, -0.2, 0.4]),
+        np.asarray([0.7, -0.1, 0.5]),
+    )
 
 
 def make_design_split_bound_aircraft(num_design_splits):

@@ -134,6 +134,55 @@ class GaussianEliminationPivot(om.ExplicitComponent):
         ]
 
 
+class HessianUpdate(om.ExplicitComponent):
+    """Update a Hessian approximation with FAST's damped BFGS formula.
+
+    Inputs:
+        hessian: Current Hessian approximation matrix.
+        step: Design-variable step vector.
+        gradient_delta: Difference in objective or Lagrangian gradient.
+
+    Outputs:
+        updated_hessian: FAST damped BFGS Hessian update.
+
+    Assumptions:
+        The Powell-damping branch is fixed for the current values. Derivatives
+        are exact away from the branch boundary and singular curvature terms.
+    """
+
+    def initialize(self):
+        self.options.declare("size", default=2)
+
+    def setup(self):
+        size = self.options["size"]
+        self.add_input("hessian", val=np.eye(size))
+        self.add_input("step", val=np.ones(size))
+        self.add_input("gradient_delta", val=np.ones(size))
+        self.add_output("updated_hessian", val=np.eye(size))
+        self.declare_partials(of="updated_hessian", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["updated_hessian"] = hessian_update_values(
+            inputs["hessian"],
+            inputs["step"],
+            inputs["gradient_delta"],
+        )["updated_hessian"]
+
+    def compute_partials(self, inputs, partials):
+        values = hessian_update_values(
+            inputs["hessian"],
+            inputs["step"],
+            inputs["gradient_delta"],
+        )
+        partials["updated_hessian", "hessian"] = values[
+            "dupdated_hessian_dhessian"
+        ]
+        partials["updated_hessian", "step"] = values["dupdated_hessian_dstep"]
+        partials["updated_hessian", "gradient_delta"] = values[
+            "dupdated_hessian_dgradient_delta"
+        ]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -642,6 +691,125 @@ def gaussian_elimination_pivot_values(matrix, pivot_row, pivot_col):
         "eliminated_matrix": result,
         "deliminated_matrix_dmatrix": jacobian,
     }
+
+
+def hessian_update_values(hessian, step, gradient_delta):
+    """Return FAST damped BFGS Hessian update and dense Jacobians."""
+
+    hessian = np.asarray(hessian, dtype=float)
+    step = np.asarray(step, dtype=float).reshape(-1)
+    gradient_delta = np.asarray(gradient_delta, dtype=float).reshape(-1)
+    updated, data = hessian_update_core(hessian, step, gradient_delta)
+    size = step.size
+    output_size = hessian.size
+    dhessian = np.zeros((output_size, output_size))
+    dstep = np.zeros((output_size, size))
+    dgradient = np.zeros((output_size, size))
+
+    for index in range(output_size):
+        seed = np.zeros_like(hessian)
+        seed.reshape(-1)[index] = 1.0
+        dhessian[:, index] = hessian_update_directional_derivative(
+            data,
+            seed,
+            np.zeros(size),
+            np.zeros(size),
+        ).reshape(-1)
+
+    for index in range(size):
+        seed = np.zeros(size)
+        seed[index] = 1.0
+        dstep[:, index] = hessian_update_directional_derivative(
+            data,
+            np.zeros_like(hessian),
+            seed,
+            np.zeros(size),
+        ).reshape(-1)
+        dgradient[:, index] = hessian_update_directional_derivative(
+            data,
+            np.zeros_like(hessian),
+            np.zeros(size),
+            seed,
+        ).reshape(-1)
+
+    return {
+        "updated_hessian": updated,
+        "dupdated_hessian_dhessian": dhessian,
+        "dupdated_hessian_dstep": dstep,
+        "dupdated_hessian_dgradient_delta": dgradient,
+    }
+
+
+def hessian_update_core(hessian, step, gradient_delta):
+    """Return BFGS update plus cached terms for linearization."""
+
+    s_col = step.reshape(-1, 1)
+    y_col = gradient_delta.reshape(-1, 1)
+    sy = (s_col.T @ y_col).item()
+    hs = hessian @ s_col
+    qterm = (hs.T @ s_col).item()
+
+    if sy >= 0.2 * qterm:
+        theta = 1.0
+        damped = False
+    else:
+        theta = 0.8 * qterm / (qterm - sy)
+        damped = True
+
+    residual = theta * y_col + (1.0 - theta) * hs
+    residual_step = (residual.T @ s_col).item()
+    updated = hessian + residual @ residual.T / residual_step
+    updated = updated - hs @ hs.T / qterm
+    return updated, {
+        "hessian": hessian,
+        "s": s_col,
+        "y": y_col,
+        "hs": hs,
+        "sy": sy,
+        "qterm": qterm,
+        "theta": theta,
+        "damped": damped,
+        "residual": residual,
+        "residual_step": residual_step,
+    }
+
+
+def hessian_update_directional_derivative(data, dhessian, dstep, dgradient_delta):
+    """Return directional derivative of FAST's damped BFGS Hessian update."""
+
+    dhessian = np.asarray(dhessian, dtype=float)
+    ds = np.asarray(dstep, dtype=float).reshape(-1, 1)
+    dy = np.asarray(dgradient_delta, dtype=float).reshape(-1, 1)
+    hessian = data["hessian"]
+    s_col = data["s"]
+    y_col = data["y"]
+    hs = data["hs"]
+    sy = data["sy"]
+    qterm = data["qterm"]
+    theta = data["theta"]
+    residual = data["residual"]
+    residual_step = data["residual_step"]
+    dhs = dhessian @ s_col + hessian @ ds
+    dsy = (ds.T @ y_col + s_col.T @ dy).item()
+    dqterm = (dhs.T @ s_col + hs.T @ ds).item()
+
+    if data["damped"]:
+        denom = qterm - sy
+        dtheta = 0.8 * (qterm * dsy - sy * dqterm) / denom ** 2
+    else:
+        dtheta = 0.0
+
+    dresidual = (
+        theta * dy
+        + (1.0 - theta) * dhs
+        + dtheta * (y_col - hs)
+    )
+    dresidual_step = (dresidual.T @ s_col + residual.T @ ds).item()
+    dfirst = (dresidual @ residual.T + residual @ dresidual.T) / residual_step
+    dfirst = dfirst - residual @ residual.T * dresidual_step / residual_step ** 2
+    dsecond = (dhs @ hs.T + hs @ dhs.T) / qterm
+    dsecond = dsecond - hs @ hs.T * dqterm / qterm ** 2
+    return dhessian + dfirst - dsecond
 
 
 def get_slack_values(inputs, num_inequality):
