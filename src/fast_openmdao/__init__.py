@@ -7,6 +7,7 @@ from fast_openmdao.battery import AvailableCellCapacity, BatteryCurrent
 from fast_openmdao.components import FastPythonComponent
 from fast_openmdao.constraint import (
     CruiseDynamicPressure,
+    FAR25ClimbConstraint,
     FAR25EngineGradient,
     JetApproachConstraint,
     JetCruiseConstraint,
@@ -53,6 +54,7 @@ __all__ = [
     "ElectricMotorSpecificPowerProjection",
     "EngineLapse",
     "FAR25EngineGradient",
+    "FAR25ClimbConstraint",
     "FastPythonComponent",
     "FlightConditions",
     "FlowArea",

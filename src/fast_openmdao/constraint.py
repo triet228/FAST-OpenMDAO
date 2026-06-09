@@ -181,6 +181,65 @@ class JetCruiseConstraint(om.ExplicitComponent):
         ]
 
 
+class FAR25ClimbConstraint(om.ExplicitComponent):
+    """Compute FAST shared FAR 25 climb residual."""
+
+    def initialize(self):
+        self.options.declare("aircraft_class", default="Turbofan")
+        self.options.declare("req_type", default=1)
+        self.options.declare("cl", default=2.0)
+        self.options.declare("cd0", default=0.025)
+        self.options.declare("aspect_ratio", default=9.0)
+        self.options.declare("oswald", default=0.75)
+        self.options.declare("correction", default=1.0)
+        self.options.declare("gradient", default=0.012)
+        self.options.declare("ks", default=1.2)
+        self.options.declare("stall_velocity", default=60.0)
+
+    def setup(self):
+        self.add_input("wing_loading", val=400.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_output("far25_climb_residual", val=0.0)
+        self.declare_partials(of="far25_climb_residual", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["far25_climb_residual"] = far25_climb_residual(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            self.options["cl"],
+            self.options["cd0"],
+            self.options["aspect_ratio"],
+            self.options["oswald"],
+            self.options["correction"],
+            self.options["gradient"],
+            self.options["ks"],
+            self.options["stall_velocity"],
+        )
+
+    def compute_partials(self, inputs, partials):
+        derivatives = far25_climb_derivatives(
+            inputs["wing_loading"][0],
+            inputs["thrust_loading"][0],
+            self.options["aircraft_class"],
+            self.options["req_type"],
+            self.options["cl"],
+            self.options["cd0"],
+            self.options["aspect_ratio"],
+            self.options["oswald"],
+            self.options["correction"],
+            self.options["ks"],
+            self.options["stall_velocity"],
+        )
+        partials["far25_climb_residual", "wing_loading"] = derivatives[
+            "dresidual_dwing_loading"
+        ]
+        partials["far25_climb_residual", "thrust_loading"] = derivatives[
+            "dresidual_dthrust_loading"
+        ]
+
+
 class PsLossSigmoid(om.ExplicitComponent):
     """Evaluate FAST PsLoss sigmoid climb-gradient helper."""
 
@@ -549,6 +608,166 @@ def cruise_drag_residual_base_derivative(
         -dynamic_pressure * cd0 / wing_loading ** 2
         + 1.0 / (dynamic_pressure * induced_factor)
     )
+
+
+def far25_climb_residual(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    req_type,
+    cl,
+    cd0,
+    aspect_ratio,
+    oswald,
+    correction,
+    gradient,
+    ks,
+    stall_velocity,
+):
+    """Return FAST shared FAR 25 climb residual for one scalar design point."""
+
+    aircraft_class = aircraft_class.lower()
+
+    if req_type == 0:
+        effective_thrust_loading = thrust_loading
+
+        if aircraft_class in ("turboprop", "piston"):
+            effective_thrust_loading = 1.0 / (ks * stall_velocity * thrust_loading)
+
+        base = (
+            ks ** 2 * cd0 / cl
+            + cl / ks ** 2 / math.pi / aspect_ratio / oswald
+        )
+        return correction * (base + gradient) - effective_thrust_loading
+
+    converted_wing_loading = wing_loading * N_M2_TO_LBF_FT2
+
+    if req_type == 1:
+        vstall_ft_s = stall_velocity * convert_velocity(1.0, "m/s", "ft/s")
+        q = 0.5 * RHO_SL_STD * RHO_SI_TO_ENGLISH * (vstall_ft_s * ks) ** 2
+        base = cruise_drag_residual_base(
+            converted_wing_loading,
+            q,
+            cd0,
+            aspect_ratio,
+            oswald,
+        )
+        effective_thrust_loading = thrust_loading
+
+        if aircraft_class in ("turboprop", "piston"):
+            velocity = convert_velocity(vstall_ft_s * ks, "ft/s", "m/s")
+            effective_thrust_loading = 1.0 / (velocity * thrust_loading)
+
+        return correction * (base + gradient) - effective_thrust_loading
+
+    if req_type == 2:
+        cl_eff = cl / ks ** 2
+        qinf = converted_wing_loading / cl_eff
+        vinf = (2.0 * qinf / (RHO_SL_STD * RHO_SI_TO_ENGLISH)) ** 0.5
+        effective_thrust_loading = thrust_loading
+
+        if aircraft_class in ("turboprop", "piston"):
+            velocity = convert_velocity(vinf, "ft/s", "m/s")
+            effective_thrust_loading = 1.0 / (velocity * thrust_loading)
+
+        base = qinf / converted_wing_loading * (
+            cd0 + cl_eff ** 2 / (math.pi * aspect_ratio * oswald)
+        )
+        return correction * (base + gradient) - effective_thrust_loading
+
+    raise ValueError("FAR 25 climb ReqType must be 0, 1, or 2.")
+
+
+def far25_climb_derivatives(
+    wing_loading,
+    thrust_loading,
+    aircraft_class,
+    req_type,
+    cl,
+    cd0,
+    aspect_ratio,
+    oswald,
+    correction,
+    ks,
+    stall_velocity,
+):
+    """Return scalar derivatives for FAST shared FAR 25 climb residual."""
+
+    aircraft_class = aircraft_class.lower()
+
+    if req_type == 0:
+        if aircraft_class in ("turboprop", "piston"):
+            return {
+                "dresidual_dwing_loading": 0.0,
+                "dresidual_dthrust_loading": 1.0 / (
+                    ks * stall_velocity * thrust_loading ** 2
+                ),
+            }
+
+        return {
+            "dresidual_dwing_loading": 0.0,
+            "dresidual_dthrust_loading": -1.0,
+        }
+
+    converted_wing_loading = wing_loading * N_M2_TO_LBF_FT2
+
+    if req_type == 1:
+        vstall_ft_s = stall_velocity * convert_velocity(1.0, "m/s", "ft/s")
+        q = 0.5 * RHO_SL_STD * RHO_SI_TO_ENGLISH * (vstall_ft_s * ks) ** 2
+        dbase_dwing_loading = (
+            cruise_drag_residual_base_derivative(
+                converted_wing_loading,
+                q,
+                cd0,
+                aspect_ratio,
+                oswald,
+            )
+            * N_M2_TO_LBF_FT2
+        )
+
+        if aircraft_class in ("turboprop", "piston"):
+            velocity = convert_velocity(vstall_ft_s * ks, "ft/s", "m/s")
+            return {
+                "dresidual_dwing_loading": correction * dbase_dwing_loading,
+                "dresidual_dthrust_loading": 1.0 / (
+                    velocity * thrust_loading ** 2
+                ),
+            }
+
+        return {
+            "dresidual_dwing_loading": correction * dbase_dwing_loading,
+            "dresidual_dthrust_loading": -1.0,
+        }
+
+    if req_type == 2:
+        if aircraft_class in ("turboprop", "piston"):
+            cl_eff = cl / ks ** 2
+            qinf = converted_wing_loading / cl_eff
+            vinf_ft_s = (2.0 * qinf / (RHO_SL_STD * RHO_SI_TO_ENGLISH)) ** 0.5
+            vinf_m_s = convert_velocity(vinf_ft_s, "ft/s", "m/s")
+            dvinf_ft_s_dwing_loading = (
+                0.5 * vinf_ft_s / converted_wing_loading * N_M2_TO_LBF_FT2
+            )
+            dvinf_m_s_dwing_loading = convert_velocity(
+                dvinf_ft_s_dwing_loading,
+                "ft/s",
+                "m/s",
+            )
+            return {
+                "dresidual_dwing_loading": (
+                    dvinf_m_s_dwing_loading / (vinf_m_s ** 2 * thrust_loading)
+                ),
+                "dresidual_dthrust_loading": 1.0 / (
+                    vinf_m_s * thrust_loading ** 2
+                ),
+            }
+
+        return {
+            "dresidual_dwing_loading": 0.0,
+            "dresidual_dthrust_loading": -1.0,
+        }
+
+    raise ValueError("FAR 25 climb ReqType must be 0, 1, or 2.")
 
 
 def cruise_dynamic_pressure_values(altitude, mach):

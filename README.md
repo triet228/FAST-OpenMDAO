@@ -35,6 +35,7 @@ derivative-native FAST equation components:
 - Constraint residual components for approach speed, takeoff field length, and
   landing field length plus cruise/diversion with analytical partial
   derivatives and optimization validation against FAST-Python residual roots.
+- Generic FAR 25 climb residual component with analytical partial derivatives.
 - Battery scalar primitives for effective cell capacity and selected current
   root with analytical partial derivatives.
 - `make_fast_optimization_problem`: a driver-ready builder that attaches
@@ -206,8 +207,10 @@ fast-openmdao-compact --range-initial 20000 --range-lower 10000 --range-upper 40
 15. Convert approach, takeoff field length, landing field length, and
    cruise/diversion constraint residuals with analytical partial derivatives.
    Done.
-16. Add complex-step derivative checks where supported by FAST-Python internals.
-17. Build reusable groups for mission, propulsion, weights, and objective
+16. Convert shared FAR 25 climb residual with analytical partial derivatives.
+   Done.
+17. Add complex-step derivative checks where supported by FAST-Python internals.
+18. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

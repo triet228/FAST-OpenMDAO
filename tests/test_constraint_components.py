@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     CruiseDynamicPressure,
+    FAR25ClimbConstraint,
     FAR25EngineGradient,
     JetApproachConstraint,
     JetCruiseConstraint,
@@ -23,6 +24,7 @@ from fast_python.constraint import (
     cruise_dynamic_pressure,
     far25_engine_gradient,
     jet_app,
+    jet25_111,
     jet_crs,
     jet_div,
     jet_lfl,
@@ -248,6 +250,38 @@ def test_jet_cruise_residual_components_match_fast_python():
         )
 
 
+def test_far25_climb_component_matches_fast_python_jet25_111():
+    """Check shared FAR 25 climb residual parity through Jet25_111."""
+
+    aircraft = make_full_constraint_aircraft()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "constraint",
+        FAR25ClimbConstraint(
+            aircraft_class="Turbofan",
+            req_type=1,
+            cl=2.0,
+            cd0=0.025,
+            aspect_ratio=9.0,
+            oswald=0.75,
+            correction=2.2,
+            gradient=0.012,
+            ks=1.2,
+            stall_velocity=60.0,
+        ),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("wing_loading", 400.0, units="kg/m**2")
+    problem.set_val("thrust_loading", 0.3)
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("far25_climb_residual")[0],
+        jet25_111(400.0, 0.3, aircraft),
+    )
+
+
 def test_constraint_primitives_declare_analytic_partials():
     """Check constraint primitive derivatives against finite difference."""
 
@@ -299,6 +333,22 @@ def test_constraint_primitives_declare_analytic_partials():
                 mach=0.78,
                 lapse_exp=0.6,
                 devries_exp=0.1,
+            ),
+            {"wing_loading": 400.0, "thrust_loading": 0.3},
+        ),
+        (
+            "far25",
+            FAR25ClimbConstraint(
+                aircraft_class="Turbofan",
+                req_type=1,
+                cl=2.0,
+                cd0=0.025,
+                aspect_ratio=9.0,
+                oswald=0.75,
+                correction=2.2,
+                gradient=0.012,
+                ks=1.2,
+                stall_velocity=60.0,
             ),
             {"wing_loading": 400.0, "thrust_loading": 0.3},
         ),
@@ -404,6 +454,30 @@ def test_constraint_residual_optimizations_match_fast_python_zero_points():
     cruise_problem.run_driver()
     cruise_root = cruise_problem.get_val("thrust_loading")[0]
     assert abs(jet_crs(400.0, cruise_root, aircraft)) < 1.0e-7
+
+    far25_problem = make_zero_residual_problem(
+        FAR25ClimbConstraint(
+            aircraft_class="Turbofan",
+            req_type=1,
+            cl=2.0,
+            cd0=0.025,
+            aspect_ratio=9.0,
+            oswald=0.75,
+            correction=2.2,
+            gradient=0.012,
+            ks=1.2,
+            stall_velocity=60.0,
+        ),
+        "far25_climb_residual",
+        design_var="thrust_loading",
+        initial=0.3,
+        lower=0.01,
+        upper=1.0,
+    )
+    far25_problem.set_val("wing_loading", 400.0, units="kg/m**2")
+    far25_problem.run_driver()
+    far25_root = far25_problem.get_val("thrust_loading")[0]
+    assert abs(jet25_111(400.0, far25_root, aircraft)) < 1.0e-7
 
 
 def make_zero_residual_problem(component, residual_name, design_var, initial, lower, upper):
