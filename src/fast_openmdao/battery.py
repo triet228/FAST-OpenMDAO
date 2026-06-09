@@ -346,6 +346,71 @@ class BatteryHistoryMatrix(om.ExplicitComponent):
         )["history_matrix"]
 
 
+class BatteryPowerTimeBroadcast(om.ExplicitComponent):
+    """Broadcast FAST battery requested-power and time vectors to one length."""
+
+    def initialize(self):
+        self.options.declare("power_size", default=1)
+        self.options.declare("time_size", default=1)
+
+    def setup(self):
+        power_size = self.options["power_size"]
+        time_size = self.options["time_size"]
+        output_size = battery_power_time_output_size(power_size, time_size)
+        self.add_input("requested_power", val=np.zeros(power_size), units="W")
+        self.add_input("time", val=np.zeros(time_size), units="s")
+        self.add_output("broadcast_power", val=np.zeros(output_size), units="W")
+        self.add_output("broadcast_time", val=np.zeros(output_size), units="s")
+        self.declare_partials(of="broadcast_power", wrt="requested_power")
+        self.declare_partials(of="broadcast_time", wrt="time")
+
+    def compute(self, inputs, outputs):
+        values = battery_power_time_broadcast_values(
+            inputs["requested_power"],
+            inputs["time"],
+        )
+        outputs["broadcast_power"] = values["broadcast_power"]
+        outputs["broadcast_time"] = values["broadcast_time"]
+
+    def compute_partials(self, inputs, partials):
+        values = battery_power_time_broadcast_values(
+            inputs["requested_power"],
+            inputs["time"],
+        )
+        partials["broadcast_power", "requested_power"] = values[
+            "dbroadcast_power_drequested_power"
+        ]
+        partials["broadcast_time", "time"] = values["dbroadcast_time_dtime"]
+
+
+class BatteryInitialSOC(om.ExplicitComponent):
+    """Normalize FAST battery initial state of charge default/scalar input."""
+
+    def initialize(self):
+        self.options.declare("soc_size", default=1)
+
+    def setup(self):
+        soc_size = self.options["soc_size"]
+
+        if soc_size not in (0, 1):
+            raise ValueError("BatteryInitialSOC requires soc_size 0 or 1.")
+
+        if soc_size == 1:
+            self.add_input("soc_begin", val=np.zeros(1))
+
+        self.add_output("initial_soc", val=100.0)
+
+        if soc_size == 1:
+            self.declare_partials(of="initial_soc", wrt="soc_begin", val=1.0)
+
+    def compute(self, inputs, outputs):
+        if self.options["soc_size"] == 0:
+            outputs["initial_soc"] = 100.0
+            return
+
+        outputs["initial_soc"] = inputs["soc_begin"][0]
+
+
 class DetailedBatterySizing(om.ExplicitComponent):
     """Resize detailed battery parallel-cell counts and mass after a mission."""
 
@@ -828,6 +893,54 @@ def battery_history_matrix_values(values, columns):
         matrix = array
 
     return {"history_matrix": matrix}
+
+
+def battery_power_time_output_size(power_size, time_size):
+    """Return FAST broadcast length for fixed power and time vector sizes."""
+
+    if power_size == 1:
+        return time_size
+
+    if time_size == 1:
+        return power_size
+
+    if power_size == time_size:
+        return power_size
+
+    raise ValueError("Battery power and time sizes must match or broadcast.")
+
+
+def battery_power_time_broadcast_values(requested_power, time):
+    """Return FAST battery power/time broadcast outputs and derivatives."""
+
+    requested_power = np.asarray(requested_power, dtype=float).reshape(-1)
+    time = np.asarray(time, dtype=float).reshape(-1)
+    power_size = requested_power.size
+    time_size = time.size
+    output_size = battery_power_time_output_size(power_size, time_size)
+
+    if power_size == 1 and output_size > 1:
+        broadcast_power = np.repeat(requested_power, output_size)
+        dpower_dpower = np.ones((output_size, 1))
+    else:
+        broadcast_power = requested_power.copy()
+        dpower_dpower = np.eye(output_size, power_size)
+
+    if time_size == 1 and output_size > 1:
+        broadcast_time = np.repeat(time, output_size)
+        dtime_dtime = np.ones((output_size, 1))
+    else:
+        broadcast_time = time.copy()
+        dtime_dtime = np.eye(output_size, time_size)
+
+    return {
+        "broadcast_power": broadcast_power,
+        "broadcast_time": broadcast_time,
+        "dbroadcast_power_drequested_power": dpower_dpower,
+        "dbroadcast_power_dtime": np.zeros((output_size, time_size)),
+        "dbroadcast_time_drequested_power": np.zeros((output_size, power_size)),
+        "dbroadcast_time_dtime": dtime_dtime,
+    }
 
 
 def battery_power_step_input_names():

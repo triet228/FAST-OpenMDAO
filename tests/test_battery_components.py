@@ -16,10 +16,12 @@ from fast_openmdao import (
     BatteryCurrent,
     BatteryHistoryColumnMatrix,
     BatteryHistoryMatrix,
+    BatteryInitialSOC,
     BatteryNonzeroMean,
     DetailedBatterySizing,
     BatteryPowerHistory,
     BatteryPowerStep,
+    BatteryPowerTimeBroadcast,
     BatteryVector,
     BatteryWeightFromEnergy,
 )
@@ -33,6 +35,8 @@ from fast_python.battery import (
     estimate_charge_ocv,
     history_matrix,
     nonzero_mean,
+    prepare_initial_soc,
+    prepare_power_time,
     resize_battery,
     solve_battery_current,
 )
@@ -208,6 +212,72 @@ def test_battery_shape_normalizers_match_fast_python():
         history_problem.get_val("history_matrix"),
         history_matrix(history_values, 3),
     )
+
+
+def test_battery_power_time_broadcast_matches_fast_python():
+    """Check battery power/time broadcast parity with FAST-Python."""
+
+    cases = [
+        (np.asarray([1000.0]), np.asarray([10.0, 20.0, 30.0])),
+        (np.asarray([500.0, 600.0, 700.0]), np.asarray([12.0])),
+        (np.asarray([80.0, 90.0]), np.asarray([1.5, 2.5])),
+    ]
+
+    for requested_power, time in cases:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "broadcast",
+            BatteryPowerTimeBroadcast(
+                power_size=requested_power.size,
+                time_size=time.size,
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("requested_power", requested_power, units="W")
+        problem.set_val("time", time, units="s")
+        problem.run_model()
+
+        expected_power, expected_time = prepare_power_time(
+            requested_power,
+            time,
+            "test",
+        )
+        assert np.allclose(
+            problem.get_val("broadcast_power", units="W"),
+            expected_power,
+        )
+        assert np.allclose(problem.get_val("broadcast_time", units="s"), expected_time)
+
+
+def test_battery_initial_soc_matches_fast_python():
+    """Check initial SOC scalar/default parity with FAST-Python."""
+
+    scalar = om.Problem()
+    scalar.model.add_subsystem(
+        "initial",
+        BatteryInitialSOC(soc_size=1),
+        promotes=["*"],
+    )
+    scalar.setup()
+    scalar.set_val("soc_begin", np.asarray([84.0]))
+    scalar.run_model()
+
+    assert np.isclose(
+        scalar.get_val("initial_soc")[0],
+        prepare_initial_soc(np.asarray([84.0]), "test"),
+    )
+
+    default = om.Problem()
+    default.model.add_subsystem(
+        "initial",
+        BatteryInitialSOC(soc_size=0),
+        promotes=["*"],
+    )
+    default.setup()
+    default.run_model()
+
+    assert np.isclose(default.get_val("initial_soc")[0], prepare_initial_soc([], "test"))
 
 
 def test_detailed_battery_sizing_matches_fast_python_resize_battery():
@@ -395,6 +465,27 @@ def test_battery_primitives_declare_analytic_partials():
             "battery_history_matrix",
             BatteryHistoryMatrix(input_shape=(3,), columns=3),
             {"values": np.asarray([8.0, 9.0, 10.0])},
+        ),
+        (
+            "power_time_broadcast_power",
+            BatteryPowerTimeBroadcast(power_size=1, time_size=3),
+            {
+                "requested_power": np.asarray([1000.0]),
+                "time": np.asarray([10.0, 20.0, 30.0]),
+            },
+        ),
+        (
+            "power_time_broadcast_time",
+            BatteryPowerTimeBroadcast(power_size=3, time_size=1),
+            {
+                "requested_power": np.asarray([500.0, 600.0, 700.0]),
+                "time": np.asarray([12.0]),
+            },
+        ),
+        (
+            "initial_soc",
+            BatteryInitialSOC(soc_size=1),
+            {"soc_begin": np.asarray([84.0])},
         ),
         (
             "charge_current",
