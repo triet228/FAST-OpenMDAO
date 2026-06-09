@@ -88,6 +88,85 @@ class FeasibleStep(om.ExplicitComponent):
         ]
 
 
+class MeritFunction(om.ExplicitComponent):
+    """Compute FAST interior-point line-search merit value.
+
+    Inputs:
+        objective: Scalar objective value.
+        inequality_constraints: Inequality residual vector ``g``.
+        equality_constraints: Equality residual vector ``h``.
+        slack: Positive slack vector, when the slack branch is active.
+        barrier_parameter: FAST barrier parameter ``mu``.
+
+    Outputs:
+        merit: Scalar value used by FAST's line-search objective.
+
+    Assumptions:
+        This component converts the algebraic merit expression only. The
+        golden-section search and interior-point iteration remain OpenMDAO
+        driver/orchestration concerns.
+    """
+
+    def initialize(self):
+        self.options.declare("num_inequality", default=1)
+        self.options.declare("num_equality", default=0)
+        self.options.declare("use_slack", default=True)
+
+    def setup(self):
+        num_inequality = self.options["num_inequality"]
+        num_equality = self.options["num_equality"]
+        self.add_input("objective", val=1.0)
+        self.add_input("inequality_constraints", val=np.zeros(num_inequality))
+        self.add_input("equality_constraints", val=np.zeros(num_equality))
+
+        if self.options["use_slack"]:
+            self.add_input("slack", val=np.ones(num_inequality))
+            self.add_input("barrier_parameter", val=1.0)
+
+        self.add_output("merit", val=1.0)
+        self.declare_partials(of="merit", wrt="objective")
+        self.declare_partials(of="merit", wrt="inequality_constraints")
+        self.declare_partials(of="merit", wrt="equality_constraints")
+
+        if self.options["use_slack"]:
+            self.declare_partials(of="merit", wrt="slack")
+            self.declare_partials(of="merit", wrt="barrier_parameter")
+
+    def compute(self, inputs, outputs):
+        values = merit_function_values(
+            inputs["objective"][0],
+            inputs["inequality_constraints"],
+            inputs["equality_constraints"],
+            get_slack_values(inputs, self.options["num_inequality"]),
+            get_barrier_parameter(inputs),
+            self.options["use_slack"],
+        )
+        outputs["merit"] = values["merit"]
+
+    def compute_partials(self, inputs, partials):
+        values = merit_function_values(
+            inputs["objective"][0],
+            inputs["inequality_constraints"],
+            inputs["equality_constraints"],
+            get_slack_values(inputs, self.options["num_inequality"]),
+            get_barrier_parameter(inputs),
+            self.options["use_slack"],
+        )
+        partials["merit", "objective"] = values["dmerit_dobjective"]
+        partials["merit", "inequality_constraints"] = values[
+            "dmerit_dinequality_constraints"
+        ]
+        partials["merit", "equality_constraints"] = values[
+            "dmerit_dequality_constraints"
+        ]
+
+        if self.options["use_slack"]:
+            partials["merit", "slack"] = values["dmerit_dslack"]
+            partials["merit", "barrier_parameter"] = values[
+                "dmerit_dbarrier_parameter"
+            ]
+
+
 class PowerLimitConstraints(om.ExplicitComponent):
     """Compute FAST paired lower and upper power/energy limit constraints.
 
@@ -457,6 +536,68 @@ def feasible_step_values(slack, slack_direction, num_constraints):
         "feasible_step": step,
         "dfeasible_step_dslack": dslack,
         "dfeasible_step_dslack_direction": ddirection,
+    }
+
+
+def get_slack_values(inputs, num_inequality):
+    """Return slack input when the merit component exposes it."""
+
+    if "slack" not in inputs:
+        return np.zeros(num_inequality)
+
+    return inputs["slack"]
+
+
+def get_barrier_parameter(inputs):
+    """Return merit barrier parameter input when present."""
+
+    if "barrier_parameter" not in inputs:
+        return 0.0
+
+    return inputs["barrier_parameter"][0]
+
+
+def merit_function_values(
+    objective,
+    inequality_constraints,
+    equality_constraints,
+    slack,
+    barrier_parameter,
+    use_slack,
+):
+    """Return FAST merit-function value and analytical derivatives."""
+
+    g = np.asarray(inequality_constraints, dtype=float).reshape(-1)
+    h = np.asarray(equality_constraints, dtype=float).reshape(-1)
+    s = np.asarray(slack, dtype=float).reshape(-1)
+    mu = float(barrier_parameter)
+    dmu = 0.0
+
+    if use_slack:
+        rho = 100.0 * mu
+        residual = g + s
+        slack_penalty = mu * np.sum(np.log(s))
+        dslack = -mu / s + rho * residual
+        dmu = -np.sum(np.log(s)) + 50.0 * (
+            np.linalg.norm(h) ** 2 + np.linalg.norm(residual) ** 2
+        )
+    else:
+        rho = 1.0
+        residual = g
+        slack_penalty = 0.0
+        dslack = np.zeros_like(s)
+
+    merit = objective - slack_penalty + 0.5 * rho * (
+        np.linalg.norm(h) ** 2 + np.linalg.norm(residual) ** 2
+    )
+
+    return {
+        "merit": merit,
+        "dmerit_dobjective": 1.0,
+        "dmerit_dinequality_constraints": rho * residual,
+        "dmerit_dequality_constraints": rho * h,
+        "dmerit_dslack": dslack,
+        "dmerit_dbarrier_parameter": dmu,
     }
 
 

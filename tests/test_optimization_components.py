@@ -15,6 +15,7 @@ from fast_openmdao import (
     DesignSplitBounds,
     ElectricMotorPowerAvailable,
     FeasibleStep,
+    MeritFunction,
     OperationalObjective,
     OperationalSplitConstraints,
     PowerManagementObjective,
@@ -25,6 +26,7 @@ from fast_python.optimization import (
     con_size_opt,
     electric_motor_power_available,
     feas_step,
+    merit_function,
     operational_objective_value,
     operational_split_constraint_blocks,
     power_management_objective,
@@ -118,6 +120,61 @@ def test_feasible_step_matches_fast_python():
     assert np.isclose(
         problem.get_val("feasible_step")[0],
         feas_step(slack.size, slack, slack_direction),
+    )
+
+
+def test_merit_function_matches_fast_python():
+    """Check FAST line-search merit value parity."""
+
+    objective = 12.5
+    g = np.asarray([-0.2, 0.1])
+    h = np.asarray([0.05])
+    slack = np.asarray([0.4, 0.7])
+    mu = 0.3
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "merit",
+        MeritFunction(num_inequality=2, num_equality=1, use_slack=True),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("objective", objective)
+    problem.set_val("inequality_constraints", g)
+    problem.set_val("equality_constraints", h)
+    problem.set_val("slack", slack)
+    problem.set_val("barrier_parameter", mu)
+    problem.run_model()
+
+    assert np.isclose(
+        problem.get_val("merit")[0],
+        merit_function(
+            make_merit_objective(objective),
+            np.asarray([1.0]),
+            make_merit_constraints(g, h),
+            slack,
+            mu,
+        ),
+    )
+
+    no_slack = om.Problem()
+    no_slack.model.add_subsystem(
+        "merit",
+        MeritFunction(num_inequality=2, num_equality=1, use_slack=False),
+        promotes=["*"],
+    )
+    no_slack.setup()
+    no_slack.set_val("objective", objective)
+    no_slack.set_val("inequality_constraints", g)
+    no_slack.set_val("equality_constraints", h)
+    no_slack.run_model()
+
+    assert np.isclose(
+        no_slack.get_val("merit")[0],
+        merit_function(
+            make_merit_objective(objective),
+            np.asarray([1.0]),
+            make_merit_constraints(g, h),
+        ),
     )
 
 
@@ -315,6 +372,26 @@ def test_optimization_helpers_declare_analytic_partials():
             },
         ),
         (
+            "merit",
+            MeritFunction(num_inequality=2, num_equality=1, use_slack=True),
+            {
+                "objective": 12.5,
+                "inequality_constraints": np.asarray([-0.2, 0.1]),
+                "equality_constraints": np.asarray([0.05]),
+                "slack": np.asarray([0.4, 0.7]),
+                "barrier_parameter": 0.3,
+            },
+        ),
+        (
+            "merit_no_slack",
+            MeritFunction(num_inequality=2, num_equality=1, use_slack=False),
+            {
+                "objective": 12.5,
+                "inequality_constraints": np.asarray([-0.2, 0.1]),
+                "equality_constraints": np.asarray([0.05]),
+            },
+        ),
+        (
             "splits",
             OperationalSplitConstraints(
                 npoint=3,
@@ -439,6 +516,24 @@ def make_operational_split_aircraft(npoint, nopers, ndvars, narg, lam_max):
             "ndvars": ndvars,
         },
     }
+
+
+def make_merit_objective(value):
+    """Return FAST objective callable with a fixed value."""
+
+    def objective(_x, _need_grad):
+        return value, np.asarray([0.0]), None
+
+    return objective
+
+
+def make_merit_constraints(g, h):
+    """Return FAST constraint callable with fixed residuals."""
+
+    def constraints(_x, _need_grad, _info=None):
+        return g, h, np.zeros((len(g), 1)), np.zeros((len(h), 1))
+
+    return constraints
 
 
 def make_design_split_bound_aircraft(num_design_splits):
