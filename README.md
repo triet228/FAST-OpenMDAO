@@ -42,6 +42,8 @@ derivative-native FAST equation components:
   partial derivatives.
 - Engine on-design burner flow, fuel addition, combustor pressure loss, and
   exit-state component with analytical partial derivatives.
+- Engine one-stage compressor/fan flow component with corrected map scalars
+  and analytical partial derivatives.
 - Engine BADA-style simple off-design turbofan fuel-flow component with
   analytical partial derivatives.
 - Propulsion primitives for cable sizing weight, engine lapse, engine thrust
@@ -101,11 +103,11 @@ The public `fast_openmdao` package currently exports:
 - Cost: `BatteryReplacementCost`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
-  `ChokedArea`, `FlowArea`, `JetAIntegratedHeat`, `LocalEfficiency`,
-  `LocalReynolds`, `MassFlowParameter`, `OffDesignNozzleMach`,
-  `SimpleOffDesignTurbofan`, `StaticDensity`, `StaticPressure`,
-  `StaticTemperature`, `ThermalPerfectGamma`, `TotalPressure`,
-  `TotalTemperature`
+  `ChokedArea`, `CompressorStageFlow`, `FlowArea`, `JetAIntegratedHeat`,
+  `LocalEfficiency`, `LocalReynolds`, `MassFlowParameter`,
+  `OffDesignNozzleMach`, `SimpleOffDesignTurbofan`, `StaticDensity`,
+  `StaticPressure`, `StaticTemperature`, `ThermalPerfectGamma`,
+  `TotalPressure`, `TotalTemperature`
 - Mission: `CruiseBreguetEfficiencyTriplet`, `CruiseBreguetPowerSplit`,
   `CruiseBreguetPropulsiveEfficiency`, `CruiseBreguetSourceEnergy`,
   `CruiseTimeTargetDistance`, `FlightConditions`, `InitialEnergyRemaining`

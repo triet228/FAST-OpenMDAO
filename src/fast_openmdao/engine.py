@@ -397,6 +397,85 @@ class BurnerFlow(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class CompressorStageFlow(om.ExplicitComponent):
+    """Compute one FAST on-design compressor or fan stage."""
+
+    def setup(self):
+        self.add_input("mass_flow_1", val=50.0, units="kg/s")
+        self.add_input("area_1", val=0.5, units="m**2")
+        self.add_input("total_pressure_1", val=200000.0, units="Pa")
+        self.add_input("total_temperature_1", val=350.0, units="K")
+        self.add_input("static_pressure_1", val=190000.0, units="Pa")
+        self.add_input("static_temperature_1", val=345.0, units="K")
+        self.add_input("mach_1", val=0.35)
+        self.add_input("gamma_1", val=1.38)
+        self.add_input("outer_radius_1", val=0.8, units="m")
+        self.add_input("stage_pressure_ratio", val=1.2)
+        self.add_input("rpm", val=6000.0, units="rpm")
+        self.add_input("stage_efficiency", val=0.9)
+        self.add_output("mass_flow_3", val=50.0, units="kg/s")
+        self.add_output("total_pressure_3", val=240000.0, units="Pa")
+        self.add_output("total_temperature_3", val=370.0, units="K")
+        self.add_output("static_temperature_3", val=365.0, units="K")
+        self.add_output("mach_3", val=0.3)
+        self.add_output("cp_air_3", val=1010.0)
+        self.add_output("cv_air_3", val=723.0)
+        self.add_output("gamma_3", val=1.38)
+        self.add_output("static_pressure_3", val=230000.0, units="Pa")
+        self.add_output("area_3", val=0.48, units="m**2")
+        self.add_output("outer_radius_3", val=0.8, units="m")
+        self.add_output("inner_radius_3", val=0.65, units="m")
+        self.add_output("pitch_radius_3", val=0.72, units="m")
+        self.add_output("work", val=1.0e6, units="W")
+        self.add_output("temperature_ratio", val=1.05)
+        self.add_output("stage_eta", val=0.9)
+        self.add_output("stage_psi", val=0.2)
+        self.add_output("corrected_mass_flow", val=50.0)
+        self.add_output("corrected_speed", val=6000.0)
+        self.add_output("stage_phi", val=0.5)
+        self.add_output("stage_zeta", val=0.3)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = compressor_stage_flow_values(
+            inputs["mass_flow_1"][0],
+            inputs["area_1"][0],
+            inputs["total_pressure_1"][0],
+            inputs["total_temperature_1"][0],
+            inputs["static_pressure_1"][0],
+            inputs["static_temperature_1"][0],
+            inputs["mach_1"][0],
+            inputs["gamma_1"][0],
+            inputs["outer_radius_1"][0],
+            inputs["stage_pressure_ratio"][0],
+            inputs["rpm"][0],
+            inputs["stage_efficiency"][0],
+        )
+
+        for output in compressor_stage_flow_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = compressor_stage_flow_values(
+            inputs["mass_flow_1"][0],
+            inputs["area_1"][0],
+            inputs["total_pressure_1"][0],
+            inputs["total_temperature_1"][0],
+            inputs["static_pressure_1"][0],
+            inputs["static_temperature_1"][0],
+            inputs["mach_1"][0],
+            inputs["gamma_1"][0],
+            inputs["outer_radius_1"][0],
+            inputs["stage_pressure_ratio"][0],
+            inputs["rpm"][0],
+            inputs["stage_efficiency"][0],
+        )
+
+        for output in compressor_stage_flow_output_names():
+            for variable in compressor_stage_flow_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class AirIntegratedHeat(om.ExplicitComponent):
     """Compute FAST integrated air specific heat between two temperatures."""
 
@@ -840,6 +919,187 @@ def burner_flow_values(
             result["d%s_d%s" % (output_name, input_name)] = ad_value.derivatives.get(
                 input_name,
                 0.0,
+            )
+
+    return result
+
+
+def compressor_stage_flow_input_names():
+    """Return scalar inputs for CompressorStageFlow derivative bookkeeping."""
+
+    return (
+        "mass_flow_1",
+        "area_1",
+        "total_pressure_1",
+        "total_temperature_1",
+        "static_pressure_1",
+        "static_temperature_1",
+        "mach_1",
+        "gamma_1",
+        "outer_radius_1",
+        "stage_pressure_ratio",
+        "rpm",
+        "stage_efficiency",
+    )
+
+
+def compressor_stage_flow_output_names():
+    """Return scalar CompressorStageFlow outputs."""
+
+    return (
+        "mass_flow_3",
+        "total_pressure_3",
+        "total_temperature_3",
+        "static_temperature_3",
+        "mach_3",
+        "cp_air_3",
+        "cv_air_3",
+        "gamma_3",
+        "static_pressure_3",
+        "area_3",
+        "outer_radius_3",
+        "inner_radius_3",
+        "pitch_radius_3",
+        "work",
+        "temperature_ratio",
+        "stage_eta",
+        "stage_psi",
+        "corrected_mass_flow",
+        "corrected_speed",
+        "stage_phi",
+        "stage_zeta",
+    )
+
+
+def compressor_stage_flow_values(
+    mass_flow_1,
+    area_1,
+    total_pressure_1,
+    total_temperature_1,
+    static_pressure_1,
+    static_temperature_1,
+    mach_1,
+    gamma_1,
+    outer_radius_1,
+    stage_pressure_ratio,
+    rpm,
+    stage_efficiency,
+):
+    """Return FAST compressor-stage outputs with forward derivatives."""
+
+    raw_inputs = {
+        "mass_flow_1": mass_flow_1,
+        "area_1": area_1,
+        "total_pressure_1": total_pressure_1,
+        "total_temperature_1": total_temperature_1,
+        "static_pressure_1": static_pressure_1,
+        "static_temperature_1": static_temperature_1,
+        "mach_1": mach_1,
+        "gamma_1": gamma_1,
+        "outer_radius_1": outer_radius_1,
+        "stage_pressure_ratio": stage_pressure_ratio,
+        "rpm": rpm,
+        "stage_efficiency": stage_efficiency,
+    }
+    values = {
+        name: _Ad.variable(raw_inputs[name], name)
+        for name in compressor_stage_flow_input_names()
+    }
+    mass1 = values["mass_flow_1"]
+    area1 = values["area_1"]
+    pt1 = values["total_pressure_1"]
+    tt1 = values["total_temperature_1"]
+    ps1 = values["static_pressure_1"]
+    ts1 = values["static_temperature_1"]
+    mach1 = values["mach_1"]
+    gamma1 = values["gamma_1"]
+    ro1 = values["outer_radius_1"]
+    stage_pr = values["stage_pressure_ratio"]
+    rpm_ad = values["rpm"]
+    efficiency = values["stage_efficiency"]
+    pressure_std = 101325.353
+    temperature_std = 288.15
+    rho1 = ps1 / ts1 / GAS_CONSTANT_AIR
+    tau = stage_pr ** ((gamma1 - 1.0) / gamma1)
+    mach3 = mach1 * _ad_sqrt(
+        1.0
+        / (
+            tau * (1.0 + (gamma1 - 1.0) * mach1 ** 2.0 / 2.0)
+            - (gamma1 - 1.0) * mach1 ** 2.0 / 2.0
+        )
+    )
+    tt3 = tau * tt1
+    thermals = _ad_thermal_perfect_gamma(tt3, mach3, gamma1)
+    gamma3 = thermals["updated_gamma"]
+    pt3 = stage_pr * pt1
+    ps3 = pt3 / _ad_pressure_ratio(mach3, gamma3)
+    rho3 = ps3 / GAS_CONSTANT_AIR / thermals["static_temperature"]
+    area3 = area1 * rho1 / rho3
+    ri3 = _ad_sqrt(ro1 ** 2.0 - area3 / math.pi)
+    rp3 = (ro1 + ri3) / 2.0
+    heat_added = _ad_integrated_heat_value(
+        tt1,
+        tt3,
+        233.0,
+        1.0 / 210.0,
+        875.0,
+        993.0,
+    )
+    work = heat_added * mass1 / efficiency
+    omega = rpm_ad / 60.0 * 2.0 * math.pi
+    blade_speed = omega * rp3
+    ts1_cp = _ad_sigmoid_heat_value(ts1, 233.0, 1.0 / 210.0, 875.0, 993.0)
+    stage_eta = (
+        ts1 * stage_pr ** ((gamma3 - 1.0) / gamma3) * ts1_cp
+        - ts1 * ts1_cp
+    ) / work * mass1
+    stage_psi = heat_added / blade_speed ** 2.0
+    corrected_mass_flow = (
+        mass1 * _ad_sqrt(thermals["static_temperature"] / temperature_std)
+        / (ps3 / pressure_std)
+    )
+    corrected_speed = rpm_ad / _ad_sqrt(
+        thermals["static_temperature"] / temperature_std
+    )
+    stage_phi = (
+        GAS_CONSTANT_AIR
+        * 60.0
+        / (2.0 * math.pi * area3 * rp3)
+        * (corrected_mass_flow / pressure_std * math.sqrt(temperature_std))
+        / (corrected_speed / math.sqrt(temperature_std))
+    )
+    stage_zeta = stage_psi / stage_eta
+    ad_outputs = {
+        "mass_flow_3": mass1,
+        "total_pressure_3": pt3,
+        "total_temperature_3": tt3,
+        "static_temperature_3": thermals["static_temperature"],
+        "mach_3": mach3,
+        "cp_air_3": thermals["cp_air"],
+        "cv_air_3": thermals["cv_air"],
+        "gamma_3": gamma3,
+        "static_pressure_3": ps3,
+        "area_3": area3,
+        "outer_radius_3": ro1,
+        "inner_radius_3": ri3,
+        "pitch_radius_3": rp3,
+        "work": work,
+        "temperature_ratio": tau,
+        "stage_eta": stage_eta,
+        "stage_psi": stage_psi,
+        "corrected_mass_flow": corrected_mass_flow,
+        "corrected_speed": corrected_speed,
+        "stage_phi": stage_phi,
+        "stage_zeta": stage_zeta,
+    }
+    result = {}
+
+    for output_name, ad_value in ad_outputs.items():
+        result[output_name] = ad_value.value
+
+        for input_name in compressor_stage_flow_input_names():
+            result["d%s_d%s" % (output_name, input_name)] = (
+                ad_value.derivatives.get(input_name, 0.0)
             )
 
     return result
