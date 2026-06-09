@@ -1195,6 +1195,240 @@ class FuelUseHistory(om.ExplicitComponent):
                 ]
 
 
+class SplitValuesVector(om.ExplicitComponent):
+    """Flatten FAST propulsion split values into an optimization vector.
+
+    Inputs:
+        split_values: Fixed-shape split scalar, vector, or matrix.
+
+    Outputs:
+        normalized_split_values: Flattened split values matching
+            ``fast_python.propulsion.normalize_split_values`` for numeric
+            nonempty values.
+
+    Assumptions:
+        OpenMDAO fixes the input shape at setup, so the FAST-Python ``None``
+        branch is represented by choosing an empty problem layout instead of a
+        runtime branch.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = fixed_shape_tuple(self.options["input_shape"])
+        output_size = int(np.prod(input_shape))
+        self.add_input("split_values", val=np.zeros(input_shape))
+        self.add_output("normalized_split_values", val=np.zeros(output_size))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="normalized_split_values",
+            wrt="split_values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["normalized_split_values"] = split_values_vector_values(
+            inputs["split_values"],
+        )["normalized_split_values"]
+
+
+class PropulsionVector(om.ExplicitComponent):
+    """Normalize FAST propulsion values to a one-dimensional vector.
+
+    Inputs:
+        values: Fixed-shape scalar, vector, or matrix.
+
+    Outputs:
+        vector: Flattened values matching ``fast_python.propulsion.as_vector``
+            for numeric inputs.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = fixed_shape_tuple(self.options["input_shape"])
+        output_size = int(np.prod(input_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("vector", val=np.zeros(output_size))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="vector",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["vector"] = propulsion_vector_values(inputs["values"])["vector"]
+
+
+class PropulsionTwoDimensionalArray(om.ExplicitComponent):
+    """Normalize FAST propulsion values to an explicit two-dimensional array.
+
+    Inputs:
+        values: Fixed-shape vector or matrix.
+
+    Outputs:
+        two_dimensional_values: Values matching
+            ``fast_python.propulsion.as_2d`` for numeric inputs.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = fixed_shape_tuple(self.options["input_shape"])
+        output_shape = propulsion_two_dimensional_output_shape(input_shape)
+        output_size = int(np.prod(output_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("two_dimensional_values", val=np.zeros(output_shape))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="two_dimensional_values",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["two_dimensional_values"] = propulsion_two_dimensional_values(
+            inputs["values"],
+        )["two_dimensional_values"]
+
+
+class PropulsionHistoryMatrix(om.ExplicitComponent):
+    """Normalize FAST propulsion history values to a mission-history matrix.
+
+    Inputs:
+        values: Fixed-shape vector or matrix history values.
+
+    Outputs:
+        history_matrix: Matrix matching
+            ``fast_python.propulsion.history_matrix`` for numeric inputs.
+
+    Assumptions:
+        The expected column count is a fixed setup option. Runtime validation
+        of incompatible FAST-Python shapes remains outside this linear mapper.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+        self.options.declare("columns", default=1)
+
+    def setup(self):
+        input_shape = fixed_shape_tuple(self.options["input_shape"])
+        output_shape = propulsion_history_matrix_output_shape(
+            input_shape,
+            self.options["columns"],
+        )
+        output_size = int(np.prod(output_shape))
+        self.add_input("values", val=np.zeros(input_shape))
+        self.add_output("history_matrix", val=np.zeros(output_shape))
+        rows = np.arange(output_size)
+        self.declare_partials(
+            of="history_matrix",
+            wrt="values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(output_size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["history_matrix"] = propulsion_history_matrix_values(
+            inputs["values"],
+            self.options["columns"],
+        )["history_matrix"]
+
+
+def fixed_shape_tuple(shape):
+    """Return an OpenMDAO option shape as a tuple of integers."""
+
+    if isinstance(shape, tuple) and len(shape) == 0:
+        return ()
+
+    array = np.asarray(shape).reshape(-1)
+
+    if array.size == 0:
+        return (1,)
+
+    return tuple(int(value) for value in array)
+
+
+def split_values_vector_values(split_values):
+    """Return FAST normalized split values as a vector."""
+
+    array = np.asarray(split_values, dtype=float)
+    return {"normalized_split_values": array.reshape(-1)}
+
+
+def propulsion_vector_values(values):
+    """Return FAST propulsion values as a one-dimensional vector."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim == 0:
+        vector = array.reshape(1)
+    else:
+        vector = array.reshape(-1)
+
+    return {"vector": vector}
+
+
+def propulsion_two_dimensional_output_shape(input_shape):
+    """Return output shape for FAST propulsion ``as_2d``."""
+
+    if len(input_shape) == 1:
+        return (1, input_shape[0])
+
+    return input_shape
+
+
+def propulsion_two_dimensional_values(values):
+    """Return FAST propulsion values as a two-dimensional array."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim == 1:
+        output = array.reshape(1, -1)
+    else:
+        output = array
+
+    return {"two_dimensional_values": output}
+
+
+def propulsion_history_matrix_output_shape(input_shape, columns):
+    """Return output shape for FAST propulsion history-matrix normalization."""
+
+    if len(input_shape) == 1 and columns == 1:
+        return (input_shape[0], 1)
+
+    if len(input_shape) == 1:
+        return (1, input_shape[0])
+
+    return input_shape
+
+
+def propulsion_history_matrix_values(values, columns):
+    """Return FAST propulsion history values as a two-dimensional matrix."""
+
+    array = np.asarray(values, dtype=float)
+
+    if array.ndim == 1 and columns == 1:
+        matrix = array.reshape(-1, 1)
+    elif array.ndim == 1:
+        matrix = array.reshape(1, -1)
+    else:
+        matrix = array
+
+    return {"history_matrix": matrix}
+
+
 def engine_lapse_value(sea_level_static, aircraft_class, density):
     """Return scalar FAST engine-lapse value."""
 

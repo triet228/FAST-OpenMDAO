@@ -21,9 +21,13 @@ from fast_openmdao import (
     PowerAvailable,
     PowerFlow,
     PowerSupplementCheck,
+    PropulsionHistoryMatrix,
+    PropulsionTwoDimensionalArray,
+    PropulsionVector,
     SafeComponentWeight,
     SeriesHybridArchitecture,
     SimpleSourceTransmitterArchitecture,
+    SplitValuesVector,
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
     TurboelectricArchitecture,
@@ -38,6 +42,8 @@ from fast_python.propulsion import (
     engine_weights_for_sizing,
     estimate_fuel_use,
     get_thrust_sink_efficiency,
+    history_matrix,
+    normalize_split_values,
     parallel_hybrid_architecture,
     partial_turboelectric_architecture,
     power_available,
@@ -45,6 +51,8 @@ from fast_python.propulsion import (
     power_supplement_check,
     safe_component_weight,
     series_hybrid_architecture,
+    as_2d,
+    as_vector,
     transmitter_fan_efficiency,
     turboelectric_architecture,
     update_battery_energy,
@@ -692,6 +700,71 @@ def test_fuel_use_history_matches_fast_python_custom_model():
     )
 
 
+def test_propulsion_shape_normalizers_match_fast_python():
+    """Check propulsion split and history shape helpers against FAST-Python."""
+
+    split_values = np.asarray([[0.15, 0.25], [0.35, 0.45]])
+    split_problem = om.Problem()
+    split_problem.model.add_subsystem(
+        "split",
+        SplitValuesVector(input_shape=split_values.shape),
+        promotes=["*"],
+    )
+    split_problem.setup()
+    split_problem.set_val("split_values", split_values)
+    split_problem.run_model()
+
+    assert np.allclose(
+        split_problem.get_val("normalized_split_values"),
+        normalize_split_values(split_values),
+    )
+
+    vector_values = np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    vector_problem = om.Problem()
+    vector_problem.model.add_subsystem(
+        "vector",
+        PropulsionVector(input_shape=vector_values.shape),
+        promotes=["*"],
+    )
+    vector_problem.setup()
+    vector_problem.set_val("values", vector_values)
+    vector_problem.run_model()
+
+    assert np.allclose(vector_problem.get_val("vector"), as_vector(vector_values))
+
+    row_values = np.asarray([7.0, 8.0, 9.0])
+    two_dimensional_problem = om.Problem()
+    two_dimensional_problem.model.add_subsystem(
+        "array",
+        PropulsionTwoDimensionalArray(input_shape=row_values.shape),
+        promotes=["*"],
+    )
+    two_dimensional_problem.setup()
+    two_dimensional_problem.set_val("values", row_values)
+    two_dimensional_problem.run_model()
+
+    assert np.allclose(
+        two_dimensional_problem.get_val("two_dimensional_values"),
+        as_2d(row_values),
+    )
+
+    history_values = np.asarray([10.0, 11.0, 12.0])
+    history_problem = om.Problem()
+    history_problem.model.add_subsystem(
+        "history",
+        PropulsionHistoryMatrix(input_shape=history_values.shape, columns=1),
+        promotes=["*"],
+    )
+    history_problem.setup()
+    history_problem.set_val("values", history_values)
+    history_problem.run_model()
+
+    assert np.allclose(
+        history_problem.get_val("history_matrix"),
+        history_matrix(history_values, 1),
+    )
+
+
 def test_propulsion_primitives_declare_analytic_partials():
     """Check propulsion primitive derivatives against finite difference."""
 
@@ -1020,6 +1093,26 @@ def test_propulsion_primitives_declare_analytic_partials():
             "transmitter",
             TransmitterFanEfficiency(aircraft_class="Turbofan"),
             {"fan_efficiency": 0.91},
+        ),
+        (
+            "split_values",
+            SplitValuesVector(input_shape=(2, 2)),
+            {"split_values": np.asarray([[0.15, 0.25], [0.35, 0.45]])},
+        ),
+        (
+            "propulsion_vector",
+            PropulsionVector(input_shape=(2, 3)),
+            {"values": np.asarray([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])},
+        ),
+        (
+            "propulsion_2d",
+            PropulsionTwoDimensionalArray(input_shape=(3,)),
+            {"values": np.asarray([7.0, 8.0, 9.0])},
+        ),
+        (
+            "propulsion_history",
+            PropulsionHistoryMatrix(input_shape=(3,), columns=1),
+            {"values": np.asarray([10.0, 11.0, 12.0])},
         ),
         (
             "supplement",

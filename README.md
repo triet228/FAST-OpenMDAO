@@ -68,6 +68,8 @@ derivative-native FAST equation components:
   supplemental transmitter power with analytical partial derivatives.
 - Propulsion fuel-use, battery-source energy history accumulation, and
   fixed-branch battery depletion cutoff with analytical partial derivatives.
+- Propulsion fixed-shape split, vector, two-dimensional array, and history
+  matrix normalization helpers with analytical partial derivatives.
 - Propulsion conventional/electric, parallel-hybrid, series-hybrid,
   turboelectric, and partial-turboelectric architecture matrix builders for
   architecture, split, efficiency, source-type, and transmitter-type arrays
@@ -178,9 +180,10 @@ The public `fast_openmdao` package currently exports:
   `CableWeightForSizing`, `EngineLapse`, `EngineThrustRequirement`,
   `FuelUseHistory`, `ParallelHybridArchitecture`,
   `PartialTurboelectricArchitecture`, `PowerAvailable`, `PowerFlow`,
-  `PowerSupplementCheck`, `SafeComponentWeight`, `SeriesHybridArchitecture`,
-  `SimpleSourceTransmitterArchitecture`, `ThrustSinkEfficiency`,
-  `TransmitterFanEfficiency`,
+  `PowerSupplementCheck`, `PropulsionHistoryMatrix`,
+  `PropulsionTwoDimensionalArray`, `PropulsionVector`, `SafeComponentWeight`,
+  `SeriesHybridArchitecture`, `SimpleSourceTransmitterArchitecture`,
+  `SplitValuesVector`, `ThrustSinkEfficiency`, `TransmitterFanEfficiency`,
   `TurboelectricArchitecture`, `TurbofanEngineWeightForSizing`,
   `TurbopropEngineWeightForSizing`
 - Regression: `GaussianProcessPrediction`, `SquaredExponentialKernel`
