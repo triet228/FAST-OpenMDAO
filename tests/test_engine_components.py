@@ -18,6 +18,7 @@ from fast_openmdao import (
     BurnerFlow,
     ChokedArea,
     CompressorStageFlow,
+    DiffuserFlow,
     FlowArea,
     JetAIntegratedHeat,
     LocalEfficiency,
@@ -42,6 +43,7 @@ from fast_python.engine import (
     cp_air,
     cp_jeta,
     cv_air,
+    diffuser,
     local_efficiency,
     local_reynolds,
     mass_flow_parameter,
@@ -327,6 +329,32 @@ def test_burner_flow_matches_fast_python():
     assert np.isclose(problem.get_val("inner_radius_39", units="m")[0], expected_state["Ri"])
 
 
+def test_diffuser_flow_matches_fast_python():
+    """Check FAST on-design diffuser parity for scalar flow-state outputs."""
+
+    state1 = make_diffuser_state()
+    eta_poly = {"Diffusers": 0.98}
+    expected_state = diffuser(state1, 0.25, "Inner", eta_poly)
+    problem = om.Problem()
+    problem.model.add_subsystem("diffuser", DiffuserFlow(radius_mode="Inner"), promotes=["*"])
+    problem.setup()
+    set_diffuser_values(problem, state1, 0.25, eta_poly["Diffusers"])
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("mass_flow_2", units="kg/s")[0], expected_state["MDot"])
+    assert np.isclose(problem.get_val("total_pressure_2", units="Pa")[0], expected_state["Pt"])
+    assert np.isclose(problem.get_val("total_temperature_2", units="K")[0], expected_state["Tt"])
+    assert np.isclose(problem.get_val("static_temperature_2", units="K")[0], expected_state["Ts"])
+    assert np.isclose(problem.get_val("mach_2")[0], expected_state["Mach"])
+    assert np.isclose(problem.get_val("cp_air_2")[0], expected_state["Cp"])
+    assert np.isclose(problem.get_val("cv_air_2")[0], expected_state["Cv"])
+    assert np.isclose(problem.get_val("gamma_2")[0], expected_state["Gam"])
+    assert np.isclose(problem.get_val("static_pressure_2", units="Pa")[0], expected_state["Ps"])
+    assert np.isclose(problem.get_val("area_2", units="m**2")[0], expected_state["Area"])
+    assert np.isclose(problem.get_val("outer_radius_2", units="m")[0], expected_state["Ro"])
+    assert np.isclose(problem.get_val("inner_radius_2", units="m")[0], expected_state["Ri"])
+
+
 def test_compressor_stage_flow_matches_fast_python():
     """Check FAST one-stage compressor flow parity."""
 
@@ -523,6 +551,22 @@ def test_engine_primitives_declare_analytic_partials():
             },
         ),
         (
+            "diffuser",
+            DiffuserFlow(radius_mode="Inner"),
+            {
+                "mass_flow_1": 45.0,
+                "area_1": 0.55,
+                "total_pressure_1": 250000.0,
+                "total_temperature_1": 360.0,
+                "mach_1": 0.32,
+                "gamma_1": 1.38,
+                "outer_radius_1": 0.8,
+                "inner_radius_1": 0.45,
+                "desired_mach": 0.25,
+                "diffuser_efficiency": 0.98,
+            },
+        ),
+        (
             "burner",
             BurnerFlow(),
             {
@@ -611,6 +655,7 @@ def test_engine_primitives_declare_analytic_partials():
         for partial_data in partials[name].values():
             tolerance = 1.0e-3 if name in (
                 "nozzle",
+                "diffuser",
                 "burner",
                 "stage",
                 "turbine_stage",
@@ -636,6 +681,40 @@ def make_burner_state():
         "Cv": cv_air(ts_tt(750.0, 0.25, 1.35)),
         "Ps": ps_pt(800000.0, 0.25, 1.35),
     }
+
+
+def make_diffuser_state():
+    """Return a compact FAST-Python flow state for diffuser tests."""
+
+    return {
+        "MDot": 45.0,
+        "Area": 0.55,
+        "Pt": 250000.0,
+        "Tt": 360.0,
+        "Mach": 0.32,
+        "Gam": 1.38,
+        "Ro": 0.8,
+        "Ri": 0.45,
+        "Ts": ts_tt(360.0, 0.32, 1.38),
+        "Cp": cp_air(ts_tt(360.0, 0.32, 1.38)),
+        "Cv": cv_air(ts_tt(360.0, 0.32, 1.38)),
+        "Ps": ps_pt(250000.0, 0.32, 1.38),
+    }
+
+
+def set_diffuser_values(problem, state, desired_mach, efficiency):
+    """Set OpenMDAO diffuser inputs from a FAST-Python flow-state dictionary."""
+
+    problem.set_val("mass_flow_1", state["MDot"], units="kg/s")
+    problem.set_val("area_1", state["Area"], units="m**2")
+    problem.set_val("total_pressure_1", state["Pt"], units="Pa")
+    problem.set_val("total_temperature_1", state["Tt"], units="K")
+    problem.set_val("mach_1", state["Mach"])
+    problem.set_val("gamma_1", state["Gam"])
+    problem.set_val("outer_radius_1", state["Ro"], units="m")
+    problem.set_val("inner_radius_1", state["Ri"], units="m")
+    problem.set_val("desired_mach", desired_mach)
+    problem.set_val("diffuser_efficiency", efficiency)
 
 
 def set_burner_values(problem, state, total_temperature_4, fuel_lhv, combustor_efficiency):

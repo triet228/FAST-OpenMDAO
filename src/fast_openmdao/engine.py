@@ -331,6 +331,75 @@ class ThermalPerfectGamma(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class DiffuserFlow(om.ExplicitComponent):
+    """Compute FAST on-design diffuser flow state."""
+
+    def initialize(self):
+        self.options.declare("radius_mode", default="Inner", values=("Inner", "Outer"))
+
+    def setup(self):
+        self.add_input("mass_flow_1", val=50.0, units="kg/s")
+        self.add_input("area_1", val=0.5, units="m**2")
+        self.add_input("total_pressure_1", val=200000.0, units="Pa")
+        self.add_input("total_temperature_1", val=350.0, units="K")
+        self.add_input("mach_1", val=0.4)
+        self.add_input("gamma_1", val=1.38)
+        self.add_input("outer_radius_1", val=0.8, units="m")
+        self.add_input("inner_radius_1", val=0.45, units="m")
+        self.add_input("desired_mach", val=0.25)
+        self.add_input("diffuser_efficiency", val=0.98)
+        self.add_output("mass_flow_2", val=50.0, units="kg/s")
+        self.add_output("total_pressure_2", val=196000.0, units="Pa")
+        self.add_output("total_temperature_2", val=350.0, units="K")
+        self.add_output("static_temperature_2", val=346.0, units="K")
+        self.add_output("mach_2", val=0.25)
+        self.add_output("cp_air_2", val=1010.0)
+        self.add_output("cv_air_2", val=723.0)
+        self.add_output("gamma_2", val=1.38)
+        self.add_output("static_pressure_2", val=188000.0, units="Pa")
+        self.add_output("area_2", val=0.7, units="m**2")
+        self.add_output("outer_radius_2", val=0.85, units="m")
+        self.add_output("inner_radius_2", val=0.45, units="m")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = diffuser_flow_values(
+            inputs["mass_flow_1"][0],
+            inputs["area_1"][0],
+            inputs["total_pressure_1"][0],
+            inputs["total_temperature_1"][0],
+            inputs["mach_1"][0],
+            inputs["gamma_1"][0],
+            inputs["outer_radius_1"][0],
+            inputs["inner_radius_1"][0],
+            inputs["desired_mach"][0],
+            inputs["diffuser_efficiency"][0],
+            self.options["radius_mode"],
+        )
+
+        for output in diffuser_flow_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = diffuser_flow_values(
+            inputs["mass_flow_1"][0],
+            inputs["area_1"][0],
+            inputs["total_pressure_1"][0],
+            inputs["total_temperature_1"][0],
+            inputs["mach_1"][0],
+            inputs["gamma_1"][0],
+            inputs["outer_radius_1"][0],
+            inputs["inner_radius_1"][0],
+            inputs["desired_mach"][0],
+            inputs["diffuser_efficiency"][0],
+            self.options["radius_mode"],
+        )
+
+        for output in diffuser_flow_output_names():
+            for variable in diffuser_flow_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class BurnerFlow(om.ExplicitComponent):
     """Compute FAST on-design burner flow, fuel addition, and exit state."""
 
@@ -894,6 +963,130 @@ def simple_off_design_input_names():
         "fuel_coeff_altitude",
         "he_coefficient",
     )
+
+
+def diffuser_flow_input_names():
+    """Return scalar inputs for DiffuserFlow derivative bookkeeping."""
+
+    return (
+        "mass_flow_1",
+        "area_1",
+        "total_pressure_1",
+        "total_temperature_1",
+        "mach_1",
+        "gamma_1",
+        "outer_radius_1",
+        "inner_radius_1",
+        "desired_mach",
+        "diffuser_efficiency",
+    )
+
+
+def diffuser_flow_output_names():
+    """Return scalar DiffuserFlow outputs."""
+
+    return (
+        "mass_flow_2",
+        "total_pressure_2",
+        "total_temperature_2",
+        "static_temperature_2",
+        "mach_2",
+        "cp_air_2",
+        "cv_air_2",
+        "gamma_2",
+        "static_pressure_2",
+        "area_2",
+        "outer_radius_2",
+        "inner_radius_2",
+    )
+
+
+def diffuser_flow_values(
+    mass_flow_1,
+    area_1,
+    total_pressure_1,
+    total_temperature_1,
+    mach_1,
+    gamma_1,
+    outer_radius_1,
+    inner_radius_1,
+    desired_mach,
+    diffuser_efficiency,
+    radius_mode,
+):
+    """Return FAST diffuser outputs with forward derivatives."""
+
+    raw_inputs = {
+        "mass_flow_1": mass_flow_1,
+        "area_1": area_1,
+        "total_pressure_1": total_pressure_1,
+        "total_temperature_1": total_temperature_1,
+        "mach_1": mach_1,
+        "gamma_1": gamma_1,
+        "outer_radius_1": outer_radius_1,
+        "inner_radius_1": inner_radius_1,
+        "desired_mach": desired_mach,
+        "diffuser_efficiency": diffuser_efficiency,
+    }
+    values = {
+        name: _Ad.variable(raw_inputs[name], name)
+        for name in diffuser_flow_input_names()
+    }
+    mass1 = values["mass_flow_1"]
+    area1 = values["area_1"]
+    pt1 = values["total_pressure_1"]
+    tt1 = values["total_temperature_1"]
+    mach1 = values["mach_1"]
+    gamma1 = values["gamma_1"]
+    ro1 = values["outer_radius_1"]
+    ri1 = values["inner_radius_1"]
+    mach2 = values["desired_mach"]
+    efficiency = values["diffuser_efficiency"]
+    area_star = area1 / _ad_area_ratio(mach1, gamma1)
+    area2 = area_star * _ad_area_ratio(mach2, gamma1)
+
+    if radius_mode == "Inner":
+        ri2 = ri1
+        ro2 = _ad_sqrt(ri2 ** 2.0 + area2 / math.pi)
+    elif radius_mode == "Outer":
+        ro2 = ro1
+        radius_argument = ro2 ** 2.0 - area2 / math.pi
+
+        if radius_argument.value < 0.0:
+            raise ValueError("New diffuser area cannot fit within outer radius.")
+
+        ri2 = _ad_sqrt(radius_argument)
+    else:
+        raise ValueError("radius_mode must be Inner or Outer.")
+
+    thermals = _ad_thermal_perfect_gamma(tt1, mach2, gamma1)
+    pt2 = pt1 * efficiency
+    ps2 = pt2 / _ad_pressure_ratio(mach2, thermals["updated_gamma"])
+    ad_outputs = {
+        "mass_flow_2": mass1,
+        "total_pressure_2": pt2,
+        "total_temperature_2": tt1,
+        "static_temperature_2": thermals["static_temperature"],
+        "mach_2": mach2,
+        "cp_air_2": thermals["cp_air"],
+        "cv_air_2": thermals["cv_air"],
+        "gamma_2": thermals["updated_gamma"],
+        "static_pressure_2": ps2,
+        "area_2": area2,
+        "outer_radius_2": ro2,
+        "inner_radius_2": ri2,
+    }
+    result = {}
+
+    for output_name, ad_value in ad_outputs.items():
+        result[output_name] = ad_value.value
+
+        for input_name in diffuser_flow_input_names():
+            result["d%s_d%s" % (output_name, input_name)] = (
+                ad_value.derivatives.get(input_name, 0.0)
+            )
+
+    return result
 
 
 def burner_flow_input_names():
