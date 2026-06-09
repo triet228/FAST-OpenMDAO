@@ -172,7 +172,11 @@ from fast_openmdao.regression import (
     SquaredExponentialKernel,
 )
 from fast_openmdao.safety import FailureModel
-from fast_openmdao.specs import LM100JHybridArchitecture, LM100JHybridOperationMatrices
+from fast_openmdao.specs import (
+    AEACustomArchitecture,
+    LM100JHybridArchitecture,
+    LM100JHybridOperationMatrices,
+)
 from fast_openmdao.propulsion import (
     BatteryEnergyCutoff,
     BatteryEnergyHistory,
@@ -212,6 +216,7 @@ __all__ = [
     "AirSpecificHeatVolume",
     "AirTemperatureFromHeatAdded",
     "AirTemperatureFromHeatRemoved",
+    "AEACustomArchitecture",
     "AnalysisWeightUpdate",
     "BatteryEnergyAvailable",
     "BatteryEnergyCutoff",

@@ -6,6 +6,36 @@ import numpy as np
 import openmdao.api as om
 
 
+class AEACustomArchitecture(om.ExplicitComponent):
+    """Build the fixed AEA custom propulsion architecture matrices.
+
+    Outputs:
+        architecture: Fixed 10 by 10 component connectivity matrix.
+        upstream_split: Fixed 10 by 10 upstream operation matrix.
+        downstream_split: Fixed 10 by 10 downstream operation matrix.
+        upstream_efficiency: Fixed 10 by 10 upstream efficiency matrix.
+        downstream_efficiency: Fixed 10 by 10 downstream efficiency matrix.
+
+    Assumptions:
+        FAST-Python exposes this preset as a constant dictionary. With no
+        continuous inputs, the OpenMDAO component has an empty derivative
+        surface and no declared partials.
+    """
+
+    def setup(self):
+        self.add_output("architecture", val=np.zeros((10, 10)))
+        self.add_output("upstream_split", val=np.zeros((10, 10)))
+        self.add_output("downstream_split", val=np.zeros((10, 10)))
+        self.add_output("upstream_efficiency", val=np.ones((10, 10)))
+        self.add_output("downstream_efficiency", val=np.ones((10, 10)))
+
+    def compute(self, inputs, outputs):
+        values = aea_custom_architecture_values()
+
+        for name in aea_custom_architecture_output_names():
+            outputs[name] = values[name]
+
+
 class LM100JHybridArchitecture(om.ExplicitComponent):
     """Build LM100J_Hybrid's custom propulsion architecture matrices.
 
@@ -102,6 +132,91 @@ def lm100j_hybrid_architecture_output_names():
         "source_type",
         "transmitter_type",
     ]
+
+
+def aea_custom_architecture_output_names():
+    """Return output names for the AEA custom architecture component."""
+
+    return [
+        "architecture",
+        "upstream_split",
+        "downstream_split",
+        "upstream_efficiency",
+        "downstream_efficiency",
+    ]
+
+
+def aea_custom_architecture_values():
+    """Return the fixed AEA custom architecture matrices from FAST-Python."""
+
+    architecture = np.asarray(
+        [
+            [0, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 1, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 1, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ],
+        dtype=float,
+    )
+    downstream_split = np.asarray(
+        [
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 1, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 1, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0.25, 0.25, 0.25, 0.25, 0],
+        ],
+        dtype=float,
+    )
+    upstream_efficiency = np.asarray(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 0.661, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 0.661, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 0.661, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 0.661, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ],
+        dtype=float,
+    )
+    downstream_efficiency = np.asarray(
+        [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 0.661, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 0.661, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 0.661, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 0.661, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ],
+        dtype=float,
+    )
+
+    return {
+        "architecture": architecture,
+        "upstream_split": architecture.copy(),
+        "downstream_split": downstream_split,
+        "upstream_efficiency": upstream_efficiency,
+        "downstream_efficiency": downstream_efficiency,
+    }
 
 
 def lm100j_hybrid_architecture_values(power_split):

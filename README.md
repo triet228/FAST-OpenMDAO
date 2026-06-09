@@ -234,7 +234,7 @@ The public `fast_openmdao` package currently exports:
   `ZeroIfEmpty`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
-- Specs: `LM100JHybridArchitecture`, `LM100JHybridOperationMatrices`
+- Specs: `AEACustomArchitecture`, `LM100JHybridArchitecture`, `LM100JHybridOperationMatrices`
 - Propulsion: `BatteryEnergyCutoff`, `BatteryEnergyHistory`,
   `CableWeightForSizing`, `DetailedBatterySOCOff`, `EngineLapse`,
   `EngineThrustRequirement`, `FuelUseHistory`, `ParallelHybridArchitecture`,

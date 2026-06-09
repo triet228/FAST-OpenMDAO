@@ -9,12 +9,37 @@ os.environ.setdefault("OPENMDAO_REPORTS", "0")
 import numpy as np
 import openmdao.api as om
 
-from fast_openmdao import LM100JHybridArchitecture, LM100JHybridOperationMatrices
+from fast_openmdao import (
+    AEACustomArchitecture,
+    LM100JHybridArchitecture,
+    LM100JHybridOperationMatrices,
+)
 from fast_python.specs import (
+    aea_architecture_matrices,
     lm100j_hybrid_architecture,
     lm100j_hybrid_oper_dwn,
     lm100j_hybrid_oper_ups,
 )
+
+
+def test_aea_custom_architecture_matches_fast_python():
+    """Check AEA custom architecture parity with FAST-Python."""
+
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "architecture",
+        AEACustomArchitecture(),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.run_model()
+
+    expected = aea_architecture_matrices()
+    assert np.allclose(problem.get_val("architecture"), expected["Arch"])
+    assert np.allclose(problem.get_val("upstream_split"), expected["OperUps"])
+    assert np.allclose(problem.get_val("downstream_split"), expected["OperDwn"])
+    assert np.allclose(problem.get_val("upstream_efficiency"), expected["EtaUps"])
+    assert np.allclose(problem.get_val("downstream_efficiency"), expected["EtaDwn"])
 
 
 def test_lm100j_hybrid_architecture_matches_fast_python():
