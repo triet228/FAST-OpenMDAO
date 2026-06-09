@@ -185,6 +185,7 @@ COVERAGE_ALIASES = {
     "solve_battery_current": {"BatteryCurrent"},
     "set_aircraft_design_group": {"DatabaseDesignGroupPercent"},
     "set_split_history": {"MissionSplitHistory"},
+    "sigmoid": {"PsLossSigmoid"},
     "square_exp_kernel": {"SquaredExponentialKernel"},
     "split_scalar": {"SplitScalar"},
     "sum_weight": {"WeightSum"},
