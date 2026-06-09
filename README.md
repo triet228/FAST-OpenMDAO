@@ -11,9 +11,15 @@ groups, derivative checks, and optimization examples while keeping
 
 ## Current Status
 
-This repository is in initial setup. The first milestone is a clean Python
-package with project metadata, tests, and installation instructions. OpenMDAO
-model components will be added in small commits after this scaffold.
+This repository now has its first OpenMDAO bridge:
+
+- `FastPythonComponent`: an `om.ExplicitComponent` that wraps a `FAST-Python`
+  run.
+- Path-based scalar input specs that write OpenMDAO values into nested FAST
+  aircraft or mission dictionaries.
+- Path-based scalar output specs that extract values from the FAST result.
+- OpenMDAO finite-difference partials so drivers can compute total
+  derivatives while analytic derivatives are developed.
 
 ## Repository Layout
 
@@ -55,11 +61,44 @@ again to refresh editable installs.
 python -m pytest -q
 ```
 
+## Minimal OpenMDAO Usage
+
+```python
+from fast_openmdao import make_fast_problem
+from fast_python import native_case
+
+aircraft, mission = native_case("ATR42")
+
+problem = make_fast_problem(
+    aircraft=aircraft,
+    mission=mission,
+    input_specs=[
+        {
+            "name": "mission_range",
+            "target": "mission",
+            "path": ("Target", "Valu", 0),
+            "val": 926000.0,
+            "units": "m",
+        },
+    ],
+)
+
+problem.model.add_design_var("mission_range", lower=500000.0, upper=1200000.0)
+problem.model.add_objective("mtow")
+problem.setup()
+problem.run_model()
+```
+
+The component currently uses OpenMDAO finite-difference partials. That makes the
+framework driver-ready while FAST-Python internals are converted toward
+derivative-native implementations.
+
 ## Development Roadmap
 
-1. Add a minimal OpenMDAO component that wraps a `FAST-Python` case.
-2. Expose scalar FAST inputs as OpenMDAO design variables.
-3. Add finite-difference and complex-step derivative checks where supported.
-4. Build reusable groups for mission, propulsion, weights, and objective
+1. Add a minimal OpenMDAO component that wraps a `FAST-Python` case. Done.
+2. Expose scalar FAST inputs as OpenMDAO design variables. Done.
+3. Add finite-difference checks around the component bridge. Done.
+4. Add optimization examples that run from the command line.
+5. Add complex-step derivative checks where supported by FAST-Python internals.
+6. Build reusable groups for mission, propulsion, weights, and objective
    functions.
-5. Add optimization examples that run from the command line.

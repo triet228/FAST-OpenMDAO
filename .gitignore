@@ -51,6 +51,9 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# OpenMDAO generated reports
+*_out/
+
 # Translations
 *.mo
 *.pot
