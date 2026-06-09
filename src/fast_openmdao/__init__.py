@@ -2,6 +2,7 @@
 
 """OpenMDAO integration layer for FAST-Python."""
 
+from fast_openmdao.analysis import ConvergenceError
 from fast_openmdao.atmosphere import Gravity, StandardAtmosphere
 from fast_openmdao.battery import AvailableCellCapacity, BatteryCurrent
 from fast_openmdao.components import FastPythonComponent
@@ -59,6 +60,7 @@ __all__ = [
     "AvailableCellCapacity",
     "BatteryCurrent",
     "ChokedArea",
+    "ConvergenceError",
     "CruiseDynamicPressure",
     "CruiseTimeTargetDistance",
     "ElectricMotorSpecificPowerProjection",

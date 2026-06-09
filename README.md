@@ -56,6 +56,7 @@ derivative-native FAST equation components:
 The public `fast_openmdao` package currently exports:
 
 - Atmosphere: `Gravity`, `StandardAtmosphere`
+- Analysis: `ConvergenceError`
 - Battery: `AvailableCellCapacity`, `BatteryCurrent`
 - Constraint analysis: `CruiseDynamicPressure`, `FAR25ClimbConstraint`,
   `FAR25EngineGradient`, `JetApproachConstraint`, `JetCruiseConstraint`,
@@ -254,8 +255,10 @@ optimized values against FAST-Python residual functions.
    derivatives. Done.
 19. Convert cruise time-target distance helper with analytical partial
    derivatives. Done.
-20. Add complex-step derivative checks where supported by FAST-Python internals.
-21. Build reusable groups for mission, propulsion, weights, and objective
+20. Convert scalar convergence-error helper with analytical partial
+   derivatives. Done.
+21. Add complex-step derivative checks where supported by FAST-Python internals.
+22. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

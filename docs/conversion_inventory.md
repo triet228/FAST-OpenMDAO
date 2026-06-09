@@ -20,7 +20,7 @@ closed-form derivatives are practical.
 | FAST-Python module | Status | OpenMDAO target |
 | --- | --- | --- |
 | `aircraft.py` | support | Keep as FAST data preparation until the data contract stabilizes. |
-| `analysis.py` | candidate | Top-level analysis group coordinating weights, mission, propulsion, and convergence. |
+| `analysis.py` | candidate | Scalar convergence-error helper converted; top-level analysis group coordinating weights, mission, propulsion, and convergence remains. |
 | `atmosphere.py` | converted | `fast_openmdao.atmosphere.Gravity`, `fast_openmdao.atmosphere.StandardAtmosphere`. |
 | `battery.py` | candidate | Effective cell capacity and selected current root converted; discharge, charge, aging, and sizing components remain. |
 | `cases.py` | support | Case factories, not derivative components. |
