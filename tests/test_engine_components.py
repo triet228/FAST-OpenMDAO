@@ -24,6 +24,7 @@ from fast_openmdao import (
     LocalReynolds,
     MassFlowParameter,
     OffDesignNozzleMach,
+    PerfectExpansionNozzleFlow,
     SimpleOffDesignTurbofan,
     StaticDensity,
     StaticPressure,
@@ -48,6 +49,7 @@ from fast_python.engine import (
     newton_raphson_tt1,
     newton_raphson_tt3,
     off_design_nozzle,
+    perf_ex_nozzle,
     ps_pt,
     pt_ps,
     rhos_rhot,
@@ -398,6 +400,37 @@ def test_turbine_stage_flow_matches_fast_python():
     assert np.isclose(problem.get_val("temperature_ratio")[0], expected_tau)
 
 
+def test_perfect_expansion_nozzle_flow_matches_fast_python():
+    """Check FAST perfect-expansion core nozzle parity."""
+
+    state5 = make_nozzle_state()
+    ambient = make_nozzle_ambient()
+    eta_poly = {"Nozzles": 0.92}
+    expected_state, expected_thrust = perf_ex_nozzle(
+        state5,
+        ambient,
+        eta_poly,
+        "Core",
+    )
+    problem = om.Problem()
+    problem.model.add_subsystem("nozzle", PerfectExpansionNozzleFlow(), promotes=["*"])
+    problem.setup()
+    set_nozzle_values(problem, state5, ambient, 1.3, eta_poly["Nozzles"])
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("total_temperature_9", units="K")[0], expected_state["Tt"])
+    assert np.isclose(problem.get_val("static_temperature_9", units="K")[0], expected_state["Ts"])
+    assert np.isclose(problem.get_val("total_pressure_9", units="Pa")[0], expected_state["Pt"])
+    assert np.isclose(problem.get_val("static_pressure_9", units="Pa")[0], expected_state["Ps"])
+    assert np.isclose(problem.get_val("mach_9")[0], expected_state["Mach"])
+    assert np.isclose(problem.get_val("cp_air_9")[0], expected_state["Cp"])
+    assert np.isclose(problem.get_val("cv_air_9")[0], expected_state["Cv"])
+    assert np.isclose(problem.get_val("gamma_9")[0], expected_state["Gam"])
+    assert np.isclose(problem.get_val("area_9", units="m**2")[0], expected_state["Area"])
+    assert np.isclose(problem.get_val("core_outer_radius_9", units="m")[0], expected_state["Ro"])
+    assert np.isclose(problem.get_val("thrust", units="N")[0], expected_thrust)
+
+
 def test_simple_off_design_turbofan_matches_fast_python():
     """Check BADA-style simple off-design turbofan parity."""
 
@@ -540,6 +573,23 @@ def test_engine_primitives_declare_analytic_partials():
                 "turbine_efficiency": 0.91,
             },
         ),
+        (
+            "perfect_expansion_nozzle",
+            PerfectExpansionNozzleFlow(),
+            {
+                "mass_flow_5": 52.0,
+                "total_pressure_5": 320000.0,
+                "total_temperature_5": 900.0,
+                "cp_air_5": cp_air(900.0),
+                "gamma_5": 1.33,
+                "inner_radius_5": 0.1,
+                "ambient_total_pressure": 101325.0,
+                "ambient_mach": 0.0,
+                "ambient_gamma": 1.4,
+                "nozzle_pressure_ratio": 1.3,
+                "nozzle_efficiency": 0.92,
+            },
+        ),
     ]
 
     for name, component, values in cases:
@@ -564,6 +614,7 @@ def test_engine_primitives_declare_analytic_partials():
                 "burner",
                 "stage",
                 "turbine_stage",
+                "perfect_expansion_nozzle",
             ) else 1.0e-4
             assert partial_data["abs error"].forward < tolerance
 
@@ -671,6 +722,51 @@ def set_turbine_stage_values(problem, state, total_temperature_3, mach_2, rpm, e
     problem.set_val("stage_mach_2", mach_2)
     problem.set_val("rpm", rpm, units="rpm")
     problem.set_val("turbine_efficiency", efficiency)
+
+
+def make_nozzle_state():
+    """Return a compact FAST-Python flow state for nozzle tests."""
+
+    return {
+        "MDot": 52.0,
+        "Area": 0.4,
+        "Pt": 320000.0,
+        "Tt": 900.0,
+        "Mach": 0.55,
+        "Gam": 1.33,
+        "Ro": 0.45,
+        "Ri": 0.1,
+        "Ts": ts_tt(900.0, 0.55, 1.33),
+        "Cp": cp_air(900.0),
+        "Cv": cv_air(900.0),
+        "Ps": ps_pt(320000.0, 0.55, 1.33),
+    }
+
+
+def make_nozzle_ambient():
+    """Return compact FAST-Python ambient state for nozzle tests."""
+
+    return {
+        "Pt": 101325.0,
+        "Mach": 0.0,
+        "Gam": 1.4,
+    }
+
+
+def set_nozzle_values(problem, state, ambient, nozzle_pressure_ratio, efficiency):
+    """Set OpenMDAO nozzle inputs from FAST-Python flow states."""
+
+    problem.set_val("mass_flow_5", state["MDot"], units="kg/s")
+    problem.set_val("total_pressure_5", state["Pt"], units="Pa")
+    problem.set_val("total_temperature_5", state["Tt"], units="K")
+    problem.set_val("cp_air_5", state["Cp"])
+    problem.set_val("gamma_5", state["Gam"])
+    problem.set_val("inner_radius_5", state["Ri"], units="m")
+    problem.set_val("ambient_total_pressure", ambient["Pt"], units="Pa")
+    problem.set_val("ambient_mach", ambient["Mach"])
+    problem.set_val("ambient_gamma", ambient["Gam"])
+    problem.set_val("nozzle_pressure_ratio", nozzle_pressure_ratio)
+    problem.set_val("nozzle_efficiency", efficiency)
 
 
 def make_simple_off_design_aircraft():

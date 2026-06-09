@@ -33,8 +33,8 @@ derivative-native FAST equation components:
 - Mission initial source-energy remaining helper with analytical partial
   derivatives for fixed source layouts.
 - Engine primitives for isentropic pressure, temperature, area-Mach,
-  mass-flow parameter, off-design nozzle Mach, and static-density equations
-  with analytical partial derivatives.
+  mass-flow parameter, off-design nozzle Mach, perfect-expansion nozzle flow,
+  and static-density equations with analytical partial derivatives.
 - Engine specific-heat components for air Cp, air Cv, thermally perfect gamma
   update, integrated air heat, integrated Jet-A heat, and inverse air heat
   solvers with analytical partial derivatives.
@@ -106,9 +106,10 @@ The public `fast_openmdao` package currently exports:
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
   `ChokedArea`, `CompressorStageFlow`, `FlowArea`, `JetAIntegratedHeat`,
   `LocalEfficiency`, `LocalReynolds`, `MassFlowParameter`,
-  `OffDesignNozzleMach`, `SimpleOffDesignTurbofan`, `StaticDensity`,
-  `StaticPressure`, `StaticTemperature`, `ThermalPerfectGamma`,
-  `TotalPressure`, `TotalTemperature`, `TurbineStageFlow`
+  `OffDesignNozzleMach`, `PerfectExpansionNozzleFlow`,
+  `SimpleOffDesignTurbofan`, `StaticDensity`, `StaticPressure`,
+  `StaticTemperature`, `ThermalPerfectGamma`, `TotalPressure`,
+  `TotalTemperature`, `TurbineStageFlow`
 - Mission: `CruiseBreguetEfficiencyTriplet`, `CruiseBreguetPowerSplit`,
   `CruiseBreguetPropulsiveEfficiency`, `CruiseBreguetSourceEnergy`,
   `CruiseTimeTargetDistance`, `FlightConditions`, `InitialEnergyRemaining`

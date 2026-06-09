@@ -545,6 +545,74 @@ class TurbineStageFlow(om.ExplicitComponent):
                 partials[output, variable] = values["d%s_d%s" % (output, variable)]
 
 
+class PerfectExpansionNozzleFlow(om.ExplicitComponent):
+    """Compute FAST perfect-expansion nozzle flow and thrust."""
+
+    def setup(self):
+        self.add_input("mass_flow_5", val=50.0, units="kg/s")
+        self.add_input("total_pressure_5", val=300000.0, units="Pa")
+        self.add_input("total_temperature_5", val=900.0, units="K")
+        self.add_input("cp_air_5", val=1100.0)
+        self.add_input("gamma_5", val=1.33)
+        self.add_input("inner_radius_5", val=0.2, units="m")
+        self.add_input("ambient_total_pressure", val=101325.0, units="Pa")
+        self.add_input("ambient_mach", val=0.0)
+        self.add_input("ambient_gamma", val=1.4)
+        self.add_input("nozzle_pressure_ratio", val=1.3)
+        self.add_input("nozzle_efficiency", val=0.95)
+        self.add_output("total_temperature_9", val=900.0, units="K")
+        self.add_output("static_temperature_9", val=800.0, units="K")
+        self.add_output("total_pressure_9", val=150000.0, units="Pa")
+        self.add_output("static_pressure_9", val=130000.0, units="Pa")
+        self.add_output("mach_9", val=0.8)
+        self.add_output("cp_air_9", val=1100.0)
+        self.add_output("cv_air_9", val=813.0)
+        self.add_output("gamma_9", val=1.35)
+        self.add_output("area_9", val=0.4, units="m**2")
+        self.add_output("core_outer_radius_9", val=0.35, units="m")
+        self.add_output("bypass_outer_radius_9", val=0.3, units="m")
+        self.add_output("exit_velocity", val=400.0, units="m/s")
+        self.add_output("thrust", val=20000.0, units="N")
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = perfect_expansion_nozzle_flow_values(
+            inputs["mass_flow_5"][0],
+            inputs["total_pressure_5"][0],
+            inputs["total_temperature_5"][0],
+            inputs["cp_air_5"][0],
+            inputs["gamma_5"][0],
+            inputs["inner_radius_5"][0],
+            inputs["ambient_total_pressure"][0],
+            inputs["ambient_mach"][0],
+            inputs["ambient_gamma"][0],
+            inputs["nozzle_pressure_ratio"][0],
+            inputs["nozzle_efficiency"][0],
+        )
+
+        for output in perfect_expansion_nozzle_flow_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = perfect_expansion_nozzle_flow_values(
+            inputs["mass_flow_5"][0],
+            inputs["total_pressure_5"][0],
+            inputs["total_temperature_5"][0],
+            inputs["cp_air_5"][0],
+            inputs["gamma_5"][0],
+            inputs["inner_radius_5"][0],
+            inputs["ambient_total_pressure"][0],
+            inputs["ambient_mach"][0],
+            inputs["ambient_gamma"][0],
+            inputs["nozzle_pressure_ratio"][0],
+            inputs["nozzle_efficiency"][0],
+        )
+
+        for output in perfect_expansion_nozzle_flow_output_names():
+            for variable in perfect_expansion_nozzle_flow_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class AirIntegratedHeat(om.ExplicitComponent):
     """Compute FAST integrated air specific heat between two temperatures."""
 
@@ -1320,6 +1388,150 @@ def turbine_stage_flow_values(
     return result
 
 
+def perfect_expansion_nozzle_flow_input_names():
+    """Return scalar inputs for PerfectExpansionNozzleFlow derivatives."""
+
+    return (
+        "mass_flow_5",
+        "total_pressure_5",
+        "total_temperature_5",
+        "cp_air_5",
+        "gamma_5",
+        "inner_radius_5",
+        "ambient_total_pressure",
+        "ambient_mach",
+        "ambient_gamma",
+        "nozzle_pressure_ratio",
+        "nozzle_efficiency",
+    )
+
+
+def perfect_expansion_nozzle_flow_output_names():
+    """Return scalar PerfectExpansionNozzleFlow outputs."""
+
+    return (
+        "total_temperature_9",
+        "static_temperature_9",
+        "total_pressure_9",
+        "static_pressure_9",
+        "mach_9",
+        "cp_air_9",
+        "cv_air_9",
+        "gamma_9",
+        "area_9",
+        "core_outer_radius_9",
+        "bypass_outer_radius_9",
+        "exit_velocity",
+        "thrust",
+    )
+
+
+def perfect_expansion_nozzle_flow_values(
+    mass_flow_5,
+    total_pressure_5,
+    total_temperature_5,
+    cp_air_5,
+    gamma_5,
+    inner_radius_5,
+    ambient_total_pressure,
+    ambient_mach,
+    ambient_gamma,
+    nozzle_pressure_ratio,
+    nozzle_efficiency,
+):
+    """Return FAST perfect-expansion nozzle outputs and derivatives."""
+
+    raw_inputs = {
+        "mass_flow_5": mass_flow_5,
+        "total_pressure_5": total_pressure_5,
+        "total_temperature_5": total_temperature_5,
+        "cp_air_5": cp_air_5,
+        "gamma_5": gamma_5,
+        "inner_radius_5": inner_radius_5,
+        "ambient_total_pressure": ambient_total_pressure,
+        "ambient_mach": ambient_mach,
+        "ambient_gamma": ambient_gamma,
+        "nozzle_pressure_ratio": nozzle_pressure_ratio,
+        "nozzle_efficiency": nozzle_efficiency,
+    }
+    values = {
+        name: _Ad.variable(raw_inputs[name], name)
+        for name in perfect_expansion_nozzle_flow_input_names()
+    }
+    mass5 = values["mass_flow_5"]
+    pt5 = values["total_pressure_5"]
+    tt5 = values["total_temperature_5"]
+    cp5 = values["cp_air_5"]
+    gamma5 = values["gamma_5"]
+    inner_radius = values["inner_radius_5"]
+    ambient_pt = values["ambient_total_pressure"]
+    ambient_mach_ad = values["ambient_mach"]
+    ambient_gamma_ad = values["ambient_gamma"]
+    npr = values["nozzle_pressure_ratio"]
+    efficiency = values["nozzle_efficiency"]
+    ambient_ps = ambient_pt / _ad_pressure_ratio(ambient_mach_ad, ambient_gamma_ad)
+    ps9 = ambient_ps * npr
+    ts9_ideal = tt5 * (ps9 / pt5) ** ((gamma5 - 1.0) / gamma5)
+    u9_ideal = _ad_sqrt((tt5 - ts9_ideal) * 2.0 * cp5)
+    u9 = u9_ideal * efficiency
+    ts9 = tt5 - u9 ** 2.0 / 2.0 / cp5
+    pt9 = ps9 * (tt5 / ts9) ** (gamma5 / (gamma5 - 1.0))
+    mach9 = u9 / _ad_sqrt(gamma5 * GAS_CONSTANT_AIR * ts9)
+
+    if mach9.value > 1.0:
+        mach9 = _Ad(1.0)
+        u9 = mach9 * _ad_sqrt(gamma5 * GAS_CONSTANT_AIR * ts9)
+        ts9 = tt5 - u9 ** 2.0 / 2.0 / cp5
+        ps9 = pt9 / (tt5 / ts9) ** (gamma5 / (gamma5 - 1.0))
+
+    cp9 = _ad_sigmoid_heat_value(ts9, 233.0, 1.0 / 210.0, 875.0, 993.0)
+    cv9 = _ad_sigmoid_heat_value(
+        ts9,
+        233.0,
+        1.0 / 210.0,
+        875.0,
+        993.0 - GAS_CONSTANT_AIR,
+    )
+    gamma9 = cp9 / cv9
+    rho9 = ps9 / ts9 / GAS_CONSTANT_AIR
+    area9 = mass5 / u9 / rho9
+    core_outer_radius = _ad_sqrt(area9 / math.pi)
+    bypass_radius_argument = area9 / math.pi - inner_radius ** 2.0
+
+    if bypass_radius_argument.value > 0.0:
+        bypass_outer_radius = _ad_sqrt(bypass_radius_argument)
+    else:
+        bypass_outer_radius = _Ad(0.0)
+
+    thrust = mass5 * u9 + (ps9 - ambient_ps) * area9
+    ad_outputs = {
+        "total_temperature_9": tt5,
+        "static_temperature_9": ts9,
+        "total_pressure_9": pt9,
+        "static_pressure_9": ps9,
+        "mach_9": mach9,
+        "cp_air_9": cp9,
+        "cv_air_9": cv9,
+        "gamma_9": gamma9,
+        "area_9": area9,
+        "core_outer_radius_9": core_outer_radius,
+        "bypass_outer_radius_9": bypass_outer_radius,
+        "exit_velocity": u9,
+        "thrust": thrust,
+    }
+    result = {}
+
+    for output_name, ad_value in ad_outputs.items():
+        result[output_name] = ad_value.value
+
+        for input_name in perfect_expansion_nozzle_flow_input_names():
+            result["d%s_d%s" % (output_name, input_name)] = (
+                ad_value.derivatives.get(input_name, 0.0)
+            )
+
+    return result
+
+
 def simple_off_design_turbofan_values(
     altitude,
     mach,
@@ -2002,6 +2214,15 @@ class _Ad:
     def __pow__(self, other):
         other = _ad_value(other)
         value = self.value ** other.value
+
+        if not other.derivatives or all(derivative == 0.0 for derivative in other.derivatives.values()):
+            derivatives = {}
+            if self.derivatives:
+                scale = other.value * self.value ** (other.value - 1.0)
+                for name, derivative in self.derivatives.items():
+                    derivatives[name] = scale * derivative
+            return _Ad(value, derivatives)
+
         derivatives = {}
 
         for name in set(self.derivatives) | set(other.derivatives):
