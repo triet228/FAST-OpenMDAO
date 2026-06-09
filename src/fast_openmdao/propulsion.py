@@ -152,6 +152,62 @@ class TransmitterFanEfficiency(om.ExplicitComponent):
             raise ValueError(f"Invalid aircraft class: {self.options['aircraft_class']}")
 
 
+class SimpleSourceTransmitterArchitecture(om.ExplicitComponent):
+    """Build FAST's conventional or electric source-transmitter architecture."""
+
+    def initialize(self):
+        self.options.declare("num_engines", default=2)
+        self.options.declare("architecture_type", default="C")
+
+    def setup(self):
+        num_engines = self.options["num_engines"]
+        num_components = 2 * num_engines + 2
+        num_transmitters = 2 * num_engines
+
+        self.add_input("electric_motor_efficiency", val=0.95)
+        self.add_input("thrust_sink_efficiency", val=0.85)
+        self.add_output("architecture", val=np.zeros((num_components, num_components)))
+        self.add_output("upstream_split", val=np.zeros((num_components, num_components)))
+        self.add_output(
+            "downstream_split",
+            val=np.zeros((num_components, num_components)),
+        )
+        self.add_output(
+            "upstream_efficiency",
+            val=np.ones((num_components, num_components)),
+        )
+        self.add_output(
+            "downstream_efficiency",
+            val=np.ones((num_components, num_components)),
+        )
+        self.add_output("source_type", val=np.zeros(1))
+        self.add_output("transmitter_type", val=np.zeros(num_transmitters))
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = simple_source_transmitter_architecture_values(
+            self.options["num_engines"],
+            self.options["architecture_type"],
+            inputs["electric_motor_efficiency"][0],
+            inputs["thrust_sink_efficiency"][0],
+        )
+
+        for output in architecture_builder_output_names():
+            outputs[output] = values[output]
+
+    def compute_partials(self, inputs, partials):
+        values = simple_source_transmitter_architecture_values(
+            self.options["num_engines"],
+            self.options["architecture_type"],
+            inputs["electric_motor_efficiency"][0],
+            inputs["thrust_sink_efficiency"][0],
+        )
+
+        for output in architecture_builder_output_names():
+            for variable in simple_source_transmitter_architecture_input_names():
+                partials[output, variable] = values["d%s_d%s" % (output, variable)]
+
+
 class ParallelHybridArchitecture(om.ExplicitComponent):
     """Build FAST's built-in parallel-hybrid propulsion architecture matrices."""
 
@@ -917,6 +973,15 @@ def safe_component_weight_value(power, power_to_weight):
     return power / power_to_weight
 
 
+def simple_source_transmitter_architecture_input_names():
+    """Return inputs for SimpleSourceTransmitterArchitecture derivatives."""
+
+    return (
+        "electric_motor_efficiency",
+        "thrust_sink_efficiency",
+    )
+
+
 def parallel_hybrid_architecture_input_names():
     """Return inputs for ParallelHybridArchitecture derivatives."""
 
@@ -977,6 +1042,98 @@ def partial_turboelectric_architecture_input_names():
         "electric_generator_efficiency",
         "thrust_sink_efficiency",
     )
+
+
+def simple_source_transmitter_architecture_values(
+    num_engines,
+    architecture_type,
+    electric_motor_efficiency,
+    thrust_sink_efficiency,
+):
+    """Return FAST C/E architecture matrices and dense derivatives."""
+
+    architecture_type = architecture_type.upper()
+
+    if architecture_type not in ("C", "E"):
+        raise ValueError(f"Invalid simple architecture type: {architecture_type}")
+
+    num_components = 2 * num_engines + 2
+    architecture = np.zeros((num_components, num_components))
+    upstream_split = np.zeros_like(architecture)
+    downstream_split = np.zeros_like(architecture)
+    upstream_efficiency = np.ones_like(architecture)
+    downstream_efficiency = np.ones_like(architecture)
+    source = 0
+    transmitter_index = np.arange(1, 1 + num_engines)
+    sink_index = np.arange(1 + num_engines, 1 + 2 * num_engines)
+    final_sink = num_components - 1
+    architecture[source, transmitter_index] = 1.0
+    upstream_split[source, transmitter_index] = 1.0 / num_engines
+    downstream_split[transmitter_index, source] = 1.0
+
+    dupstream_efficiency_dem = np.zeros_like(architecture)
+    ddownstream_efficiency_dem = np.zeros_like(architecture)
+    dupstream_efficiency_dts = np.zeros_like(architecture)
+    ddownstream_efficiency_dts = np.zeros_like(architecture)
+
+    for transmitter, sink in zip(transmitter_index, sink_index):
+        architecture[transmitter, sink] = 1.0
+        architecture[sink, final_sink] = 1.0
+        upstream_split[transmitter, sink] = 1.0
+        upstream_split[sink, final_sink] = 1.0
+        downstream_split[sink, transmitter] = 1.0
+        downstream_split[final_sink, sink] = 1.0 / num_engines
+        upstream_efficiency[transmitter, sink] = thrust_sink_efficiency
+        downstream_efficiency[sink, transmitter] = thrust_sink_efficiency
+        dupstream_efficiency_dts[transmitter, sink] = 1.0
+        ddownstream_efficiency_dts[sink, transmitter] = 1.0
+
+    if architecture_type == "C":
+        source_type = np.asarray([1.0])
+        transmitter_type = np.asarray([1.0] * num_engines + [2.0] * num_engines)
+    else:
+        upstream_efficiency[source, transmitter_index] = electric_motor_efficiency
+        downstream_efficiency[transmitter_index, source] = electric_motor_efficiency
+        dupstream_efficiency_dem[source, transmitter_index] = 1.0
+        ddownstream_efficiency_dem[transmitter_index, source] = 1.0
+        source_type = np.asarray([0.0])
+        transmitter_type = np.asarray([0.0] * num_engines + [2.0] * num_engines)
+
+    output_values = {
+        "architecture": architecture,
+        "upstream_split": upstream_split,
+        "downstream_split": downstream_split,
+        "upstream_efficiency": upstream_efficiency,
+        "downstream_efficiency": downstream_efficiency,
+        "source_type": source_type,
+        "transmitter_type": transmitter_type,
+    }
+    derivative_maps = {
+        "electric_motor_efficiency": {
+            "upstream_efficiency": dupstream_efficiency_dem,
+            "downstream_efficiency": ddownstream_efficiency_dem,
+        },
+        "thrust_sink_efficiency": {
+            "upstream_efficiency": dupstream_efficiency_dts,
+            "downstream_efficiency": ddownstream_efficiency_dts,
+        },
+    }
+    result = dict(output_values)
+
+    for output_name, value in output_values.items():
+        output_size = np.asarray(value).size
+        for input_name in simple_source_transmitter_architecture_input_names():
+            derivative = derivative_maps.get(input_name, {}).get(output_name)
+
+            if derivative is None:
+                derivative = np.zeros(output_size)
+
+            result["d%s_d%s" % (output_name, input_name)] = np.asarray(
+                derivative,
+                dtype=float,
+            ).reshape(output_size, 1)
+
+    return result
 
 
 def parallel_hybrid_architecture_values(

@@ -21,6 +21,7 @@ from fast_openmdao import (
     PowerSupplementCheck,
     SafeComponentWeight,
     SeriesHybridArchitecture,
+    SimpleSourceTransmitterArchitecture,
     ThrustSinkEfficiency,
     TransmitterFanEfficiency,
     TurboelectricArchitecture,
@@ -28,6 +29,7 @@ from fast_openmdao import (
 )
 from fast_python.propulsion import (
     cable_weight_for_sizing,
+    create_prop_arch,
     engine_lapse,
     engine_thrust_requirement,
     engine_weights_for_sizing,
@@ -116,6 +118,44 @@ def test_efficiency_selectors_match_fast_python():
         transmitter.get_val("transmitter_fan_efficiency")[0],
         transmitter_fan_efficiency(specs, "Turbofan"),
     )
+
+
+def test_simple_source_transmitter_architecture_matches_fast_python():
+    """Check C/E architecture matrix builders against FAST-Python."""
+
+    for architecture_type in ("C", "E"):
+        values = make_simple_source_architecture_values(architecture_type)
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "architecture",
+            SimpleSourceTransmitterArchitecture(
+                num_engines=values["num_engines"],
+                architecture_type=architecture_type,
+            ),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val(
+            "electric_motor_efficiency",
+            values["electric_motor_efficiency"],
+        )
+        problem.set_val("thrust_sink_efficiency", values["thrust_sink_efficiency"])
+        problem.run_model()
+
+        expected_aircraft = create_prop_arch(
+            make_arch_aircraft(architecture_type, values["num_engines"])
+        )
+        expected = expected_aircraft["Specs"]["Propulsion"]["PropArch"]
+        assert np.allclose(problem.get_val("architecture"), expected["Arch"])
+        assert np.allclose(problem.get_val("upstream_split"), expected["OperUps"]())
+        assert np.allclose(problem.get_val("downstream_split"), expected["OperDwn"]())
+        assert np.allclose(problem.get_val("upstream_efficiency"), expected["EtaUps"])
+        assert np.allclose(
+            problem.get_val("downstream_efficiency"),
+            expected["EtaDwn"],
+        )
+        assert np.allclose(problem.get_val("source_type"), expected["SrcType"])
+        assert np.allclose(problem.get_val("transmitter_type"), expected["TrnType"])
 
 
 def test_parallel_hybrid_architecture_matches_fast_python():
@@ -550,11 +590,43 @@ def test_propulsion_primitives_declare_analytic_partials():
     fuel_derivative_case["fuel_specific_energy"] = 1000.0
     fuel_derivative_case["initial_fuel_energy"] = 5.0
     fuel_derivative_case["initial_fuel_energy_left"] = 1000.0
+    simple_conventional_values = make_simple_source_architecture_values("C")
+    simple_electric_values = make_simple_source_architecture_values("E")
     architecture_values = make_parallel_hybrid_architecture_values()
     series_architecture_values = make_series_hybrid_architecture_values()
     turboelectric_architecture_values = make_turboelectric_architecture_values()
     partial_turboelectric_values = make_partial_turboelectric_architecture_values()
     cases = [
+        (
+            "simple_conventional",
+            SimpleSourceTransmitterArchitecture(
+                num_engines=simple_conventional_values["num_engines"],
+                architecture_type="C",
+            ),
+            {
+                "electric_motor_efficiency": simple_conventional_values[
+                    "electric_motor_efficiency"
+                ],
+                "thrust_sink_efficiency": simple_conventional_values[
+                    "thrust_sink_efficiency"
+                ],
+            },
+        ),
+        (
+            "simple_electric",
+            SimpleSourceTransmitterArchitecture(
+                num_engines=simple_electric_values["num_engines"],
+                architecture_type="E",
+            ),
+            {
+                "electric_motor_efficiency": simple_electric_values[
+                    "electric_motor_efficiency"
+                ],
+                "thrust_sink_efficiency": simple_electric_values[
+                    "thrust_sink_efficiency"
+                ],
+            },
+        ),
         (
             "parallel_hybrid",
             ParallelHybridArchitecture(
@@ -807,6 +879,21 @@ def make_efficiency_specs():
     }
 
 
+def make_simple_source_architecture_values(architecture_type):
+    """Return scalar inputs for FAST C/E architecture construction."""
+
+    values = {
+        "num_engines": 2,
+        "electric_motor_efficiency": 0.96,
+        "thrust_sink_efficiency": 0.8,
+    }
+
+    if architecture_type == "C":
+        values["electric_motor_efficiency"] = 0.91
+
+    return values
+
+
 def make_parallel_hybrid_architecture_values():
     """Return scalar inputs for FAST parallel-hybrid architecture construction."""
 
@@ -850,6 +937,37 @@ def make_partial_turboelectric_architecture_values():
         "electric_motor_efficiency": 0.925,
         "electric_generator_efficiency": 0.905,
         "thrust_sink_efficiency": 0.835,
+    }
+
+
+def make_arch_aircraft(architecture_type, num_engines):
+    """Return a minimal aircraft dictionary for FAST-Python architecture setup."""
+
+    return {
+        "Settings": {},
+        "Specs": {
+            "TLAR": {
+                "Class": "Turboprop",
+            },
+            "Power": {
+                "Eta": {
+                    "EM": 0.96,
+                    "EG": 0.96,
+                    "Propeller": 0.8,
+                },
+            },
+            "Propulsion": {
+                "NumEngines": num_engines,
+                "Engine": {
+                    "EtaPoly": {
+                        "Fan": 0.99,
+                    },
+                },
+                "PropArch": {
+                    "Type": architecture_type,
+                },
+            },
+        },
     }
 
 
