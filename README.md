@@ -36,9 +36,9 @@ derivative-native FAST equation components:
   partial derivatives.
 - Engine local Reynolds and local efficiency components with analytical
   partial derivatives.
-- Propulsion primitives for engine lapse, safe component weight, efficiency
-  selection, and supplemental transmitter power with analytical partial
-  derivatives.
+- Propulsion primitives for engine lapse, power-flow propagation, safe
+  component weight, efficiency selection, and supplemental transmitter power
+  with analytical partial derivatives.
 - Constraint scalar primitives for PsLoss sigmoid, OEI multiplier, FAR 25
   engine-gradient selection, and cruise dynamic pressure with analytical
   partial derivatives.
@@ -94,8 +94,8 @@ The public `fast_openmdao` package currently exports:
   `PowerManagementObjective`, `PowerLimitConstraints`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
-- Propulsion: `EngineLapse`, `PowerSupplementCheck`, `SafeComponentWeight`,
-  `ThrustSinkEfficiency`, `TransmitterFanEfficiency`
+- Propulsion: `EngineLapse`, `PowerFlow`, `PowerSupplementCheck`,
+  `SafeComponentWeight`, `ThrustSinkEfficiency`, `TransmitterFanEfficiency`
 - Regression: `SquaredExponentialKernel`
 - Units: `UnitConversion`
 - Bridge/builders: `FastPythonComponent`, `make_fast_problem`,
@@ -302,8 +302,10 @@ FAST-Python residual functions.
    derivatives. Done.
 30. Convert supplemental transmitter power helper with analytical partial
    derivatives. Done.
-31. Add complex-step derivative checks where supported by FAST-Python internals.
-32. Build reusable groups for mission, propulsion, weights, and objective
+31. Convert propulsion power-flow propagation with analytical partial
+   derivatives. Done.
+32. Add complex-step derivative checks where supported by FAST-Python internals.
+33. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

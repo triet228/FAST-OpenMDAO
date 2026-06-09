@@ -11,6 +11,7 @@ import openmdao.api as om
 
 from fast_openmdao import (
     EngineLapse,
+    PowerFlow,
     PowerSupplementCheck,
     SafeComponentWeight,
     ThrustSinkEfficiency,
@@ -19,6 +20,7 @@ from fast_openmdao import (
 from fast_python.propulsion import (
     engine_lapse,
     get_thrust_sink_efficiency,
+    power_flow,
     power_supplement_check,
     safe_component_weight,
     transmitter_fan_efficiency,
@@ -133,13 +135,67 @@ def test_power_supplement_check_matches_fast_python():
     assert np.allclose(problem.get_val("supplemental_power", units="W"), expected)
 
 
+def test_power_flow_matches_fast_python_upstream_and_downstream():
+    """Check FAST power-flow iteration parity in both directions."""
+
+    cases = make_power_flow_cases()
+
+    for name, direction, initial_power, architecture, split, efficiency in cases:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            name,
+            PowerFlow(architecture=architecture, direction=direction),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("initial_power", initial_power, units="W")
+        problem.set_val("split", split)
+        problem.set_val("efficiency", efficiency)
+        problem.run_model()
+
+        expected = power_flow(
+            initial_power,
+            architecture,
+            split,
+            efficiency,
+            direction,
+        )
+
+        assert np.allclose(problem.get_val("propagated_power", units="W"), expected)
+
+
 def test_propulsion_primitives_declare_analytic_partials():
     """Check propulsion primitive derivatives against finite difference."""
 
     architecture, transmitter_type, required_power, split, efficiency = (
         make_power_supplement_case()
     )
+    flow_up, flow_down = make_power_flow_cases()
     cases = [
+        (
+            "flow_up",
+            PowerFlow(
+                architecture=flow_up[3],
+                direction=flow_up[1],
+            ),
+            {
+                "initial_power": flow_up[2],
+                "split": flow_up[4],
+                "efficiency": flow_up[5],
+            },
+        ),
+        (
+            "flow_down",
+            PowerFlow(
+                architecture=flow_down[3],
+                direction=flow_down[1],
+            ),
+            {
+                "initial_power": flow_down[2],
+                "split": flow_down[4],
+                "efficiency": flow_down[5],
+            },
+        ),
         (
             "lapse",
             EngineLapse(aircraft_class="Turbofan"),
@@ -247,3 +303,61 @@ def make_power_supplement_case():
         ]
     )
     return architecture, transmitter_type, required_power, split, efficiency
+
+
+def make_power_flow_cases():
+    """Return small acyclic FAST power-flow cases for both directions."""
+
+    architecture = np.asarray(
+        [
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+        ]
+    )
+    upstream_split = np.asarray(
+        [
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+        ]
+    )
+    upstream_efficiency = np.asarray(
+        [
+            [1.0, 0.5, 1.0],
+            [1.0, 1.0, 0.25],
+            [1.0, 1.0, 1.0],
+        ]
+    )
+    downstream_split = np.asarray(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ]
+    )
+    downstream_efficiency = np.asarray(
+        [
+            [1.0, 1.0, 1.0],
+            [0.5, 1.0, 1.0],
+            [1.0, 0.25, 1.0],
+        ]
+    )
+    return [
+        (
+            "flow_up",
+            1,
+            np.asarray([100.0, 0.0, 0.0]),
+            architecture,
+            upstream_split,
+            upstream_efficiency,
+        ),
+        (
+            "flow_down",
+            -1,
+            np.asarray([0.0, 0.0, 100.0]),
+            architecture.T,
+            downstream_split,
+            downstream_efficiency,
+        ),
+    ]

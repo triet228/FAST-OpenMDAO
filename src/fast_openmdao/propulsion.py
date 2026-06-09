@@ -233,6 +233,76 @@ class PowerSupplementCheck(om.ExplicitComponent):
         ]
 
 
+class PowerFlow(om.ExplicitComponent):
+    """Propagate power through a fixed FAST propulsion architecture.
+
+    Inputs:
+        initial_power: Initial component power vector in W.
+        split: Operational split matrix for the selected propagation direction.
+        efficiency: Efficiency matrix paired with ``split``.
+
+    Outputs:
+        propagated_power: Updated component power vector in W.
+
+    Assumptions:
+        Architecture, propagation direction, and convergence tolerance are fixed
+        at setup. Analytical partials follow FAST's active-update iteration for
+        the current input values, so they are exact away from tolerance-switch
+        boundaries.
+    """
+
+    def initialize(self):
+        self.options.declare("architecture")
+        self.options.declare("direction", default=1)
+        self.options.declare("tolerance", default=1.0e-6)
+
+    def setup(self):
+        architecture = np.asarray(self.options["architecture"], dtype=float)
+        num_components = architecture.shape[0]
+        matrix_shape = (num_components, num_components)
+
+        self.add_input(
+            "initial_power",
+            val=np.zeros(num_components),
+            units="W",
+        )
+        self.add_input("split", val=np.zeros(matrix_shape))
+        self.add_input("efficiency", val=np.ones(matrix_shape))
+        self.add_output(
+            "propagated_power",
+            val=np.zeros(num_components),
+            units="W",
+        )
+        self.declare_partials(of="propagated_power", wrt="*")
+
+    def compute(self, inputs, outputs):
+        outputs["propagated_power"] = power_flow_values(
+            inputs["initial_power"],
+            self.options["architecture"],
+            inputs["split"],
+            inputs["efficiency"],
+            self.options["direction"],
+            self.options["tolerance"],
+        )["propagated_power"]
+
+    def compute_partials(self, inputs, partials):
+        values = power_flow_values(
+            inputs["initial_power"],
+            self.options["architecture"],
+            inputs["split"],
+            inputs["efficiency"],
+            self.options["direction"],
+            self.options["tolerance"],
+        )
+        partials["propagated_power", "initial_power"] = values[
+            "dpropagated_dinitial_power"
+        ]
+        partials["propagated_power", "split"] = values["dpropagated_dsplit"]
+        partials["propagated_power", "efficiency"] = values[
+            "dpropagated_defficiency"
+        ]
+
+
 def engine_lapse_value(sea_level_static, aircraft_class, density):
     """Return scalar FAST engine-lapse value."""
 
@@ -274,6 +344,95 @@ def safe_component_weight_value(power, power_to_weight):
         return 0.0
 
     return power / power_to_weight
+
+
+def power_flow_values(power, architecture, split, efficiency, direction, tolerance):
+    """Return FAST power-flow propagation and dense analytical partials."""
+
+    pwr = np.asarray(power, dtype=float).reshape(-1).copy()
+    architecture = np.asarray(architecture, dtype=float)
+    split = np.asarray(split, dtype=float)
+    efficiency = np.asarray(efficiency, dtype=float)
+    num_components = len(pwr)
+    nmatrix = split.size
+    previous = np.zeros(num_components)
+    dpower = np.eye(num_components)
+    dsplit = np.zeros((num_components, nmatrix))
+    defficiency = np.zeros((num_components, nmatrix))
+
+    if direction == 1:
+        matrix = (split * architecture * efficiency).T
+    elif direction == -1:
+        matrix = (split * architecture / efficiency).T
+    else:
+        raise ValueError("direction must be +1 for upstream or -1 for downstream.")
+
+    iteration = 0
+
+    while (
+        np.linalg.norm(previous - pwr) > tolerance
+        and iteration < num_components
+    ):
+        old_power = pwr.copy()
+        old_dpower = dpower.copy()
+        old_dsplit = dsplit.copy()
+        old_defficiency = defficiency.copy()
+        propagated = matrix @ old_power
+        previous = old_power
+        update = np.abs(propagated) > tolerance
+
+        for output_index in np.where(update)[0]:
+            pwr[output_index] = propagated[output_index]
+            dpower[output_index, :] = matrix[output_index, :] @ old_dpower
+            dsplit[output_index, :] = matrix[output_index, :] @ old_dsplit
+            defficiency[output_index, :] = (
+                matrix[output_index, :] @ old_defficiency
+            )
+
+            for input_index in range(num_components):
+                arch_value = architecture[input_index, output_index]
+
+                if abs(arch_value) < 1.0e-15:
+                    continue
+
+                parameter_index = input_index * num_components + output_index
+                source_power = old_power[input_index]
+
+                if direction == 1:
+                    dmatrix_dsplit = arch_value * efficiency[
+                        input_index,
+                        output_index,
+                    ]
+                    dmatrix_defficiency = arch_value * split[
+                        input_index,
+                        output_index,
+                    ]
+                else:
+                    dmatrix_dsplit = arch_value / efficiency[
+                        input_index,
+                        output_index,
+                    ]
+                    dmatrix_defficiency = (
+                        -arch_value
+                        * split[input_index, output_index]
+                        / efficiency[input_index, output_index] ** 2
+                    )
+
+                dsplit[output_index, parameter_index] += (
+                    dmatrix_dsplit * source_power
+                )
+                defficiency[output_index, parameter_index] += (
+                    dmatrix_defficiency * source_power
+                )
+
+        iteration += 1
+
+    return {
+        "propagated_power": pwr,
+        "dpropagated_dinitial_power": dpower,
+        "dpropagated_dsplit": dsplit,
+        "dpropagated_defficiency": defficiency,
+    }
 
 
 def power_supplement_values(
