@@ -33,6 +33,7 @@ from fast_openmdao import (
     SanitizedValues,
     SplitScheduleFill,
     TwoDimensionalArray,
+    ZeroIfEmpty,
 )
 from fast_python.optimization import (
     battery_energy_available,
@@ -57,6 +58,7 @@ from fast_python.optimization import (
     sanitize_gradient,
     sanitize_values,
     two_dimensional,
+    zero_if_empty,
 )
 
 
@@ -466,6 +468,40 @@ def test_sanitized_gradient_matches_fast_python():
     )
 
 
+def test_zero_if_empty_matches_fast_python():
+    """Check FAST empty-output normalization parity."""
+
+    values = np.asarray([0.2, -0.4, 0.6])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "zero",
+        ZeroIfEmpty(input_size=values.size),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("values", values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("zero_if_empty_values"),
+        zero_if_empty(values),
+    )
+
+    empty_problem = om.Problem()
+    empty_problem.model.add_subsystem(
+        "zero",
+        ZeroIfEmpty(input_size=0),
+        promotes=["*"],
+    )
+    empty_problem.setup()
+    empty_problem.run_model()
+
+    assert np.allclose(
+        empty_problem.get_val("zero_if_empty_values"),
+        zero_if_empty(None),
+    )
+
+
 def test_merit_function_matches_fast_python():
     """Check FAST line-search merit value parity."""
 
@@ -826,6 +862,13 @@ def test_optimization_helpers_declare_analytic_partials():
             SanitizedGradient(input_shape=(2, 2)),
             {
                 "gradient_values": np.asarray([[0.2, -0.4], [0.6, 0.8]]),
+            },
+        ),
+        (
+            "zero_if_empty",
+            ZeroIfEmpty(input_size=3),
+            {
+                "values": np.asarray([0.2, -0.4, 0.6]),
             },
         ),
         (

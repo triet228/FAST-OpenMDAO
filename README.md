@@ -122,7 +122,8 @@ derivative-native FAST equation components:
   Gaussian-elimination pivots, damped BFGS Hessian updates, fixed-shape
   gradient-block formatting, gradient-matrix reshaping, fixed-piece vector and
   matrix concatenation, split-array dimensional normalization, NaN/Inf
-  sanitizer helpers, and merit values with analytical partial derivatives.
+  sanitizer helpers, empty-output normalization, and merit values with
+  analytical partial derivatives.
 - Optimization power/energy, design split bound, and cruise power availability
   residual helpers with analytical partial derivatives for active constraints.
 - Optimization operational split bound residual helper with analytical partial
@@ -211,7 +212,8 @@ The public `fast_openmdao` package currently exports:
   `MeritFunction`, `OneBasedHistoryValues`, `OperationalObjective`,
   `OperationalSplitConstraints`, `PowerManagementObjective`,
   `PowerLimitConstraints`, `SanitizedArray`, `SanitizedGradient`,
-  `SanitizedValues`, `SplitScheduleFill`, `TwoDimensionalArray`
+  `SanitizedValues`, `SplitScheduleFill`, `TwoDimensionalArray`,
+  `ZeroIfEmpty`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `BatteryEnergyCutoff`, `BatteryEnergyHistory`,

@@ -690,6 +690,49 @@ class SanitizedGradient(om.ExplicitComponent):
         ]
 
 
+class ZeroIfEmpty(om.ExplicitComponent):
+    """Normalize FAST empty constraint output to a numeric zero vector.
+
+    Inputs:
+        values: Nonempty constraint values when ``input_size`` is positive.
+
+    Outputs:
+        zero_if_empty_values: ``values`` for nonempty inputs, or ``[0.0]`` for
+            FAST's empty-output branch.
+    """
+
+    def initialize(self):
+        self.options.declare("input_size", default=1)
+
+    def setup(self):
+        input_size = self.options["input_size"]
+        output_size = input_size if input_size > 0 else 1
+
+        self.add_output("zero_if_empty_values", val=np.zeros(output_size))
+
+        if input_size > 0:
+            self.add_input("values", val=np.zeros(input_size))
+            rows = np.arange(output_size)
+            self.declare_partials(
+                of="zero_if_empty_values",
+                wrt="values",
+                rows=rows,
+                cols=rows,
+                val=np.ones(output_size),
+            )
+
+    def compute(self, inputs, outputs):
+        input_size = self.options["input_size"]
+
+        if input_size > 0:
+            outputs["zero_if_empty_values"] = np.asarray(
+                inputs["values"],
+                dtype=float,
+            ).reshape(-1)
+        else:
+            outputs["zero_if_empty_values"] = np.asarray([0.0])
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 

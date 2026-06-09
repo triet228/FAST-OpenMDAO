@@ -143,6 +143,7 @@ from fast_openmdao.optimization import (
     SanitizedValues,
     SplitScheduleFill,
     TwoDimensionalArray,
+    ZeroIfEmpty,
 )
 from fast_openmdao.problem import make_fast_optimization_problem, make_fast_problem
 from fast_openmdao.projection import (
@@ -351,6 +352,7 @@ __all__ = [
     "TurbopropAirframeWeight",
     "TurbopropOEWIterationStep",
     "TwoDimensionalArray",
+    "ZeroIfEmpty",
     "TurbofanAirframeWeight",
     "TurbofanOEWIterationStep",
     "UnitConversion",
