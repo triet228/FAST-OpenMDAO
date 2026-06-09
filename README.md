@@ -97,9 +97,9 @@ derivative-native FAST equation components:
   objective values with analytical partial derivatives.
 - Regression squared-exponential kernel and fixed-preprocessing Gaussian
   process posterior prediction with analytical partial derivatives.
-- OEW turboprop linear fit, one-step turboprop fixed-point balance, turbofan
-  airframe GPR weight, and numeric-sum helpers with analytical partial
-  derivatives.
+- OEW turboprop linear fit, one-step turboprop and turbofan fixed-point
+  balances, turbofan airframe GPR weight, and numeric-sum helpers with
+  analytical partial derivatives.
 - Propulsion turboprop/piston linear and turbofan GPR engine sizing-weight
   helpers with analytical partial derivatives.
 - Database-derived MAC and turboprop cruise lift-to-drag estimates with
@@ -153,8 +153,8 @@ The public `fast_openmdao` package currently exports:
   `DetailedTakeoffSegmentKinematicsPower`, `FlightConditions`, `InitialEnergyRemaining`,
   `LandingSegmentKinematicsPower`, `PrescribedRateSegmentKinematicsPower`,
   `TakeoffSegmentKinematics`
-- OEW: `NumericSum`, `TurbofanAirframeWeight`, `TurbopropAirframeWeight`,
-  `TurbopropOEWIterationStep`
+- OEW: `NumericSum`, `TurbofanAirframeWeight`, `TurbofanOEWIterationStep`,
+  `TurbopropAirframeWeight`, `TurbopropOEWIterationStep`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,
   `CruisePowerAvailableConstraint`, `DesignSplitBounds`, `FeasibleStep`,
   `MeritFunction`, `OperationalObjective`, `OperationalSplitConstraints`,
@@ -415,8 +415,10 @@ residual functions.
    partial derivatives. Done.
 50. Convert one-step turboprop OEW fixed-point balance with analytical partial
    derivatives. Done.
-51. Add complex-step derivative checks where supported by FAST-Python internals.
-52. Build reusable groups for mission, propulsion, weights, and objective
+51. Convert one-step turbofan OEW fixed-point balance with analytical partial
+   derivatives. Done.
+52. Add complex-step derivative checks where supported by FAST-Python internals.
+53. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

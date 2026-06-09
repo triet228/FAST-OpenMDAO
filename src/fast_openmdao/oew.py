@@ -178,6 +178,94 @@ class TurbopropOEWIterationStep(om.ExplicitComponent):
                 partials[output_name, input_name] = derivative
 
 
+class TurbofanOEWIterationStep(om.ExplicitComponent):
+    """Compute one FAST turbofan OEW fixed-point iteration step.
+
+    Inputs:
+        Weight inputs mirror the turbofan OEW loop. Old propulsion weights
+        enter the MTOW estimate before propulsion resizing; new propulsion
+        weights replace them after the sizing call.
+
+    Outputs:
+        mtow_pre_sizing: MTOW estimate before propulsion resizing in kg.
+        sizing_thrust: SLS thrust requested before propulsion resizing in N.
+        wing_area: Wing area implied by the pre-sizing MTOW in m**2.
+        mtow: MTOW after replacing old propulsion weights with new weights in
+            kg.
+        airframe_weight: Updated GPR airframe weight in kg.
+        oew: Updated operating empty weight in kg.
+        convergence_error: FAST fixed-point relative airframe-weight change.
+
+    Assumptions:
+        GPR database preprocessing is fixed and passed as options. The
+        convergence-error derivative is the active-branch derivative away from
+        exact equality points.
+    """
+
+    def initialize(self):
+        self.options.declare("data_matrix")
+        self.options.declare("hyperparams")
+        self.options.declare("inverse_term")
+        self.options.declare("prior", default=1.0)
+        self.options.declare("gravity", default=9.81)
+        self.options.declare("minimum_error_denominator", default=1.0e-12)
+
+    def setup(self):
+        self._data_matrix = np.asarray(self.options["data_matrix"], dtype=float)
+        self._hyperparams = np.asarray(self.options["hyperparams"], dtype=float)
+        self._inverse_term = np.asarray(self.options["inverse_term"], dtype=float)
+
+        for name in turbofan_oew_iteration_step_input_names():
+            self.add_input(name, val=1.0)
+
+        self.add_input("wing_loading", val=100.0, units="kg/m**2")
+        self.add_input("thrust_loading", val=0.3)
+        self.add_input("eis", val=2035.0)
+        self.add_input("frame_factor", val=1.0)
+        self.add_output("mtow_pre_sizing", val=1.0, units="kg")
+        self.add_output("sizing_thrust", val=1.0, units="N")
+        self.add_output("wing_area", val=1.0, units="m**2")
+        self.add_output("mtow", val=1.0, units="kg")
+        self.add_output("airframe_weight", val=1.0, units="kg")
+        self.add_output("oew", val=1.0, units="kg")
+        self.add_output("convergence_error", val=1.0)
+        self._declared_partials = turbofan_oew_iteration_step_dependencies()
+
+        for output_name, input_names in self._declared_partials.items():
+            self.declare_partials(of=output_name, wrt=input_names)
+
+    def compute(self, inputs, outputs):
+        values = turbofan_oew_iteration_step_values(
+            self._data_matrix,
+            self._hyperparams,
+            self._inverse_term,
+            self.options["prior"],
+            self.options["gravity"],
+            self.options["minimum_error_denominator"],
+            inputs,
+        )
+
+        for name in turbofan_oew_iteration_step_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = turbofan_oew_iteration_step_values(
+            self._data_matrix,
+            self._hyperparams,
+            self._inverse_term,
+            self.options["prior"],
+            self.options["gravity"],
+            self.options["minimum_error_denominator"],
+            inputs,
+        )
+
+        for output_name, input_names in self._declared_partials.items():
+            derivatives = values["partials"][output_name]
+
+            for input_name in input_names:
+                partials[output_name, input_name] = derivatives[input_name]
+
+
 class NumericSum(om.ExplicitComponent):
     """Compute FAST's scalar sum for OEW numeric values."""
 
@@ -497,5 +585,286 @@ def turboprop_oew_iteration_step_derivatives(
     }
     partials["sizing_power"]["power_loading"] = mtow_pre_sizing
     partials["wing_area"]["wing_loading"] = -mtow_pre_sizing / wing_loading**2
+
+    return partials
+
+
+def turbofan_oew_iteration_step_input_names():
+    """Return scalar input names used by the turbofan OEW step."""
+
+    return turboprop_oew_iteration_step_input_names()
+
+
+def turbofan_oew_iteration_step_output_names():
+    """Return scalar output names produced by the turbofan OEW step."""
+
+    return [
+        "mtow_pre_sizing",
+        "sizing_thrust",
+        "wing_area",
+        "mtow",
+        "airframe_weight",
+        "oew",
+        "convergence_error",
+    ]
+
+
+def turbofan_oew_iteration_step_dependencies():
+    """Return nonzero derivative dependencies for the turbofan OEW step."""
+
+    old_names = [
+        "airframe_weight_old",
+        "fuel_weight",
+        "battery_weight",
+        "payload_weight",
+        "crew_weight",
+        "motor_weight_old",
+        "generator_weight_old",
+        "engine_weight_old",
+        "eap_weight",
+        "cable_weight_old",
+    ]
+    balance_names = [
+        "airframe_weight_old",
+        "fuel_weight",
+        "battery_weight",
+        "payload_weight",
+        "crew_weight",
+        "eap_weight",
+        "motor_weight_new",
+        "generator_weight_new",
+        "engine_weight_new",
+        "cable_weight_new",
+    ]
+    airframe_names = balance_names + [
+        "wing_loading",
+        "thrust_loading",
+        "eis",
+        "frame_factor",
+    ]
+
+    return {
+        "mtow_pre_sizing": old_names,
+        "sizing_thrust": old_names + ["thrust_loading"],
+        "wing_area": old_names + ["wing_loading"],
+        "mtow": balance_names,
+        "airframe_weight": airframe_names,
+        "oew": airframe_names,
+        "convergence_error": airframe_names,
+    }
+
+
+def turbofan_oew_iteration_step_values(
+    data_matrix,
+    hyperparams,
+    inverse_term,
+    prior,
+    gravity,
+    minimum_error_denominator,
+    inputs,
+):
+    """Return one turbofan OEW iteration step and exact active derivatives."""
+
+    values = {}
+
+    for name in turbofan_oew_iteration_step_input_names():
+        values[name] = float(inputs[name][0])
+
+    wing_loading = float(inputs["wing_loading"][0])
+    thrust_loading = float(inputs["thrust_loading"][0])
+    eis = float(inputs["eis"][0])
+    frame_factor = float(inputs["frame_factor"][0])
+    old_names = [
+        "airframe_weight_old",
+        "fuel_weight",
+        "battery_weight",
+        "payload_weight",
+        "crew_weight",
+        "motor_weight_old",
+        "generator_weight_old",
+        "engine_weight_old",
+        "eap_weight",
+        "cable_weight_old",
+    ]
+    mtow_pre_sizing = sum(values[name] for name in old_names)
+    sizing_thrust = mtow_pre_sizing * thrust_loading * gravity
+    wing_area = mtow_pre_sizing / wing_loading
+    mtow = (
+        mtow_pre_sizing
+        + values["engine_weight_new"]
+        - values["engine_weight_old"]
+        + values["motor_weight_new"]
+        - values["motor_weight_old"]
+        + values["generator_weight_new"]
+        - values["generator_weight_old"]
+        + values["cable_weight_new"]
+        - values["cable_weight_old"]
+    )
+    prediction = gaussian_process_prediction_values(
+        data_matrix,
+        hyperparams,
+        inverse_term,
+        np.asarray([wing_area, sizing_thrust, eis, mtow]),
+        prior,
+    )
+    mean = prediction["posterior_mean"]
+    dmean_dtarget = prediction["dposterior_mean_dtarget"]
+    airframe_weight = mean * frame_factor
+    oew = (
+        airframe_weight
+        + values["motor_weight_new"]
+        + values["generator_weight_new"]
+        + values["engine_weight_new"]
+        + values["eap_weight"]
+        + values["cable_weight_new"]
+    )
+    difference = values["airframe_weight_old"] - airframe_weight
+    denominator = max(
+        abs(values["airframe_weight_old"]),
+        minimum_error_denominator,
+    )
+    convergence_error = abs(difference) / denominator
+
+    derivatives = turbofan_oew_iteration_step_derivatives(
+        gravity,
+        frame_factor,
+        mean,
+        dmean_dtarget,
+        values,
+        mtow_pre_sizing,
+        wing_loading,
+        thrust_loading,
+        difference,
+        denominator,
+        minimum_error_denominator,
+    )
+
+    return {
+        "mtow_pre_sizing": mtow_pre_sizing,
+        "sizing_thrust": sizing_thrust,
+        "wing_area": wing_area,
+        "mtow": mtow,
+        "airframe_weight": airframe_weight,
+        "oew": oew,
+        "convergence_error": convergence_error,
+        "partials": derivatives,
+    }
+
+
+def turbofan_oew_iteration_step_derivatives(
+    gravity,
+    frame_factor,
+    mean,
+    dmean_dtarget,
+    values,
+    mtow_pre_sizing,
+    wing_loading,
+    thrust_loading,
+    difference,
+    denominator,
+    minimum_error_denominator,
+):
+    """Return analytical derivative maps for one turbofan OEW step."""
+
+    input_names = turbofan_oew_iteration_step_input_names() + [
+        "wing_loading",
+        "thrust_loading",
+        "eis",
+        "frame_factor",
+    ]
+    dpre = dict.fromkeys(input_names, 0.0)
+    dmtow = dict.fromkeys(input_names, 0.0)
+
+    for name in [
+        "airframe_weight_old",
+        "fuel_weight",
+        "battery_weight",
+        "payload_weight",
+        "crew_weight",
+        "motor_weight_old",
+        "generator_weight_old",
+        "engine_weight_old",
+        "eap_weight",
+        "cable_weight_old",
+    ]:
+        dpre[name] = 1.0
+        dmtow[name] = 1.0
+
+    for name in [
+        "engine_weight_old",
+        "motor_weight_old",
+        "generator_weight_old",
+        "cable_weight_old",
+    ]:
+        dmtow[name] -= 1.0
+
+    for name in [
+        "engine_weight_new",
+        "motor_weight_new",
+        "generator_weight_new",
+        "cable_weight_new",
+    ]:
+        dmtow[name] = 1.0
+
+    dwing = {name: dpre[name] / wing_loading for name in input_names}
+    dwing["wing_loading"] = -mtow_pre_sizing / wing_loading**2
+    dthrust = {
+        name: dpre[name] * thrust_loading * gravity for name in input_names
+    }
+    dthrust["thrust_loading"] = mtow_pre_sizing * gravity
+    deis = dict.fromkeys(input_names, 0.0)
+    deis["eis"] = 1.0
+    dairframe = {}
+    doew = {}
+    derror = {}
+    sign_difference = np.sign(difference)
+    ddenominator = dict.fromkeys(input_names, 0.0)
+
+    if abs(values["airframe_weight_old"]) > minimum_error_denominator:
+        ddenominator["airframe_weight_old"] = np.sign(values["airframe_weight_old"])
+
+    for name in input_names:
+        dmean = (
+            dmean_dtarget[0] * dwing[name]
+            + dmean_dtarget[1] * dthrust[name]
+            + dmean_dtarget[2] * deis[name]
+            + dmean_dtarget[3] * dmtow[name]
+        )
+        dairframe[name] = dmean * frame_factor
+
+    dairframe["frame_factor"] += mean
+
+    for name in input_names:
+        doew[name] = dairframe[name]
+
+    for name in [
+        "motor_weight_new",
+        "generator_weight_new",
+        "engine_weight_new",
+        "cable_weight_new",
+        "eap_weight",
+    ]:
+        doew[name] += 1.0
+
+    for name in input_names:
+        ddifference = -dairframe[name]
+
+        if name == "airframe_weight_old":
+            ddifference += 1.0
+
+        derror[name] = (
+            sign_difference * ddifference / denominator
+            - abs(difference) * ddenominator[name] / denominator**2
+        )
+
+    partials = {
+        "mtow_pre_sizing": dict(dpre),
+        "sizing_thrust": dthrust,
+        "wing_area": dwing,
+        "mtow": dmtow,
+        "airframe_weight": dairframe,
+        "oew": doew,
+        "convergence_error": derror,
+    }
 
     return partials

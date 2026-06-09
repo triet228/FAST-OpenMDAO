@@ -93,6 +93,7 @@ from fast_openmdao.mission import (
 from fast_openmdao.oew import (
     NumericSum,
     TurbofanAirframeWeight,
+    TurbofanOEWIterationStep,
     TurbopropAirframeWeight,
     TurbopropOEWIterationStep,
 )
@@ -252,6 +253,7 @@ __all__ = [
     "TurbopropAirframeWeight",
     "TurbopropOEWIterationStep",
     "TurbofanAirframeWeight",
+    "TurbofanOEWIterationStep",
     "UnitConversion",
     "WeightSum",
     "WingAreaFromLoading",
