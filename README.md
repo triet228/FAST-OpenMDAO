@@ -91,8 +91,8 @@ derivative-native FAST equation components:
 - Optimization helper primitives for available electric motor power and
   battery energy plus interior-point feasible slack-step limits,
   Gaussian-elimination pivots, damped BFGS Hessian updates, fixed-shape
-  gradient-block formatting, and merit values with analytical partial
-  derivatives.
+  gradient-block formatting, gradient-matrix reshaping, and merit values with
+  analytical partial derivatives.
 - Optimization power/energy, design split bound, and cruise power availability
   residual helpers with analytical partial derivatives for active constraints.
 - Optimization operational split bound residual helper with analytical partial
@@ -166,8 +166,9 @@ The public `fast_openmdao` package currently exports:
   `TurbopropAirframeWeight`, `TurbopropOEWIterationStep`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`,
   `CruisePowerAvailableConstraint`, `DesignSplitBounds`, `FeasibleStep`,
-  `GaussianEliminationPivot`, `GradientBlock`, `HessianUpdate`, `HistoryArray`,
-  `MeritFunction`, `OneBasedHistoryValues`, `OperationalObjective`,
+  `GaussianEliminationPivot`, `GradientBlock`, `GradientMatrix`,
+  `HessianUpdate`, `HistoryArray`, `MeritFunction`, `OneBasedHistoryValues`,
+  `OperationalObjective`,
   `OperationalSplitConstraints`, `PowerManagementObjective`,
   `PowerLimitConstraints`, `SplitScheduleFill`
 - Projection: `BatterySpecificEnergyProjection`,

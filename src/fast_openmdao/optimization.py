@@ -377,6 +377,59 @@ class GradientBlock(om.ExplicitComponent):
         ]
 
 
+class GradientMatrix(om.ExplicitComponent):
+    """Reshape FAST constraint-gradient values into a fixed matrix.
+
+    Inputs:
+        gradient_values: Flattened FAST gradient entries.
+
+    Outputs:
+        gradient_matrix: nrow-by-ncol FAST constraint-gradient matrix.
+
+    Assumptions:
+        This represents the active nonempty branch of
+        ``fast_python.optimization.gradient_matrix``. Empty or ``None``
+        gradient outputs are handled by fixed OpenMDAO setup choices rather
+        than runtime shape changes.
+    """
+
+    def initialize(self):
+        self.options.declare("num_rows", default=1)
+        self.options.declare("num_cols", default=1)
+
+    def setup(self):
+        num_rows = self.options["num_rows"]
+        num_cols = self.options["num_cols"]
+        size = num_rows * num_cols
+        self.add_input("gradient_values", val=np.zeros(size))
+        self.add_output("gradient_matrix", val=np.zeros((num_rows, num_cols)))
+        rows = np.arange(size)
+        self.declare_partials(
+            of="gradient_matrix",
+            wrt="gradient_values",
+            rows=rows,
+            cols=rows,
+        )
+
+    def compute(self, inputs, outputs):
+        values = gradient_matrix_values(
+            inputs["gradient_values"],
+            self.options["num_rows"],
+            self.options["num_cols"],
+        )
+        outputs["gradient_matrix"] = values["gradient_matrix"]
+
+    def compute_partials(self, inputs, partials):
+        values = gradient_matrix_values(
+            inputs["gradient_values"],
+            self.options["num_rows"],
+            self.options["num_cols"],
+        )
+        partials["gradient_matrix", "gradient_values"] = values[
+            "dgradient_matrix_dgradient_values"
+        ]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -1124,6 +1177,16 @@ def reshape_gradient_block(values, num_design_vars):
         array = np.repeat(array, num_design_vars, axis=1)
 
     return array.reshape(array.shape[0], num_design_vars)
+
+
+def gradient_matrix_values(gradient_values, num_rows, num_cols):
+    """Return FAST gradient-matrix reshape values and identity Jacobian."""
+
+    values = np.asarray(gradient_values, dtype=float).reshape(-1)
+    return {
+        "gradient_matrix": values.reshape(num_rows, num_cols),
+        "dgradient_matrix_dgradient_values": np.ones(values.size),
+    }
 
 
 def get_slack_values(inputs, num_inequality):

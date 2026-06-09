@@ -17,6 +17,7 @@ from fast_openmdao import (
     FeasibleStep,
     GaussianEliminationPivot,
     GradientBlock,
+    GradientMatrix,
     HessianUpdate,
     HistoryArray,
     MeritFunction,
@@ -35,6 +36,7 @@ from fast_python.optimization import (
     fill_split_values,
     gauss_elim,
     as_gradient_block,
+    gradient_matrix,
     history_array,
     hess_upd,
     merit_function,
@@ -290,6 +292,26 @@ def test_gradient_block_matches_fast_python():
             problem.get_val("gradient_block"),
             as_gradient_block(gradient_values, num_design_vars),
         )
+
+
+def test_gradient_matrix_matches_fast_python():
+    """Check FAST gradient-matrix reshape parity for fixed nonempty values."""
+
+    gradient_values = np.asarray([0.1, 0.2, 0.3, 0.4, 0.5, 0.6])
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "gradient",
+        GradientMatrix(num_rows=2, num_cols=3),
+        promotes=["*"],
+    )
+    problem.setup()
+    problem.set_val("gradient_values", gradient_values)
+    problem.run_model()
+
+    assert np.allclose(
+        problem.get_val("gradient_matrix"),
+        gradient_matrix(gradient_values, 2, 3),
+    )
 
 
 def test_merit_function_matches_fast_python():
@@ -601,6 +623,13 @@ def test_optimization_helpers_declare_analytic_partials():
             GradientBlock(input_shape=(2,), num_design_vars=3),
             {
                 "gradient_values": np.asarray([0.4, 0.5]),
+            },
+        ),
+        (
+            "gradient_matrix",
+            GradientMatrix(num_rows=2, num_cols=3),
+            {
+                "gradient_values": np.asarray([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]),
             },
         ),
         (
