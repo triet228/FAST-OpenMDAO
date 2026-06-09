@@ -263,6 +263,7 @@ FAST-OpenMDAO/
   docs/                  Conversion inventory and design notes
   src/fast_openmdao/     Python package for OpenMDAO integration
   tests/                 Unit and smoke tests
+  tools/                 Conversion audit utilities
   README.md              Project overview and setup notes
   pyproject.toml         Package metadata and test configuration
 ```
@@ -296,6 +297,17 @@ again to refresh editable installs.
 ```powershell
 conda run -n FAST-OpenMDAO python -m pytest -q
 ```
+
+To re-check the FAST-Python conversion inventory against the local checkout:
+
+```bash
+conda run -n FAST-OpenMDAO python tools/conversion_audit.py
+```
+
+The compact audit should finish with `unsupported=0`. Use
+`--show-remaining` to list FAST-Python functions that are intentionally kept as
+support, orchestration, adaptive-loop logic, or OpenMDAO driver setup according
+to `docs/conversion_inventory.md`.
 
 ## Minimal OpenMDAO Usage
 
