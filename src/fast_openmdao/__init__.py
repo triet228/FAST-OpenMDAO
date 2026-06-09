@@ -37,6 +37,7 @@ from fast_openmdao.database import (
     DatabaseWeightFractions,
     MacLiftDragEstimate,
     TurbofanCruiseLiftDragEstimate,
+    TurbofanMacLiftDragEstimate,
     TurbopropCruiseLiftDragEstimate,
 )
 from fast_openmdao.engine import (
@@ -228,6 +229,7 @@ __all__ = [
     "TurbineStageFlow",
     "TurbofanCruiseLiftDragEstimate",
     "TurbofanLinearSizing",
+    "TurbofanMacLiftDragEstimate",
     "TurbopropLinearSizing",
     "ThrustSinkEfficiency",
     "TransmitterFanEfficiency",

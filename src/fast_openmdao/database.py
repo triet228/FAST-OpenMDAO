@@ -429,6 +429,50 @@ class TurbofanCruiseLiftDragEstimate(om.ExplicitComponent):
                 ]
 
 
+class TurbofanMacLiftDragEstimate(om.ExplicitComponent):
+    """Compute FAST turbofan MAC/Reynolds cruise L/D estimates."""
+
+    def initialize(self):
+        self.options.declare("wingtip_factor", default=1.0)
+
+    def setup(self):
+        self.add_input("aspect_ratio", val=9.0)
+        self.add_input("mac_length", val=4.0, units="m")
+        self.add_input("cruise_mach", val=0.78)
+        self.add_input("altitude", val=10000.0, units="m")
+        self.add_output("reynolds", val=1.0e7)
+        self.add_output("mac_lift_drag", val=18.0)
+        self.add_output("effective_mac_lift_drag", val=20.0)
+        self.declare_partials(of="*", wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = turbofan_mac_lift_drag_values(
+            inputs["aspect_ratio"][0],
+            inputs["mac_length"][0],
+            inputs["cruise_mach"][0],
+            inputs["altitude"][0],
+            self.options["wingtip_factor"],
+        )
+
+        for name in turbofan_mac_lift_drag_output_names():
+            outputs[name] = values[name]
+
+    def compute_partials(self, inputs, partials):
+        values = turbofan_mac_lift_drag_values(
+            inputs["aspect_ratio"][0],
+            inputs["mac_length"][0],
+            inputs["cruise_mach"][0],
+            inputs["altitude"][0],
+            self.options["wingtip_factor"],
+        )
+
+        for output_name in turbofan_mac_lift_drag_output_names():
+            for input_name in turbofan_mac_lift_drag_input_names():
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
 def mac_lift_drag_values(aspect_ratio, reynolds):
     """Return FAST MAC L/D estimate and analytical derivatives."""
 
@@ -542,6 +586,92 @@ def turbofan_cruise_lift_drag_values(
     values["dthrust_lift_drag_dmtow"] = thrust_lift_drag / mtow
     values["dthrust_lift_drag_dengine_thrust_cruise"] = (
         -thrust_lift_drag / engine_thrust_cruise
+    )
+    return values
+
+
+def turbofan_mac_lift_drag_input_names():
+    """Return turbofan MAC/Reynolds L/D component input names."""
+
+    return [
+        "aspect_ratio",
+        "mac_length",
+        "cruise_mach",
+        "altitude",
+    ]
+
+
+def turbofan_mac_lift_drag_output_names():
+    """Return turbofan MAC/Reynolds L/D component output names."""
+
+    return [
+        "reynolds",
+        "mac_lift_drag",
+        "effective_mac_lift_drag",
+    ]
+
+
+def turbofan_mac_lift_drag_values(
+    aspect_ratio,
+    mac_length,
+    cruise_mach,
+    altitude,
+    wingtip_factor,
+):
+    """Return FAST turbofan MAC/Reynolds L/D estimates and derivatives."""
+
+    aspect_ratio = float(aspect_ratio)
+    mac_length = float(mac_length)
+    cruise_mach = float(cruise_mach)
+    altitude = float(altitude)
+    wingtip_factor = float(wingtip_factor)
+    ft_per_m = 3.280839895013123
+    mac_ft = mac_length * ft_per_m
+    altitude_ft = altitude * ft_per_m
+    altitude_ratio = altitude_ft / 23500.0
+    altitude_factor = 1.0 - 0.5 * altitude_ratio ** 0.7
+    reynolds = 7.093e6 * mac_ft * cruise_mach * altitude_factor
+    base = mac_lift_drag_values(aspect_ratio, reynolds)
+    effective = mac_lift_drag_values(aspect_ratio * wingtip_factor, reynolds)
+    values = {
+        "reynolds": reynolds,
+        "mac_lift_drag": base["lift_drag"],
+        "effective_mac_lift_drag": effective["lift_drag"],
+    }
+
+    for output_name in turbofan_mac_lift_drag_output_names():
+        for input_name in turbofan_mac_lift_drag_input_names():
+            values[f"d{output_name}_d{input_name}"] = 0.0
+
+    daltitude_factor_daltitude = (
+        -0.5 * 0.7 * altitude_ratio ** -0.3 * ft_per_m / 23500.0
+    )
+    values["dreynolds_dmac_length"] = 7.093e6 * ft_per_m * cruise_mach * altitude_factor
+    values["dreynolds_dcruise_mach"] = 7.093e6 * mac_ft * altitude_factor
+    values["dreynolds_daltitude"] = (
+        7.093e6 * mac_ft * cruise_mach * daltitude_factor_daltitude
+    )
+    values["dmac_lift_drag_daspect_ratio"] = base["dlift_drag_daspect_ratio"]
+    values["dmac_lift_drag_dmac_length"] = (
+        base["dlift_drag_dreynolds"] * values["dreynolds_dmac_length"]
+    )
+    values["dmac_lift_drag_dcruise_mach"] = (
+        base["dlift_drag_dreynolds"] * values["dreynolds_dcruise_mach"]
+    )
+    values["dmac_lift_drag_daltitude"] = (
+        base["dlift_drag_dreynolds"] * values["dreynolds_daltitude"]
+    )
+    values["deffective_mac_lift_drag_daspect_ratio"] = (
+        effective["dlift_drag_daspect_ratio"] * wingtip_factor
+    )
+    values["deffective_mac_lift_drag_dmac_length"] = (
+        effective["dlift_drag_dreynolds"] * values["dreynolds_dmac_length"]
+    )
+    values["deffective_mac_lift_drag_dcruise_mach"] = (
+        effective["dlift_drag_dreynolds"] * values["dreynolds_dcruise_mach"]
+    )
+    values["deffective_mac_lift_drag_daltitude"] = (
+        effective["dlift_drag_dreynolds"] * values["dreynolds_daltitude"]
     )
     return values
 

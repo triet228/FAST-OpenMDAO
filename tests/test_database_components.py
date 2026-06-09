@@ -16,6 +16,7 @@ from fast_openmdao import (
     DatabaseWeightFractions,
     MacLiftDragEstimate,
     TurbofanCruiseLiftDragEstimate,
+    TurbofanMacLiftDragEstimate,
     TurbopropCruiseLiftDragEstimate,
 )
 from fast_python.atmosphere import standard_atmosphere
@@ -165,6 +166,56 @@ def test_turbofan_cruise_lift_drag_estimate_declares_analytic_partials():
     )
 
     for partial_data in partials["lift_drag"].values():
+        assert (
+            partial_data["abs error"].forward < 1.0e-6
+            or partial_data["rel error"].forward < 1.0e-6
+        )
+
+
+def test_turbofan_mac_lift_drag_estimate_matches_fast_python():
+    """Check FAST CalcFanVals MAC/Reynolds L/D parity."""
+
+    plane = make_fan_plane()
+    expected = calc_fan_vals(plane, "Vals")["Specs"]["Aero"]["L_D"]
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "mac",
+        TurbofanMacLiftDragEstimate(wingtip_factor=1.2),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_turbofan_mac_lift_drag_values(problem, plane)
+    problem.run_model()
+
+    assert np.isclose(problem.get_val("mac_lift_drag")[0], expected["CrsMAC"])
+    assert np.isclose(
+        problem.get_val("effective_mac_lift_drag")[0],
+        expected["CrsMAC2"],
+    )
+
+
+def test_turbofan_mac_lift_drag_estimate_declares_analytic_partials():
+    """Check turbofan MAC/Reynolds L/D derivatives."""
+
+    plane = make_fan_plane()
+    problem = om.Problem()
+    problem.model.add_subsystem(
+        "mac",
+        TurbofanMacLiftDragEstimate(wingtip_factor=1.2),
+        promotes=["*"],
+    )
+    problem.setup()
+    set_turbofan_mac_lift_drag_values(problem, plane)
+    problem.run_model()
+
+    partials = problem.check_partials(
+        out_stream=None,
+        method="fd",
+        form="central",
+        step=1.0e-4,
+    )
+
+    for partial_data in partials["mac"].values():
         assert (
             partial_data["abs error"].forward < 1.0e-6
             or partial_data["rel error"].forward < 1.0e-6
@@ -467,6 +518,19 @@ def set_turbofan_cruise_lift_drag_values(problem, plane):
         specs["Propulsion"]["Engine"]["Thrust_Crs"],
         units="N",
     )
+
+
+def set_turbofan_mac_lift_drag_values(problem, plane):
+    """Set OpenMDAO inputs for turbofan MAC/Reynolds L/D preprocessing."""
+
+    specs = plane["Specs"]
+    problem.set_val(
+        "aspect_ratio",
+        specs["Aero"]["Span"] ** 2 / specs["Aero"]["S"],
+    )
+    problem.set_val("mac_length", specs["Aero"]["MAC"], units="m")
+    problem.set_val("cruise_mach", specs["Performance"]["Vels"]["Crs"])
+    problem.set_val("altitude", specs["Performance"]["Alts"]["Crs"], units="m")
 
 
 def set_database_geometry_load_values(problem, plane, max_payload):

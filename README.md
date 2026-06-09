@@ -134,7 +134,7 @@ The public `fast_openmdao` package currently exports:
 - Database: `DatabaseFanThrustNormalization`, `DatabaseGeometryLoads`,
   `DatabasePropPowerNormalization`, `DatabaseWeightFractions`,
   `MacLiftDragEstimate`, `TurbofanCruiseLiftDragEstimate`,
-  `TurbopropCruiseLiftDragEstimate`
+  `TurbofanMacLiftDragEstimate`, `TurbopropCruiseLiftDragEstimate`
 - Engine: `AirIntegratedHeat`, `AirSpecificHeat`, `AirSpecificHeatVolume`,
   `AirTemperatureFromHeatAdded`, `AirTemperatureFromHeatRemoved`, `BurnerFlow`,
   `ChokedArea`, `CompressorStageFlow`, `DiffuserFlow`, `FlowArea`,
