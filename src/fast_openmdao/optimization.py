@@ -531,6 +531,46 @@ class ConcatenateMatrices(om.ExplicitComponent):
         )["concatenated_matrix"]
 
 
+class TwoDimensionalArray(om.ExplicitComponent):
+    """Normalize FAST split values to explicit two-dimensional arrays.
+
+    Inputs:
+        array_values: Fixed-shape scalar/vector/matrix values.
+
+    Outputs:
+        two_dimensional_array: Values with FAST-Python's explicit 2-D shape.
+
+    Assumptions:
+        Input shape is fixed at setup. This converts
+        ``fast_python.optimization.two_dimensional`` into a linear OpenMDAO
+        component with an identity reshape derivative.
+    """
+
+    def initialize(self):
+        self.options.declare("input_shape", default=(1,))
+
+    def setup(self):
+        input_shape = tuple(np.asarray(self.options["input_shape"]).reshape(-1))
+        input_shape = tuple(int(value) for value in input_shape)
+        output_shape = two_dimensional_output_shape(input_shape)
+        size = int(np.prod(output_shape))
+        self.add_input("array_values", val=np.zeros(input_shape))
+        self.add_output("two_dimensional_array", val=np.zeros(output_shape))
+        rows = np.arange(size)
+        self.declare_partials(
+            of="two_dimensional_array",
+            wrt="array_values",
+            rows=rows,
+            cols=rows,
+            val=np.ones(size),
+        )
+
+    def compute(self, inputs, outputs):
+        outputs["two_dimensional_array"] = two_dimensional_array_values(
+            inputs["array_values"]
+        )["two_dimensional_array"]
+
+
 class MeritFunction(om.ExplicitComponent):
     """Compute FAST interior-point line-search merit value.
 
@@ -1329,6 +1369,26 @@ def concatenate_matrix_values(inputs, piece_rows, num_cols):
         return {"concatenated_matrix": np.zeros((0, num_cols))}
 
     return {"concatenated_matrix": np.vstack(pieces)}
+
+
+def two_dimensional_output_shape(input_shape):
+    """Return FAST two-dimensional helper output shape for a fixed input."""
+
+    if len(input_shape) == 1:
+        return (input_shape[0], 1)
+
+    return input_shape
+
+
+def two_dimensional_array_values(array_values):
+    """Return FAST split-array two-dimensional normalization values."""
+
+    array = np.asarray(array_values, dtype=float).copy()
+
+    if array.ndim == 1:
+        array = array.reshape(-1, 1)
+
+    return {"two_dimensional_array": array}
 
 
 def get_slack_values(inputs, num_inequality):

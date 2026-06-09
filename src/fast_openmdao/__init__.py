@@ -119,6 +119,7 @@ from fast_openmdao.optimization import (
     PowerManagementObjective,
     PowerLimitConstraints,
     SplitScheduleFill,
+    TwoDimensionalArray,
 )
 from fast_openmdao.problem import make_fast_optimization_problem, make_fast_problem
 from fast_openmdao.projection import (
@@ -276,6 +277,7 @@ __all__ = [
     "TurbopropCruiseLiftDragEstimate",
     "TurbopropAirframeWeight",
     "TurbopropOEWIterationStep",
+    "TwoDimensionalArray",
     "TurbofanAirframeWeight",
     "TurbofanOEWIterationStep",
     "UnitConversion",

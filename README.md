@@ -92,7 +92,8 @@ derivative-native FAST equation components:
   battery energy plus interior-point feasible slack-step limits,
   Gaussian-elimination pivots, damped BFGS Hessian updates, fixed-shape
   gradient-block formatting, gradient-matrix reshaping, fixed-piece vector and
-  matrix concatenation, and merit values with analytical partial derivatives.
+  matrix concatenation, split-array dimensional normalization, and merit values
+  with analytical partial derivatives.
 - Optimization power/energy, design split bound, and cruise power availability
   residual helpers with analytical partial derivatives for active constraints.
 - Optimization operational split bound residual helper with analytical partial
@@ -170,7 +171,7 @@ The public `fast_openmdao` package currently exports:
   `ConcatenateMatrices`, `ConcatenateVectors`, `HessianUpdate`, `HistoryArray`,
   `MeritFunction`, `OneBasedHistoryValues`, `OperationalObjective`,
   `OperationalSplitConstraints`, `PowerManagementObjective`,
-  `PowerLimitConstraints`, `SplitScheduleFill`
+  `PowerLimitConstraints`, `SplitScheduleFill`, `TwoDimensionalArray`
 - Projection: `BatterySpecificEnergyProjection`,
   `ElectricMotorSpecificPowerProjection`, `KPPProjection`
 - Propulsion: `BatteryEnergyCutoff`, `BatteryEnergyHistory`,

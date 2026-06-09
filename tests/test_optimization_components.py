@@ -29,6 +29,7 @@ from fast_openmdao import (
     PowerManagementObjective,
     PowerLimitConstraints,
     SplitScheduleFill,
+    TwoDimensionalArray,
 )
 from fast_python.optimization import (
     battery_energy_available,
@@ -49,6 +50,7 @@ from fast_python.optimization import (
     operational_split_constraint_blocks,
     power_management_objective,
     power_limit_constraints,
+    two_dimensional,
 )
 
 
@@ -369,6 +371,31 @@ def test_concatenate_matrices_matches_fast_python():
         problem.get_val("concatenated_matrix"),
         concatenate_matrices(pieces, 2),
     )
+
+
+def test_two_dimensional_array_matches_fast_python():
+    """Check FAST split-array two-dimensional normalization parity."""
+
+    cases = [
+        np.asarray([0.2, 0.4, 0.6]),
+        np.asarray([[0.2, 0.3], [0.4, 0.5]]),
+    ]
+
+    for array_values in cases:
+        problem = om.Problem()
+        problem.model.add_subsystem(
+            "array",
+            TwoDimensionalArray(input_shape=array_values.shape),
+            promotes=["*"],
+        )
+        problem.setup()
+        problem.set_val("array_values", array_values)
+        problem.run_model()
+
+        assert np.allclose(
+            problem.get_val("two_dimensional_array"),
+            two_dimensional(array_values),
+        )
 
 
 def test_merit_function_matches_fast_python():
@@ -703,6 +730,13 @@ def test_optimization_helpers_declare_analytic_partials():
             {
                 "matrix_piece_0": np.asarray([[0.1, 0.2], [0.3, 0.4]]),
                 "matrix_piece_2": np.asarray([[0.5, 0.6]]),
+            },
+        ),
+        (
+            "two_dimensional_array",
+            TwoDimensionalArray(input_shape=(3,)),
+            {
+                "array_values": np.asarray([0.2, 0.4, 0.6]),
             },
         ),
         (
