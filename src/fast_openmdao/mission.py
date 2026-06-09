@@ -151,6 +151,66 @@ class CruiseTimeTargetDistance(om.ExplicitComponent):
             partials["distance", name] = values[f"ddistance_d{name}"]
 
 
+class CruiseBreguetEfficiencyTriplet(om.ExplicitComponent):
+    """Compute FAST CruiseBRE eta1, eta2, and eta3 coefficients.
+
+    Inputs:
+        propulsive_efficiency: Propulsive efficiency.
+        electric_motor_efficiency: Electric motor efficiency.
+        electric_generator_efficiency: Electric generator efficiency.
+        gas_turbine_efficiency: Gas turbine efficiency.
+
+    Outputs:
+        eta1, eta2, eta3: FAST Breguet cruise coefficients for the selected
+            architecture.
+
+    Assumptions:
+        ``architecture`` is a discrete FAST CruiseBRE architecture label:
+        AC, PHE, SHE, or TE. The component is differentiable within a fixed
+        architecture; switching architectures is a discrete model change.
+    """
+
+    def initialize(self):
+        self.options.declare("architecture", default="AC")
+
+    def setup(self):
+        self.add_input("propulsive_efficiency", val=0.85)
+        self.add_input("electric_motor_efficiency", val=0.95)
+        self.add_input("electric_generator_efficiency", val=0.92)
+        self.add_input("gas_turbine_efficiency", val=0.35)
+        self.add_output("eta1", val=0.35)
+        self.add_output("eta2", val=0.0)
+        self.add_output("eta3", val=0.85)
+        self.declare_partials(of=["eta1", "eta2", "eta3"], wrt="*")
+
+    def compute(self, inputs, outputs):
+        values = cruise_breguet_efficiency_values(
+            self.options["architecture"],
+            inputs["propulsive_efficiency"][0],
+            inputs["electric_motor_efficiency"][0],
+            inputs["electric_generator_efficiency"][0],
+            inputs["gas_turbine_efficiency"][0],
+        )
+        outputs["eta1"] = values["eta1"]
+        outputs["eta2"] = values["eta2"]
+        outputs["eta3"] = values["eta3"]
+
+    def compute_partials(self, inputs, partials):
+        values = cruise_breguet_efficiency_values(
+            self.options["architecture"],
+            inputs["propulsive_efficiency"][0],
+            inputs["electric_motor_efficiency"][0],
+            inputs["electric_generator_efficiency"][0],
+            inputs["gas_turbine_efficiency"][0],
+        )
+
+        for output_name in ("eta1", "eta2", "eta3"):
+            for input_name in breguet_efficiency_input_names():
+                partials[output_name, input_name] = values[
+                    f"d{output_name}_d{input_name}"
+                ]
+
+
 def flight_condition_values(altitude, disa, velocity_type, velocity):
     """Return FAST flight-condition values and analytical derivatives."""
 
@@ -201,6 +261,101 @@ def flight_condition_values(altitude, disa, velocity_type, velocity):
         dsound_speed_daltitude,
         dsound_speed_ddisa,
     )
+    return values
+
+
+def cruise_breguet_efficiency_values(
+    architecture,
+    propulsive_efficiency,
+    electric_motor_efficiency,
+    electric_generator_efficiency,
+    gas_turbine_efficiency,
+):
+    """Return FAST CruiseBRE efficiency coefficients and derivatives."""
+
+    arch = architecture.upper()
+    values = zero_breguet_efficiency_derivatives()
+
+    if arch == "AC":
+        values.update(
+            {
+                "eta1": gas_turbine_efficiency,
+                "eta2": 0.0,
+                "eta3": propulsive_efficiency,
+                "deta1_dgas_turbine_efficiency": 1.0,
+                "deta3_dpropulsive_efficiency": 1.0,
+            }
+        )
+        return values
+
+    if arch == "PHE":
+        values.update(
+            {
+                "eta1": gas_turbine_efficiency,
+                "eta2": electric_motor_efficiency,
+                "eta3": propulsive_efficiency,
+                "deta1_dgas_turbine_efficiency": 1.0,
+                "deta2_delectric_motor_efficiency": 1.0,
+                "deta3_dpropulsive_efficiency": 1.0,
+            }
+        )
+        return values
+
+    if arch == "SHE":
+        values.update(
+            {
+                "eta1": gas_turbine_efficiency * electric_generator_efficiency,
+                "eta2": 1.0,
+                "eta3": electric_motor_efficiency * propulsive_efficiency,
+                "deta1_dgas_turbine_efficiency": electric_generator_efficiency,
+                "deta1_delectric_generator_efficiency": gas_turbine_efficiency,
+                "deta3_delectric_motor_efficiency": propulsive_efficiency,
+                "deta3_dpropulsive_efficiency": electric_motor_efficiency,
+            }
+        )
+        return values
+
+    if arch == "TE":
+        values.update(
+            {
+                "eta1": gas_turbine_efficiency * electric_generator_efficiency,
+                "eta2": 0.0,
+                "eta3": electric_motor_efficiency * propulsive_efficiency,
+                "deta1_dgas_turbine_efficiency": electric_generator_efficiency,
+                "deta1_delectric_generator_efficiency": gas_turbine_efficiency,
+                "deta3_delectric_motor_efficiency": propulsive_efficiency,
+                "deta3_dpropulsive_efficiency": electric_motor_efficiency,
+            }
+        )
+        return values
+
+    raise ValueError("architecture must be AC, PHE, SHE, or TE.")
+
+
+def breguet_efficiency_input_names():
+    """Return CruiseBRE efficiency input names."""
+
+    return (
+        "propulsive_efficiency",
+        "electric_motor_efficiency",
+        "electric_generator_efficiency",
+        "gas_turbine_efficiency",
+    )
+
+
+def zero_breguet_efficiency_derivatives():
+    """Return zero-initialized CruiseBRE efficiency derivative mapping."""
+
+    values = {
+        "eta1": 0.0,
+        "eta2": 0.0,
+        "eta3": 0.0,
+    }
+
+    for output_name in ("eta1", "eta2", "eta3"):
+        for input_name in breguet_efficiency_input_names():
+            values[f"d{output_name}_d{input_name}"] = 0.0
+
     return values
 
 

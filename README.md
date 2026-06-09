@@ -24,6 +24,8 @@ derivative-native FAST equation components:
 - `FlightConditions`: native mission primitive matching
   `fast_python.mission.compute_flight_conditions` with analytical partial
   derivatives.
+- Mission Breguet cruise efficiency triplet helper with analytical partial
+  derivatives for fixed architectures.
 - Engine primitives for isentropic pressure, temperature, area-Mach,
   mass-flow parameter, and static-density equations with analytical partial
   derivatives.
@@ -73,7 +75,8 @@ The public `fast_openmdao` package currently exports:
   `ChokedArea`, `FlowArea`, `JetAIntegratedHeat`, `LocalEfficiency`,
   `LocalReynolds`, `MassFlowParameter`, `StaticDensity`, `StaticPressure`,
   `StaticTemperature`, `TotalPressure`, `TotalTemperature`
-- Mission: `CruiseTimeTargetDistance`, `FlightConditions`
+- Mission: `CruiseBreguetEfficiencyTriplet`, `CruiseTimeTargetDistance`,
+  `FlightConditions`
 - OEW: `NumericSum`, `TurbopropAirframeWeight`
 - Optimization: `BatteryEnergyAvailable`, `ElectricMotorPowerAvailable`
 - Projection: `BatterySpecificEnergyProjection`,
@@ -268,8 +271,10 @@ optimized values against FAST-Python residual functions.
    analytical partial derivatives. Done.
 22. Convert scalar/vector analysis and OEW summation helpers with analytical
    partial derivatives. Done.
-23. Add complex-step derivative checks where supported by FAST-Python internals.
-24. Build reusable groups for mission, propulsion, weights, and objective
+23. Convert Breguet cruise efficiency triplet helper with analytical partial
+   derivatives. Done.
+24. Add complex-step derivative checks where supported by FAST-Python internals.
+25. Build reusable groups for mission, propulsion, weights, and objective
    functions.
 
 See `docs/conversion_inventory.md` for module-by-module conversion status.

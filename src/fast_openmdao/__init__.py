@@ -34,7 +34,11 @@ from fast_openmdao.engine import (
     TotalPressure,
     TotalTemperature,
 )
-from fast_openmdao.mission import CruiseTimeTargetDistance, FlightConditions
+from fast_openmdao.mission import (
+    CruiseBreguetEfficiencyTriplet,
+    CruiseTimeTargetDistance,
+    FlightConditions,
+)
 from fast_openmdao.oew import NumericSum, TurbopropAirframeWeight
 from fast_openmdao.optimization import (
     BatteryEnergyAvailable,
@@ -69,6 +73,7 @@ __all__ = [
     "ChokedArea",
     "ConvergenceError",
     "CruiseDynamicPressure",
+    "CruiseBreguetEfficiencyTriplet",
     "CruiseTimeTargetDistance",
     "ElectricMotorSpecificPowerProjection",
     "ElectricMotorPowerAvailable",
