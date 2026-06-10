@@ -234,6 +234,72 @@ def make_fast_auto_split_optimization_problem(
     return problem
 
 
+def make_fast_mission_split_schedule_optimization_problem(
+    aircraft,
+    mission=None,
+    schedule_specs=(),
+    input_specs=(),
+    output_specs=None,
+    runner=None,
+    partial_derivatives=None,
+    component_name="fast",
+    promotes=None,
+    design_vars=(),
+    objective=None,
+    constraints=(),
+    driver=None,
+    driver_options=None,
+):
+    """Create a FAST optimization problem with split schedules as DVs.
+
+    Inputs:
+        aircraft: Baseline FAST aircraft dictionary.
+        mission: Optional baseline FAST mission/profile dictionary.
+        schedule_specs: Split schedule specifications accepted by
+            ``split_schedule_design_specs``.
+        input_specs: Additional scalar FAST path input specs.
+        output_specs: Scalar FAST result outputs.
+        runner: Optional FAST-compatible runner.
+        partial_derivatives: Optional analytic partial derivative mapping.
+        component_name: FAST wrapper subsystem name.
+        promotes: OpenMDAO promotions list for the FAST wrapper.
+        design_vars: Additional OpenMDAO design-variable specs.
+        objective: Objective spec. Defaults to FAST MTOW.
+        constraints: Additional OpenMDAO constraint specs.
+        driver: Optional OpenMDAO driver.
+        driver_options: Driver options.
+
+    Outputs:
+        Unsetup OpenMDAO Problem with one generated scalar design variable per
+        selected split-schedule mission point.
+
+    Assumptions:
+        FAST schedule arrays already exist in the baseline data. This helper
+        keeps the scalar FAST bridge intact by exposing each selected schedule
+        leaf independently, which lets OpenMDAO optimize multiple mission
+        points without requiring Dymos as a hard dependency.
+    """
+
+    generated = split_schedule_design_specs(aircraft, mission, schedule_specs)
+    problem = make_fast_optimization_problem(
+        aircraft=aircraft,
+        mission=mission,
+        input_specs=list(input_specs) + generated["input_specs"],
+        output_specs=output_specs,
+        runner=runner,
+        partial_derivatives=partial_derivatives,
+        component_name=component_name,
+        promotes=promotes,
+        design_vars=list(design_vars) + generated["design_vars"],
+        objective=objective,
+        constraints=constraints,
+        driver=driver,
+        driver_options=driver_options,
+    )
+    problem.fast_split_schedule_metadata = generated
+    return problem
+
+
 def infer_propulsion_split_specs(
     aircraft,
     prop_arch_path=("Specs", "Propulsion", "PropArch"),
@@ -486,6 +552,198 @@ def split_diagnostic_message(diagnostics, preferred_matrix):
         selected.append("no matching split matrix candidate")
 
     return "No unambiguous editable split matrix found. " + "; ".join(selected)
+
+
+def split_schedule_design_specs(aircraft, mission=None, schedule_specs=()):
+    """Return input and design-variable specs for split schedules.
+
+    Inputs:
+        aircraft: Baseline FAST aircraft dictionary.
+        mission: Optional mission/profile dictionary for mission-target splits.
+        schedule_specs: Iterable of schedule split specifications.
+
+    Outputs:
+        Dictionary with ``input_specs``, ``design_vars``, ``input_names``, and
+        ``entries``. Each entry maps one OpenMDAO scalar design variable to one
+        mission-point leaf in the FAST schedule.
+    """
+
+    generated_inputs = []
+    generated_design_vars = []
+    generated_entries = []
+
+    for index, schedule_spec in enumerate(schedule_specs):
+        normalized = normalize_split_schedule_spec(schedule_spec, index)
+        schedule = np.asarray(
+            get_split_target_value(
+                aircraft,
+                mission,
+                normalized["target"],
+                normalized["path"],
+            ),
+            dtype=float,
+        )
+        entries = split_schedule_entries(schedule, normalized)
+
+        for point, column, value in entries:
+            name = split_schedule_entry_name(normalized, point, column)
+            path = split_schedule_entry_path(normalized["path"], point, column)
+            generated_inputs.append(
+                {
+                    "name": name,
+                    "target": normalized["target"],
+                    "path": path,
+                    "val": value,
+                    "desc": "%s split schedule point %s." % (
+                        normalized["label"],
+                        split_schedule_entry_label(point, column),
+                    ),
+                }
+            )
+            generated_design_vars.append(
+                split_schedule_design_var_spec(name, normalized)
+            )
+            generated_entries.append(
+                {
+                    "name": name,
+                    "target": normalized["target"],
+                    "path": path,
+                    "schedule_path": normalized["path"],
+                    "point": point,
+                    "column": column,
+                    "label": normalized["label"],
+                }
+            )
+
+    return {
+        "input_specs": generated_inputs,
+        "design_vars": generated_design_vars,
+        "input_names": tuple(spec["name"] for spec in generated_inputs),
+        "entries": tuple(generated_entries),
+    }
+
+
+def normalize_split_schedule_spec(schedule_spec, index):
+    """Return one normalized mission split schedule specification."""
+
+    if "path" not in schedule_spec:
+        raise ValueError("Split schedule specs require a path.")
+
+    label = schedule_spec.get("label", "schedule_%d" % index)
+    prefix = schedule_spec.get("prefix", safe_name(label))
+
+    return {
+        "path": tuple(schedule_spec["path"]),
+        "target": schedule_spec.get("target", "aircraft"),
+        "label": label,
+        "prefix": prefix,
+        "points": schedule_spec.get("points"),
+        "columns": schedule_spec.get("columns"),
+        "lower": schedule_spec.get("lower", 0.0),
+        "upper": schedule_spec.get("upper", 1.0),
+        "ref": schedule_spec.get("ref"),
+        "ref0": schedule_spec.get("ref0"),
+        "adder": schedule_spec.get("adder"),
+        "scaler": schedule_spec.get("scaler", 1.0),
+    }
+
+
+def split_schedule_entries(schedule, schedule_spec):
+    """Return selected schedule entries as point, column, value tuples."""
+
+    array = np.asarray(schedule, dtype=float)
+
+    if array.ndim == 0:
+        raise ValueError("Split schedule optimization requires multiple points.")
+
+    points = split_schedule_indexes(schedule_spec["points"], array.shape[0], "points")
+
+    if array.ndim == 1:
+        if schedule_spec["columns"] is not None:
+            raise ValueError("Columns are only valid for 2D split schedules.")
+
+        return tuple(
+            (point, None, array[point])
+            for point in points
+        )
+
+    if array.ndim == 2:
+        columns = split_schedule_indexes(
+            schedule_spec["columns"],
+            array.shape[1],
+            "columns",
+        )
+        return tuple(
+            (point, column, array[point, column])
+            for point in points
+            for column in columns
+        )
+
+    raise ValueError("Split schedule optimization supports 1D or 2D schedules.")
+
+
+def split_schedule_indexes(indexes, size, label):
+    """Return selected schedule indexes, defaulting to the full axis."""
+
+    if indexes is None:
+        return tuple(range(size))
+
+    selected = tuple(int(value) for value in np.asarray(indexes).reshape(-1))
+
+    for value in selected:
+        if value < 0 or value >= size:
+            raise ValueError(
+                "%s index %d is outside schedule size %d." % (
+                    label,
+                    value,
+                    size,
+                )
+            )
+
+    return selected
+
+
+def split_schedule_entry_name(schedule_spec, point, column):
+    """Return stable OpenMDAO variable name for one schedule entry."""
+
+    if column is None:
+        return "%s_%d" % (schedule_spec["prefix"], point)
+
+    return "%s_%d_%d" % (schedule_spec["prefix"], point, column)
+
+
+def split_schedule_entry_path(path, point, column):
+    """Return FAST path for one schedule point or point-column leaf."""
+
+    if column is None:
+        return tuple(path) + (point,)
+
+    return tuple(path) + (point, column)
+
+
+def split_schedule_entry_label(point, column):
+    """Return a compact human-readable schedule entry label."""
+
+    if column is None:
+        return "%d" % point
+
+    return "%d,%d" % (point, column)
+
+
+def split_schedule_design_var_spec(name, schedule_spec):
+    """Return one OpenMDAO design-variable spec for a schedule entry."""
+
+    spec = {
+        "name": name,
+        "lower": schedule_spec["lower"],
+        "upper": schedule_spec["upper"],
+    }
+
+    for key in ("ref", "ref0", "adder", "scaler"):
+        if schedule_spec[key] is not None:
+            spec[key] = schedule_spec[key]
+
+    return spec
 
 
 def split_matrix_design_specs(aircraft, mission=None, split_specs=()):

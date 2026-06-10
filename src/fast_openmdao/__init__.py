@@ -184,9 +184,11 @@ from fast_openmdao.split_optimization import (
     SplitGroupSums,
     infer_propulsion_split_specs,
     make_fast_auto_split_optimization_problem,
+    make_fast_mission_split_schedule_optimization_problem,
     make_fast_split_optimization_problem,
     propulsion_split_diagnostics,
     split_matrix_design_specs,
+    split_schedule_design_specs,
 )
 from fast_openmdao.propulsion import (
     BatteryEnergyCutoff,
@@ -372,8 +374,10 @@ __all__ = [
     "SplitGroupSums",
     "infer_propulsion_split_specs",
     "make_fast_auto_split_optimization_problem",
+    "make_fast_mission_split_schedule_optimization_problem",
     "propulsion_split_diagnostics",
     "split_matrix_design_specs",
+    "split_schedule_design_specs",
     "SimpleSourceTransmitterArchitecture",
     "SplitScalar",
     "SplitValuesVector",

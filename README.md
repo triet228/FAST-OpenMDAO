@@ -217,6 +217,57 @@ that normalize incoming split columns. Single-connection rows or columns remain
 fixed by default; set `include_singletons=True` only when those entries should
 also become design variables.
 
+## Mission-Point Split Schedule Optimization
+
+Use `make_fast_mission_split_schedule_optimization_problem` when the power
+management strategy should vary over multiple mission points instead of using
+one segment-level split. The helper exposes each selected schedule leaf as its
+own OpenMDAO design variable while keeping the FAST dictionary bridge scalar.
+
+```python
+from fast_openmdao import make_fast_mission_split_schedule_optimization_problem
+
+problem = make_fast_mission_split_schedule_optimization_problem(
+    aircraft=aircraft,
+    mission=mission,
+    schedule_specs=[
+        {
+            "label": "climb split",
+            "prefix": "climb_split",
+            "target": "aircraft",
+            "path": ("Specs", "Power", "LamDwn", "Clb"),
+            "points": (0, 1, 2, 3),
+            "lower": 0.0,
+            "upper": 1.0,
+        },
+    ],
+    output_specs=[
+        {
+            "name": "battery_energy_used",
+            "path": (
+                "aircraft",
+                "Mission",
+                "History",
+                "SI",
+                "Energy",
+                "E_ES",
+                -1,
+                1,
+            ),
+            "units": "J",
+        },
+    ],
+    objective={"name": "battery_energy_used", "scaler": 1.0e-7},
+)
+
+problem.setup()
+problem.run_driver()
+```
+
+For 2D FAST split schedules, pass `columns` to choose which split columns are
+optimized at each selected mission point. Omit `points` or `columns` to expose
+the full schedule axis.
+
 ## Compact Example
 
 Run the compact electric optimization smoke example:

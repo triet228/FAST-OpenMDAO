@@ -13,9 +13,11 @@ from fast_openmdao import (
     SplitGroupSums,
     infer_propulsion_split_specs,
     make_fast_auto_split_optimization_problem,
+    make_fast_mission_split_schedule_optimization_problem,
     make_fast_split_optimization_problem,
     propulsion_split_diagnostics,
     split_matrix_design_specs,
+    split_schedule_design_specs,
 )
 
 
@@ -189,6 +191,67 @@ def test_auto_split_diagnostics_reports_callable_generators():
     assert "callable" in diagnostics[0]["reason"]
 
 
+def test_split_schedule_design_specs_exposes_mission_points():
+    """Check schedule specs expose independent mission-point split entries."""
+
+    generated = split_schedule_design_specs(
+        make_schedule_aircraft(),
+        schedule_specs=[make_climb_schedule_spec()],
+    )
+
+    assert generated["input_names"] == (
+        "climb_split_0",
+        "climb_split_1",
+        "climb_split_2",
+    )
+    assert generated["input_specs"][1]["path"] == (
+        "Specs",
+        "Power",
+        "LamDwn",
+        "Clb",
+        1,
+    )
+    assert generated["entries"][2]["point"] == 2
+    assert generated["design_vars"][0]["lower"] == 0.0
+    assert generated["design_vars"][0]["upper"] == 1.0
+
+
+def test_mission_split_schedule_problem_optimizes_multiple_points():
+    """Check generated schedule variables optimize several mission points."""
+
+    problem = make_fast_mission_split_schedule_optimization_problem(
+        aircraft=make_schedule_aircraft(),
+        schedule_specs=[make_climb_schedule_spec()],
+        output_specs=[
+            {
+                "name": "schedule_objective",
+                "path": ("schedule_objective",),
+            },
+        ],
+        runner=schedule_objective_runner,
+        objective={
+            "name": "schedule_objective",
+        },
+        driver_options={
+            "maxiter": 60,
+            "tol": 1.0e-10,
+        },
+    )
+    problem.setup()
+    result = problem.run_driver()
+
+    assert result.success
+    assert problem.fast_split_schedule_metadata["input_names"] == (
+        "climb_split_0",
+        "climb_split_1",
+        "climb_split_2",
+    )
+    assert abs(problem.get_val("climb_split_0")[0] - 0.15) < 1.0e-5
+    assert abs(problem.get_val("climb_split_1")[0] - 0.72) < 1.0e-5
+    assert abs(problem.get_val("climb_split_2")[0] - 0.35) < 1.0e-5
+    assert problem.get_val("schedule_objective")[0] < 1.0e-10
+
+
 def make_downstream_split_spec():
     """Return a split spec for the fake downstream operation matrix."""
 
@@ -199,6 +262,20 @@ def make_downstream_split_spec():
         "matrix_path": ("Specs", "Propulsion", "PropArch", "OperDwn"),
         "architecture_path": ("Specs", "Propulsion", "PropArch", "Arch"),
         "axis": "row",
+        "lower": 0.0,
+        "upper": 1.0,
+    }
+
+
+def make_climb_schedule_spec():
+    """Return a split schedule spec for all climb mission points."""
+
+    return {
+        "label": "climb split",
+        "prefix": "climb_split",
+        "target": "aircraft",
+        "path": ("Specs", "Power", "LamDwn", "Clb"),
+        "points": (0, 1, 2),
         "lower": 0.0,
         "upper": 1.0,
     }
@@ -229,6 +306,20 @@ def make_split_aircraft():
     }
 
 
+def make_schedule_aircraft():
+    """Return a tiny FAST-shaped aircraft with a climb split schedule."""
+
+    return {
+        "Specs": {
+            "Power": {
+                "LamDwn": {
+                    "Clb": [0.3, 0.3, 0.3],
+                },
+            },
+        },
+    }
+
+
 def split_objective_runner(aircraft, _mission):
     """Return a quadratic objective with a known feasible split optimum."""
 
@@ -244,4 +335,14 @@ def split_objective_runner(aircraft, _mission):
     )
     return {
         "split_objective": objective,
+    }
+
+
+def schedule_objective_runner(aircraft, _mission):
+    """Return a quadratic objective with distinct per-point optima."""
+
+    split = np.asarray(aircraft["Specs"]["Power"]["LamDwn"]["Clb"], dtype=float)
+    target = np.asarray([0.15, 0.72, 0.35])
+    return {
+        "schedule_objective": np.sum((split - target) ** 2),
     }
