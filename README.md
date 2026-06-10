@@ -272,6 +272,44 @@ For 2D FAST split schedules, pass `columns` to choose which split columns are
 optimized at each selected mission point. Omit `points` or `columns` to expose
 the full schedule axis.
 
+## Architecture Power-Management Optimization
+
+Use `make_fast_architecture_power_management_optimization_problem` when a
+validated custom propulsion architecture has numeric `OperDwn` or `OperUps`
+matrices and the power-management strategy should be optimized across the
+flight schedule. The helper converts each active branching matrix entry into a
+FAST callable split argument, expands `Specs.Power.LamDwn` or
+`Specs.Power.LamUps` into per-point schedules for the mission segment keys, and
+adds equality constraints so every branching split group sums to one at every
+optimized point.
+
+```python
+from fast_openmdao import make_fast_architecture_power_management_optimization_problem
+
+problem = make_fast_architecture_power_management_optimization_problem(
+    aircraft=aircraft,
+    mission=mission,
+    output_specs=[
+        {
+            "name": "fuel_burn",
+            "path": ("aircraft", "Mission", "History", "SI", "Weight", "Fburn", -1),
+            "units": "kg",
+        },
+    ],
+    objective={"name": "fuel_burn"},
+)
+
+problem.setup()
+problem.run_driver()
+```
+
+This is the architecture-aware path to avoid optimizing only one segment-level
+split. FAST stores these split schedules by segment key, so repeated segment
+types share a schedule unless the mission/evaluator is extended to use
+segment-instance-specific power controls. FAST-Python currently evaluates at
+most 17 callable split arguments per operation matrix; larger branching
+topologies fail early with a clear setup error.
+
 ## Compact Example
 
 Run the compact electric optimization smoke example:

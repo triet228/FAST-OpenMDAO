@@ -2,6 +2,7 @@
 
 """Utilities for optimizing arbitrary FAST propulsion split matrices."""
 
+import inspect
 from copy import deepcopy
 
 import numpy as np
@@ -403,6 +404,505 @@ def make_fast_mission_split_schedule_optimization_problem(
     )
     problem.fast_split_schedule_metadata = generated
     return problem
+
+
+def make_fast_architecture_power_management_optimization_problem(
+    aircraft,
+    mission=None,
+    input_specs=(),
+    output_specs=None,
+    runner=None,
+    partial_derivatives=None,
+    component_name="fast",
+    promotes=None,
+    design_vars=(),
+    objective=None,
+    constraints=(),
+    driver=None,
+    driver_options=None,
+    prop_arch_path=("Specs", "Propulsion", "PropArch"),
+    power_path=("Specs", "Power"),
+    split_matrices=("OperDwn", "OperUps"),
+    segment_keys=None,
+    lower=0.0,
+    upper=1.0,
+    active_tol=1.0e-12,
+    sum_tol=1.0e-8,
+    max_callable_args=17,
+    constraint_component_name="power_split_schedule_constraints",
+):
+    """Create a full-mission power-management optimization problem.
+
+    Inputs:
+        aircraft: Baseline FAST aircraft dictionary with validated PropArch.
+        mission: Optional baseline FAST mission/profile dictionary.
+        input_specs: Additional scalar FAST path input specs.
+        output_specs: Scalar FAST result outputs.
+        runner: Optional FAST-compatible runner.
+        partial_derivatives: Optional analytic partial derivative mapping.
+        component_name: FAST wrapper subsystem name.
+        promotes: OpenMDAO promotions list for the FAST wrapper.
+        design_vars: Additional OpenMDAO design-variable specs.
+        objective: Objective spec. Defaults to FAST MTOW.
+        constraints: Additional OpenMDAO constraint specs.
+        driver: Optional OpenMDAO driver.
+        driver_options: Driver options.
+        prop_arch_path: Path to the FAST propulsion architecture dictionary.
+        power_path: Path to the FAST power settings dictionary.
+        split_matrices: PropArch matrices to convert into mission schedules.
+        segment_keys: Optional FAST segment keys to optimize.
+        lower: Lower bound for generated power split design variables.
+        upper: Upper bound for generated power split design variables.
+        active_tol: Absolute tolerance for active architecture entries.
+        sum_tol: Tolerance for recognizing normalized split groups.
+        max_callable_args: Maximum split arguments supported by FAST eval_split.
+        constraint_component_name: Name for the split-sum constraint subsystem.
+
+    Outputs:
+        Unsetup OpenMDAO Problem with one design variable per active split
+        entry at every selected mission point and equality constraints that keep
+        each pointwise split group normalized.
+
+    Assumptions:
+        Numeric ``OperDwn`` and ``OperUps`` matrices describe the validated
+        split topology. This helper converts those numeric entries into
+        FAST-style callable split matrices and writes per-point ``LamDwn`` or
+        ``LamUps`` schedules. Repeated FAST segment types share the same
+        schedule because FAST stores split schedules by segment key.
+    """
+
+    prepared = prepare_architecture_power_management_schedules(
+        aircraft,
+        mission=mission,
+        prop_arch_path=prop_arch_path,
+        power_path=power_path,
+        split_matrices=split_matrices,
+        segment_keys=segment_keys,
+        lower=lower,
+        upper=upper,
+        active_tol=active_tol,
+        sum_tol=sum_tol,
+        max_callable_args=max_callable_args,
+    )
+    generated = split_schedule_design_specs(
+        prepared["aircraft"],
+        mission,
+        prepared["schedule_specs"],
+    )
+    problem = make_fast_optimization_problem(
+        aircraft=prepared["aircraft"],
+        mission=mission,
+        input_specs=list(input_specs) + generated["input_specs"],
+        output_specs=output_specs,
+        runner=runner,
+        partial_derivatives=partial_derivatives,
+        component_name=component_name,
+        promotes=promotes,
+        design_vars=list(design_vars) + generated["design_vars"],
+        objective=objective,
+        constraints=constraints,
+        driver=driver,
+        driver_options=driver_options,
+    )
+
+    if prepared["groups"]:
+        for spec in generated["input_specs"]:
+            problem.model.set_input_defaults(spec["name"], val=spec["val"])
+
+        problem.model.add_subsystem(
+            constraint_component_name,
+            SplitGroupSums(groups=prepared["groups"]),
+            promotes_inputs=generated["input_names"],
+            promotes_outputs=[("split_sums", "power_split_sum_constraints")],
+        )
+        problem.model.add_constraint(
+            "power_split_sum_constraints",
+            equals=1.0,
+            indices=np.arange(len(prepared["groups"])),
+        )
+
+    problem.fast_power_management_metadata = prepared
+    problem.fast_split_schedule_metadata = generated
+    return problem
+
+
+def prepare_architecture_power_management_schedules(
+    aircraft,
+    mission=None,
+    prop_arch_path=("Specs", "Propulsion", "PropArch"),
+    power_path=("Specs", "Power"),
+    split_matrices=("OperDwn", "OperUps"),
+    segment_keys=None,
+    lower=0.0,
+    upper=1.0,
+    active_tol=1.0e-12,
+    sum_tol=1.0e-8,
+    max_callable_args=17,
+):
+    """Return an aircraft copy with full pointwise split schedules.
+
+    Inputs:
+        aircraft: Baseline FAST aircraft dictionary.
+        mission: Optional FAST mission/profile dictionary used for segment rows.
+        prop_arch_path: Path to the propulsion architecture dictionary.
+        power_path: Path to the FAST power settings dictionary.
+        split_matrices: Iterable of PropArch matrix names to convert.
+        segment_keys: Optional FAST segment keys to optimize.
+        lower: Lower bound for generated split design variables.
+        upper: Upper bound for generated split design variables.
+        active_tol: Absolute tolerance for active architecture entries.
+        sum_tol: Tolerance for normalized matrix inference.
+        max_callable_args: Maximum callable split arguments FAST can evaluate.
+
+    Outputs:
+        Dictionary containing prepared ``aircraft``, generated
+        ``schedule_specs``, pointwise sum ``groups``, and metadata records.
+    """
+
+    prepared_aircraft = deepcopy(aircraft)
+    prop_arch = get_path(prepared_aircraft, prop_arch_path)
+    power = ensure_power_dict(prepared_aircraft, power_path)
+    segments = mission_segment_schedule_records(
+        prepared_aircraft,
+        mission,
+        segment_keys,
+    )
+    matrix_records = architecture_power_split_matrix_records(
+        prop_arch,
+        tuple(prop_arch_path),
+        tuple(split_matrices),
+        active_tol,
+        sum_tol,
+        max_callable_args,
+    )
+    schedule_specs = []
+    schedule_records = []
+    groups = []
+
+    for matrix_record in matrix_records:
+        matrix_name = matrix_record["matrix_name"]
+        power_name = power_schedule_name(matrix_name)
+        split_power = power.setdefault(power_name, {})
+        prop_arch[matrix_name] = split_callable_from_matrix_record(matrix_record)
+
+        for segment in segments:
+            schedule = np.tile(
+                np.asarray(matrix_record["initial_values"], dtype=float),
+                (segment["rows"], 1),
+            )
+            split_power[segment["key"]] = schedule.tolist()
+            prefix = safe_name("%s_%s" % (power_name, segment["key"]))
+            schedule_spec = {
+                "label": "%s %s" % (power_name, segment["key"]),
+                "prefix": prefix,
+                "target": "aircraft",
+                "path": tuple(power_path) + (power_name, segment["key"]),
+                "columns": tuple(range(matrix_record["entry_count"])),
+                "lower": lower,
+                "upper": upper,
+            }
+            schedule_specs.append(schedule_spec)
+            schedule_records.append(
+                {
+                    "matrix_name": matrix_name,
+                    "power_name": power_name,
+                    "segment_key": segment["key"],
+                    "rows": segment["rows"],
+                    "prefix": prefix,
+                    "path": schedule_spec["path"],
+                    "entries": matrix_record["entries"],
+                }
+            )
+
+            for point in range(segment["rows"]):
+                for group in matrix_record["groups"]:
+                    names = tuple(
+                        split_schedule_entry_name(schedule_spec, point, column)
+                        for column in group
+                    )
+
+                    if len(names) > 1:
+                        groups.append(names)
+
+    if not schedule_specs:
+        raise ValueError(
+            "No numeric branching PropArch split matrices were available for "
+            "full-mission power-management optimization."
+        )
+
+    return {
+        "aircraft": prepared_aircraft,
+        "schedule_specs": tuple(schedule_specs),
+        "groups": tuple(groups),
+        "matrices": tuple(matrix_records),
+        "segments": tuple(segments),
+        "schedules": tuple(schedule_records),
+    }
+
+
+def architecture_power_split_matrix_records(
+    prop_arch,
+    prop_arch_path,
+    split_matrices,
+    active_tol,
+    sum_tol,
+    max_callable_args,
+):
+    """Return matrix records for numeric PropArch split matrices."""
+
+    if "Arch" not in prop_arch:
+        raise ValueError("PropArch must contain Arch for power-management setup.")
+
+    architecture = np.asarray(prop_arch["Arch"], dtype=float)
+    records = []
+
+    for matrix_name in split_matrices:
+        if matrix_name not in prop_arch:
+            continue
+
+        matrix_value = prop_arch[matrix_name]
+
+        if callable(matrix_value):
+            continue
+
+        matrix = np.asarray(matrix_value, dtype=float)
+        axis = infer_split_axis(architecture, matrix, active_tol, sum_tol)
+
+        if axis["axis"] is None:
+            continue
+
+        split_spec = {
+            "matrix_path": tuple(prop_arch_path) + (matrix_name,),
+            "architecture_path": tuple(prop_arch_path) + ("Arch",),
+            "axis": axis["axis"],
+            "active_tol": active_tol,
+            "include_singletons": False,
+            "active_entries": None,
+            "active_from": "architecture",
+        }
+        active_groups = split_active_groups(architecture, matrix, split_spec)
+        entries = []
+        groups = []
+
+        for group in active_groups:
+            group_indexes = []
+
+            for row, col in group:
+                group_indexes.append(len(entries))
+                entries.append((row, col))
+
+            groups.append(tuple(group_indexes))
+
+        if not entries:
+            continue
+
+        if len(entries) > max_callable_args:
+            raise ValueError(
+                "%s needs %d split arguments, but FAST eval_split supports at "
+                "most %d." % (matrix_name, len(entries), max_callable_args)
+            )
+
+        records.append(
+            {
+                "matrix_name": matrix_name,
+                "axis": axis["axis"],
+                "matrix": matrix.copy(),
+                "entries": tuple(entries),
+                "entry_count": len(entries),
+                "groups": tuple(groups),
+                "initial_values": tuple(matrix[row, col] for row, col in entries),
+                "reason": axis["reason"],
+            }
+        )
+
+    return tuple(records)
+
+
+def split_callable_from_matrix_record(record):
+    """Return a FAST split callable backed by one matrix record."""
+
+    matrix = np.asarray(record["matrix"], dtype=float).copy()
+    entries = tuple(record["entries"])
+
+    def split_matrix(*values):
+        result = matrix.copy()
+
+        for index, (row, col) in enumerate(entries):
+            result[row, col] = values[index]
+
+        return result.tolist()
+
+    parameters = [
+        inspect.Parameter(
+            "split_%d" % index,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        )
+        for index in range(len(entries))
+    ]
+    split_matrix.__signature__ = inspect.Signature(parameters)
+    return split_matrix
+
+
+def ensure_power_dict(aircraft, power_path):
+    """Return the mutable FAST power dictionary, creating it when missing."""
+
+    current = aircraft
+
+    for key in power_path:
+        current = current.setdefault(key, {})
+
+    return current
+
+
+def power_schedule_name(matrix_name):
+    """Return the FAST power schedule name for a PropArch split matrix."""
+
+    if matrix_name == "OperDwn":
+        return "LamDwn"
+
+    if matrix_name == "OperUps":
+        return "LamUps"
+
+    return "Lam%s" % matrix_name
+
+
+def mission_segment_schedule_records(aircraft, mission, segment_keys):
+    """Return FAST segment keys and point counts for split schedules."""
+
+    selected = normalize_segment_key_selection(segment_keys)
+    profile = mission_profile(aircraft, mission)
+    records = {}
+
+    if profile is not None and "Segs" in profile:
+        segments = list(profile["Segs"])
+        segment_points = profile.get("SegPts")
+
+        for index, segment_name in enumerate(segments):
+            key = segment_name_to_split_key(segment_name)
+
+            if key is None:
+                continue
+
+            if selected is not None and key not in selected:
+                continue
+
+            if segment_points is not None:
+                rows = int(np.asarray(segment_points).reshape(-1)[index])
+            else:
+                rows = segment_default_point_count(aircraft, key)
+
+            if key not in records:
+                records[key] = {
+                    "key": key,
+                    "rows": rows,
+                    "segments": [segment_name],
+                }
+            else:
+                records[key]["rows"] = max(records[key]["rows"], rows)
+                records[key]["segments"].append(segment_name)
+
+    if records:
+        ordered = [records[key] for key in FAST_FLIGHT_SEGMENT_KEYS if key in records]
+        return tuple(ordered)
+
+    if selected is None:
+        raise ValueError(
+            "Full-mission power-management optimization needs a mission profile "
+            "or explicit segment_keys."
+        )
+
+    return tuple(
+        {
+            "key": key,
+            "rows": segment_default_point_count(aircraft, key),
+            "segments": [],
+        }
+        for key in selected
+    )
+
+
+def normalize_segment_key_selection(segment_keys):
+    """Return selected FAST segment keys or None for profile-driven setup."""
+
+    if segment_keys is None:
+        return None
+
+    if isinstance(segment_keys, str):
+        segment_keys = (segment_keys,)
+
+    return tuple(segment_name_to_split_key(value) or str(value) for value in segment_keys)
+
+
+def mission_profile(aircraft, mission):
+    """Return the FAST mission profile dictionary if one is available."""
+
+    if isinstance(mission, dict):
+        if isinstance(mission.get("Profile"), dict):
+            return mission["Profile"]
+
+        return mission
+
+    try:
+        return aircraft["Mission"]["Profile"]
+    except KeyError:
+        return None
+
+
+FAST_FLIGHT_SEGMENT_KEYS = ("Tko", "Clb", "Crs", "Des", "Lnd")
+
+
+def segment_name_to_split_key(name):
+    """Return FAST split key for a mission segment name."""
+
+    mapping = {
+        "takeoff": "Tko",
+        "detailedtakeoff": "Tko",
+        "climb": "Clb",
+        "cruise": "Crs",
+        "cruisebre": "Crs",
+        "descent": "Des",
+        "landing": "Lnd",
+        "tko": "Tko",
+        "clb": "Clb",
+        "crs": "Crs",
+        "des": "Des",
+        "lnd": "Lnd",
+    }
+    return mapping.get(str(name).replace("_", "").replace(" ", "").lower())
+
+
+def segment_default_point_count(aircraft, key):
+    """Return FAST default point count for one split segment key."""
+
+    setting_names = {
+        "Tko": "TkoPoints",
+        "Clb": "ClbPoints",
+        "Crs": "CrsPoints",
+        "Des": "DesPoints",
+    }
+
+    if key == "Lnd":
+        return 2
+
+    setting = setting_names.get(key)
+    value = None
+
+    if setting is not None:
+        value = aircraft.get("Settings", {}).get(setting)
+
+    if value is None or is_nan_like(value):
+        return 10
+
+    return int(value)
+
+
+def is_nan_like(value):
+    """Return whether a FAST setting value represents NaN."""
+
+    try:
+        return bool(np.isnan(float(value)))
+    except (TypeError, ValueError):
+        return str(value).lower() == "nan"
 
 
 def infer_propulsion_split_specs(
