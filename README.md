@@ -153,8 +153,10 @@ architecture stores operational split matrices directly in the FAST aircraft
 dictionary. The helper inspects `Specs.Propulsion.PropArch`, finds editable
 `OperDwn` or `OperUps` split matrices, infers row or column normalization, and
 then exposes each active branching entry as a scalar OpenMDAO design variable.
-It fails closed if the split matrix choice or normalization direction is
-ambiguous.
+If only `Arch` is present, it can initialize missing split matrices with equal
+fractions before optimization: row branches become `OperDwn`, and column
+merges become `OperUps`. It fails closed if the split matrix choice or
+normalization direction is ambiguous.
 
 ```python
 from fast_openmdao import make_fast_auto_split_optimization_problem
@@ -179,6 +181,8 @@ problem.run_driver()
 
 When both `OperDwn` and `OperUps` are editable and valid, pass
 `preferred_matrix` so the optimizer does not guess. Use
+`strict=False` only when both inferred upstream and downstream split controls
+should be initialized and optimized together. Use
 `make_fast_split_optimization_problem` for explicit matrix control:
 
 ```python

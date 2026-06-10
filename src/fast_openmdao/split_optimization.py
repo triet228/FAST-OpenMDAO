@@ -2,6 +2,8 @@
 
 """Utilities for optimizing arbitrary FAST propulsion split matrices."""
 
+from copy import deepcopy
+
 import numpy as np
 import openmdao.api as om
 
@@ -167,6 +169,7 @@ def make_fast_auto_split_optimization_problem(
     active_tol=1.0e-12,
     sum_tol=1.0e-8,
     strict=True,
+    initialize_missing=True,
     constraint_component_name="split_constraints",
 ):
     """Create a FAST split optimization problem by inspecting PropArch.
@@ -192,19 +195,33 @@ def make_fast_auto_split_optimization_problem(
         active_tol: Absolute tolerance for active architecture entries.
         sum_tol: Tolerance for recognizing normalized split groups.
         strict: If True, fail when normalization or matrix choice is ambiguous.
+        initialize_missing: If True, create equal split matrices from ``Arch``
+            when no editable split matrix is present and the control direction
+            is unambiguous.
         constraint_component_name: Name for the split-sum constraint subsystem.
 
     Outputs:
         Unsetup OpenMDAO Problem with automatically generated split controls.
 
     Assumptions:
-        Auto mode only optimizes editable matrix data already stored in
-        ``PropArch``. Callable split generators and scalar split schedules are
-        reported as diagnostics instead of guessed.
+        Auto mode optimizes editable matrix data stored in ``PropArch``. Missing
+        matrices can be initialized from fixed architecture topology, but
+        callable split generators and scalar split schedules are reported as
+        diagnostics instead of guessed.
     """
 
-    split_specs = infer_propulsion_split_specs(
+    prepared = initialize_missing_propulsion_split_matrices(
         aircraft,
+        prop_arch_path=prop_arch_path,
+        preferred_matrix=preferred_matrix,
+        active_tol=active_tol,
+        sum_tol=sum_tol,
+        strict=strict,
+        enabled=initialize_missing,
+    )
+    prepared_aircraft = prepared["aircraft"]
+    split_specs = infer_propulsion_split_specs(
+        prepared_aircraft,
         prop_arch_path=prop_arch_path,
         preferred_matrix=preferred_matrix,
         lower=lower,
@@ -212,9 +229,10 @@ def make_fast_auto_split_optimization_problem(
         active_tol=active_tol,
         sum_tol=sum_tol,
         strict=strict,
+        allow_multiple=not strict,
     )
     problem = make_fast_split_optimization_problem(
-        aircraft=aircraft,
+        aircraft=prepared_aircraft,
         mission=mission,
         split_specs=split_specs,
         input_specs=input_specs,
@@ -231,7 +249,94 @@ def make_fast_auto_split_optimization_problem(
         constraint_component_name=constraint_component_name,
     )
     problem.fast_auto_split_specs = split_specs
+    problem.fast_auto_split_initialization = prepared
     return problem
+
+
+def initialize_missing_propulsion_split_matrices(
+    aircraft,
+    prop_arch_path=("Specs", "Propulsion", "PropArch"),
+    preferred_matrix=None,
+    active_tol=1.0e-12,
+    sum_tol=1.0e-8,
+    strict=True,
+    enabled=True,
+):
+    """Return an aircraft copy with inferred equal split matrices added.
+
+    Inputs:
+        aircraft: Baseline FAST aircraft dictionary.
+        prop_arch_path: Path to the propulsion architecture dictionary.
+        preferred_matrix: Optional matrix name, such as ``"OperUps"``.
+        active_tol: Absolute tolerance for active architecture entries.
+        sum_tol: Tolerance for recognizing normalized split groups.
+        strict: If True, do not create several missing matrices at once.
+        enabled: If False, return a copy without initializing missing matrices.
+
+    Outputs:
+        Dictionary containing the prepared ``aircraft``, initialization
+        ``diagnostics``, and any ``initialized`` matrix records.
+
+    Assumptions:
+        Existing numeric or callable split matrices are preserved. Generated
+        matrices use equal fractions over every active row or column group so
+        FAST has a feasible baseline before OpenMDAO replaces branch entries
+        with design variables.
+    """
+
+    prepared_aircraft = deepcopy(aircraft)
+    diagnostics = propulsion_split_diagnostics(
+        prepared_aircraft,
+        prop_arch_path=prop_arch_path,
+        active_tol=active_tol,
+        sum_tol=sum_tol,
+    )
+    result = {
+        "aircraft": prepared_aircraft,
+        "diagnostics": diagnostics,
+        "initialized": (),
+    }
+
+    if not enabled:
+        return result
+
+    selected = select_missing_split_initializations(
+        diagnostics,
+        preferred_matrix=preferred_matrix,
+        strict=strict,
+    )
+
+    if not selected:
+        return result
+
+    prop_arch = get_path(prepared_aircraft, prop_arch_path)
+    initialized = []
+
+    for item in selected:
+        matrix = equal_split_matrix_from_architecture(
+            get_path(prepared_aircraft, item["architecture_path"]),
+            item["axis"],
+            active_tol=active_tol,
+        )
+        prop_arch[item["matrix_name"]] = matrix.tolist()
+        initialized.append(
+            {
+                "matrix_name": item["matrix_name"],
+                "matrix_path": item["matrix_path"],
+                "architecture_path": item["architecture_path"],
+                "axis": item["axis"],
+                "groups": item["groups"],
+            }
+        )
+
+    result["diagnostics"] = propulsion_split_diagnostics(
+        prepared_aircraft,
+        prop_arch_path=prop_arch_path,
+        active_tol=active_tol,
+        sum_tol=sum_tol,
+    )
+    result["initialized"] = tuple(initialized)
+    return result
 
 
 def make_fast_mission_split_schedule_optimization_problem(
@@ -309,6 +414,7 @@ def infer_propulsion_split_specs(
     active_tol=1.0e-12,
     sum_tol=1.0e-8,
     strict=True,
+    allow_multiple=False,
 ):
     """Infer editable split matrix specs from a FAST PropArch dictionary.
 
@@ -321,6 +427,8 @@ def infer_propulsion_split_specs(
         active_tol: Absolute tolerance for active architecture entries.
         sum_tol: Normalized group-sum tolerance.
         strict: If True, reject ambiguous or currently invalid matrices.
+        allow_multiple: If True, return every usable matrix instead of requiring
+            ``preferred_matrix`` when several matrices are valid.
 
     Outputs:
         Tuple of split specs accepted by ``make_fast_split_optimization_problem``.
@@ -359,7 +467,7 @@ def infer_propulsion_split_specs(
         if invalid_selected and preferred_matrix is not None:
             raise ValueError(split_diagnostic_message(diagnostics, preferred_matrix))
 
-    if len(valid) > 1 and preferred_matrix is None:
+    if len(valid) > 1 and preferred_matrix is None and not allow_multiple:
         names = ", ".join(item["matrix_name"] for item in valid)
         raise ValueError(
             "Several editable split matrices are usable (%s). Pass "
@@ -410,10 +518,26 @@ def propulsion_split_diagnostics(
             "reason": "",
             "row_groups": 0,
             "column_groups": 0,
+            "can_initialize": False,
+            "initialization_axis": None,
+            "initialization_groups": 0,
         }
 
         if matrix_name not in prop_arch:
             item["reason"] = "missing"
+
+            if architecture is not None and architecture.ndim == 2:
+                initialization = missing_split_initialization_candidate(
+                    matrix_name,
+                    architecture,
+                    item["matrix_path"],
+                    architecture_path,
+                    active_tol,
+                )
+
+                if initialization is not None:
+                    item.update(initialization)
+
             candidates.append(item)
             continue
 
@@ -453,6 +577,131 @@ def propulsion_split_diagnostics(
         candidates.append(item)
 
     return tuple(candidates)
+
+
+def missing_split_initialization_candidate(
+    matrix_name,
+    architecture,
+    matrix_path,
+    architecture_path,
+    active_tol,
+):
+    """Return initialization metadata for a missing split matrix candidate."""
+
+    if matrix_name == "OperDwn":
+        axis = "row"
+        groups = split_branch_group_count(architecture, axis, active_tol)
+    elif matrix_name == "OperUps":
+        axis = "column"
+        groups = split_branch_group_count(architecture, axis, active_tol)
+    else:
+        return None
+
+    if groups == 0:
+        return None
+
+    return {
+        "can_initialize": True,
+        "initialization_axis": axis,
+        "initialization_groups": groups,
+        "axis": axis,
+        "groups": groups,
+        "matrix_path": matrix_path,
+        "architecture_path": architecture_path,
+    }
+
+
+def select_missing_split_initializations(
+    diagnostics,
+    preferred_matrix=None,
+    strict=True,
+):
+    """Return missing split matrices that should be initialized from ``Arch``."""
+
+    existing_usable = [item for item in diagnostics if item["usable"]]
+    candidates = [
+        item
+        for item in diagnostics
+        if item.get("can_initialize")
+        and (
+            preferred_matrix is None
+            or item["matrix_name"].lower() == preferred_matrix.lower()
+        )
+    ]
+
+    if existing_usable and strict and preferred_matrix is None:
+        return ()
+
+    if not candidates:
+        return ()
+
+    if preferred_matrix is not None:
+        return tuple(candidates[:1])
+
+    if len(candidates) == 1:
+        return tuple(candidates)
+
+    if strict:
+        names = ", ".join(item["matrix_name"] for item in candidates)
+        raise ValueError(
+            "Architecture supports several missing split matrix conventions "
+            "(%s). Pass preferred_matrix to choose one or set strict=False to "
+            "initialize all inferred split controls." % names
+        )
+
+    return tuple(candidates)
+
+
+def equal_split_matrix_from_architecture(architecture, axis, active_tol=1.0e-12):
+    """Return a feasible equal split matrix for active architecture entries."""
+
+    architecture = np.asarray(architecture, dtype=float)
+    active = np.abs(architecture) > active_tol
+    matrix = np.zeros_like(architecture, dtype=float)
+
+    if axis == "row":
+        for row in range(active.shape[0]):
+            indexes = np.where(active[row, :])[0]
+
+            if len(indexes) > 0:
+                matrix[row, indexes] = 1.0 / len(indexes)
+
+        return matrix
+
+    if axis == "column":
+        for col in range(active.shape[1]):
+            indexes = np.where(active[:, col])[0]
+
+            if len(indexes) > 0:
+                matrix[indexes, col] = 1.0 / len(indexes)
+
+        return matrix
+
+    raise ValueError("Split matrix initialization axis must be row or column.")
+
+
+def split_branch_group_count(architecture, axis, active_tol):
+    """Return number of active branching groups along one matrix axis."""
+
+    architecture = np.asarray(architecture, dtype=float)
+    active = np.abs(architecture) > active_tol
+    groups = 0
+
+    if axis == "row":
+        for row in range(active.shape[0]):
+            if np.count_nonzero(active[row, :]) > 1:
+                groups += 1
+
+        return groups
+
+    if axis == "column":
+        for col in range(active.shape[1]):
+            if np.count_nonzero(active[:, col]) > 1:
+                groups += 1
+
+        return groups
+
+    raise ValueError("Split branch group axis must be row or column.")
 
 
 def infer_split_axis(architecture, matrix, active_tol, sum_tol):

@@ -12,6 +12,7 @@ import openmdao.api as om
 from fast_openmdao import (
     SplitGroupSums,
     infer_propulsion_split_specs,
+    initialize_missing_propulsion_split_matrices,
     make_fast_auto_split_optimization_problem,
     make_fast_mission_split_schedule_optimization_problem,
     make_fast_split_optimization_problem,
@@ -155,6 +156,121 @@ def test_auto_split_optimization_problem_uses_inferred_spec():
     assert problem.fast_auto_split_specs[0]["axis"] == "row"
     assert abs(problem.get_val("operdwn_0_1")[0] - 0.2) < 1.0e-5
     assert abs(problem.get_val("operdwn_0_2")[0] - 0.8) < 1.0e-5
+
+
+def test_auto_split_initializes_missing_upstream_matrix_from_architecture():
+    """Check Arch-only merge topology creates an upstream split matrix."""
+
+    aircraft = make_merge_aircraft()
+    problem = make_fast_auto_split_optimization_problem(
+        aircraft=aircraft,
+        output_specs=[
+            {
+                "name": "split_objective",
+                "path": ("split_objective",),
+            },
+        ],
+        runner=upstream_split_objective_runner,
+        objective={
+            "name": "split_objective",
+        },
+        driver_options={
+            "maxiter": 40,
+            "tol": 1.0e-10,
+        },
+    )
+    problem.setup()
+    result = problem.run_driver()
+
+    assert result.success
+    assert "OperUps" not in aircraft["Specs"]["Propulsion"]["PropArch"]
+    assert (
+        problem.fast_auto_split_initialization["initialized"][0]["matrix_name"]
+        == "OperUps"
+    )
+    assert problem.fast_auto_split_specs[0]["axis"] == "column"
+    assert abs(problem.get_val("operups_0_2")[0] - 0.25) < 1.0e-5
+    assert abs(problem.get_val("operups_1_2")[0] - 0.75) < 1.0e-5
+
+
+def test_auto_split_initializes_missing_downstream_matrix_from_architecture():
+    """Check Arch-only branch topology creates a downstream split matrix."""
+
+    problem = make_fast_auto_split_optimization_problem(
+        aircraft=make_branch_aircraft(),
+        output_specs=[
+            {
+                "name": "split_objective",
+                "path": ("split_objective",),
+            },
+        ],
+        runner=downstream_split_objective_runner,
+        objective={
+            "name": "split_objective",
+        },
+        driver_options={
+            "maxiter": 40,
+            "tol": 1.0e-10,
+        },
+    )
+    problem.setup()
+    result = problem.run_driver()
+
+    assert result.success
+    assert (
+        problem.fast_auto_split_initialization["initialized"][0]["matrix_name"]
+        == "OperDwn"
+    )
+    assert problem.fast_auto_split_specs[0]["axis"] == "row"
+    assert abs(problem.get_val("operdwn_0_1")[0] - 0.4) < 1.0e-5
+    assert abs(problem.get_val("operdwn_0_2")[0] - 0.6) < 1.0e-5
+
+
+def test_missing_split_initialization_requires_choice_for_merge_branch_topology():
+    """Check merge-plus-branch topology is not over-controlled by default."""
+
+    try:
+        initialize_missing_propulsion_split_matrices(make_merge_branch_aircraft())
+    except ValueError as error:
+        assert "several missing split matrix conventions" in str(error)
+    else:
+        raise AssertionError("Expected merge-plus-branch initialization to fail.")
+
+
+def test_auto_split_initializes_all_missing_matrices_when_not_strict():
+    """Check strict=False exposes both upstream and downstream split controls."""
+
+    problem = make_fast_auto_split_optimization_problem(
+        aircraft=make_merge_branch_aircraft(),
+        output_specs=[
+            {
+                "name": "split_objective",
+                "path": ("split_objective",),
+            },
+        ],
+        runner=merge_branch_split_objective_runner,
+        objective={
+            "name": "split_objective",
+        },
+        strict=False,
+        driver_options={
+            "maxiter": 60,
+            "tol": 1.0e-10,
+        },
+    )
+    problem.setup()
+    result = problem.run_driver()
+
+    initialized = problem.fast_auto_split_initialization["initialized"]
+    matrix_names = tuple(item["matrix_name"] for item in initialized)
+
+    assert result.success
+    assert matrix_names == ("OperDwn", "OperUps")
+    assert len(problem.fast_auto_split_specs) == 2
+    assert abs(problem.get_val("operdwn_2_3")[0] - 0.3) < 1.0e-5
+    assert abs(problem.get_val("operdwn_2_4")[0] - 0.7) < 1.0e-5
+    assert abs(problem.get_val("operups_0_2")[0] - 0.8) < 1.0e-5
+    assert abs(problem.get_val("operups_1_2")[0] - 0.2) < 1.0e-5
 
 
 def test_auto_split_inference_requires_preferred_matrix_when_ambiguous():
@@ -306,6 +422,63 @@ def make_split_aircraft():
     }
 
 
+def make_merge_aircraft():
+    """Return a tiny Arch-only aircraft where two sources merge at one node."""
+
+    return {
+        "Specs": {
+            "Propulsion": {
+                "PropArch": {
+                    "Arch": [
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0],
+                        [0.0, 0.0, 0.0, 0.0],
+                    ],
+                },
+            },
+        },
+    }
+
+
+def make_branch_aircraft():
+    """Return a tiny Arch-only aircraft where one source branches downstream."""
+
+    return {
+        "Specs": {
+            "Propulsion": {
+                "PropArch": {
+                    "Arch": [
+                        [0.0, 1.0, 1.0],
+                        [0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0],
+                    ],
+                },
+            },
+        },
+    }
+
+
+def make_merge_branch_aircraft():
+    """Return an Arch-only aircraft with one merge and one downstream branch."""
+
+    return {
+        "Specs": {
+            "Propulsion": {
+                "PropArch": {
+                    "Arch": [
+                        [0.0, 0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 1.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 1.0, 1.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0],
+                    ],
+                },
+            },
+        },
+    }
+
+
 def make_schedule_aircraft():
     """Return a tiny FAST-shaped aircraft with a climb split schedule."""
 
@@ -332,6 +505,49 @@ def split_objective_runner(aircraft, _mission):
         + (split[0, 2] - 0.8) ** 2
         + (split[1, 2] - 0.65) ** 2
         + (split[1, 3] - 0.35) ** 2
+    )
+    return {
+        "split_objective": objective,
+    }
+
+
+def upstream_split_objective_runner(aircraft, _mission):
+    """Return a quadratic objective for one inferred upstream split group."""
+
+    split = np.asarray(
+        aircraft["Specs"]["Propulsion"]["PropArch"]["OperUps"],
+        dtype=float,
+    )
+    objective = (split[0, 2] - 0.25) ** 2 + (split[1, 2] - 0.75) ** 2
+    return {
+        "split_objective": objective,
+    }
+
+
+def downstream_split_objective_runner(aircraft, _mission):
+    """Return a quadratic objective for one inferred downstream split group."""
+
+    split = np.asarray(
+        aircraft["Specs"]["Propulsion"]["PropArch"]["OperDwn"],
+        dtype=float,
+    )
+    objective = (split[0, 1] - 0.4) ** 2 + (split[0, 2] - 0.6) ** 2
+    return {
+        "split_objective": objective,
+    }
+
+
+def merge_branch_split_objective_runner(aircraft, _mission):
+    """Return a quadratic objective for inferred merge and branch splits."""
+
+    prop_arch = aircraft["Specs"]["Propulsion"]["PropArch"]
+    downstream = np.asarray(prop_arch["OperDwn"], dtype=float)
+    upstream = np.asarray(prop_arch["OperUps"], dtype=float)
+    objective = (
+        (downstream[2, 3] - 0.3) ** 2
+        + (downstream[2, 4] - 0.7) ** 2
+        + (upstream[0, 2] - 0.8) ** 2
+        + (upstream[1, 2] - 0.2) ** 2
     )
     return {
         "split_objective": objective,
